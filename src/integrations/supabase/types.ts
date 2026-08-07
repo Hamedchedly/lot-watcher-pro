@@ -14,7 +14,268 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      imports: {
+        Row: {
+          created_at: string
+          fichier: string | null
+          id: string
+          lignes: number
+          lots_crees: number
+          lots_disparus: number
+          lots_maj: number
+          tranches_creees: number
+        }
+        Insert: {
+          created_at?: string
+          fichier?: string | null
+          id?: string
+          lignes?: number
+          lots_crees?: number
+          lots_disparus?: number
+          lots_maj?: number
+          tranches_creees?: number
+        }
+        Update: {
+          created_at?: string
+          fichier?: string | null
+          id?: string
+          lignes?: number
+          lots_crees?: number
+          lots_disparus?: number
+          lots_maj?: number
+          tranches_creees?: number
+        }
+        Relationships: []
+      }
+      lots: {
+        Row: {
+          actif: boolean
+          adresse: string | null
+          batiment: string | null
+          code_patrimoine: string
+          code_postal: string | null
+          created_at: string
+          date_achevement_travaux: string | null
+          date_dpe: string | null
+          date_entree: string | null
+          dpe: string | null
+          etage: string | null
+          id: string
+          identifiant_insee: string | null
+          individuel_collectif: string | null
+          locataire_email: string | null
+          locataire_nom: string | null
+          locataire_telephone: string | null
+          porte: string | null
+          surface_utile: number | null
+          tranche_code: string
+          type_lot: string | null
+          updated_at: string
+          ville: string | null
+          vu_le: string | null
+        }
+        Insert: {
+          actif?: boolean
+          adresse?: string | null
+          batiment?: string | null
+          code_patrimoine: string
+          code_postal?: string | null
+          created_at?: string
+          date_achevement_travaux?: string | null
+          date_dpe?: string | null
+          date_entree?: string | null
+          dpe?: string | null
+          etage?: string | null
+          id?: string
+          identifiant_insee?: string | null
+          individuel_collectif?: string | null
+          locataire_email?: string | null
+          locataire_nom?: string | null
+          locataire_telephone?: string | null
+          porte?: string | null
+          surface_utile?: number | null
+          tranche_code: string
+          type_lot?: string | null
+          updated_at?: string
+          ville?: string | null
+          vu_le?: string | null
+        }
+        Update: {
+          actif?: boolean
+          adresse?: string | null
+          batiment?: string | null
+          code_patrimoine?: string
+          code_postal?: string | null
+          created_at?: string
+          date_achevement_travaux?: string | null
+          date_dpe?: string | null
+          date_entree?: string | null
+          dpe?: string | null
+          etage?: string | null
+          id?: string
+          identifiant_insee?: string | null
+          individuel_collectif?: string | null
+          locataire_email?: string | null
+          locataire_nom?: string | null
+          locataire_telephone?: string | null
+          porte?: string | null
+          surface_utile?: number | null
+          tranche_code?: string
+          type_lot?: string | null
+          updated_at?: string
+          ville?: string | null
+          vu_le?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "lots_tranche_code_fkey"
+            columns: ["tranche_code"]
+            isOneToOne: false
+            referencedRelation: "tranches"
+            referencedColumns: ["code"]
+          },
+        ]
+      }
+      occupants: {
+        Row: {
+          created_at: string
+          date_entree: string | null
+          date_naissance: string | null
+          id: string
+          lot_code: string
+          nom: string | null
+          prenom: string | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          date_entree?: string | null
+          date_naissance?: string | null
+          id?: string
+          lot_code: string
+          nom?: string | null
+          prenom?: string | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          date_entree?: string | null
+          date_naissance?: string | null
+          id?: string
+          lot_code?: string
+          nom?: string | null
+          prenom?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "occupants_lot_code_fkey"
+            columns: ["lot_code"]
+            isOneToOne: false
+            referencedRelation: "lots"
+            referencedColumns: ["code_patrimoine"]
+          },
+        ]
+      }
+      tranches: {
+        Row: {
+          actif: boolean
+          code: string
+          copro_numero: string | null
+          created_at: string
+          id: string
+          libelle: string | null
+          localite: string | null
+          nb_logements: number
+          quartier: string | null
+          secteur: string | null
+          sous_secteur: string | null
+          updated_at: string
+          vu_le: string | null
+          zone_apl: string | null
+          zone_edf: string | null
+        }
+        Insert: {
+          actif?: boolean
+          code: string
+          copro_numero?: string | null
+          created_at?: string
+          id?: string
+          libelle?: string | null
+          localite?: string | null
+          nb_logements?: number
+          quartier?: string | null
+          secteur?: string | null
+          sous_secteur?: string | null
+          updated_at?: string
+          vu_le?: string | null
+          zone_apl?: string | null
+          zone_edf?: string | null
+        }
+        Update: {
+          actif?: boolean
+          code?: string
+          copro_numero?: string | null
+          created_at?: string
+          id?: string
+          libelle?: string | null
+          localite?: string | null
+          nb_logements?: number
+          quartier?: string | null
+          secteur?: string | null
+          sous_secteur?: string | null
+          updated_at?: string
+          vu_le?: string | null
+          zone_apl?: string | null
+          zone_edf?: string | null
+        }
+        Relationships: []
+      }
+      travaux: {
+        Row: {
+          batiment: string | null
+          cout: number
+          created_at: string
+          date_travaux: string | null
+          id: string
+          libelle: string
+          lot_code: string | null
+          niveau: string
+          note: string | null
+          statut: string
+          tranche_code: string | null
+          updated_at: string
+        }
+        Insert: {
+          batiment?: string | null
+          cout?: number
+          created_at?: string
+          date_travaux?: string | null
+          id?: string
+          libelle: string
+          lot_code?: string | null
+          niveau?: string
+          note?: string | null
+          statut?: string
+          tranche_code?: string | null
+          updated_at?: string
+        }
+        Update: {
+          batiment?: string | null
+          cout?: number
+          created_at?: string
+          date_travaux?: string | null
+          id?: string
+          libelle?: string
+          lot_code?: string | null
+          niveau?: string
+          note?: string | null
+          statut?: string
+          tranche_code?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never

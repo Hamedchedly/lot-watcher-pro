@@ -1,6 +1,8 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
-import { ArrowUpDown, Building2, Plus, Search } from "lucide-react";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useServerFn } from "@tanstack/react-start";
+import { Building2, Search, Upload } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,103 +21,100 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { LotDialog } from "@/components/LotDialog";
-import { StatutBadge } from "@/components/StatutBadge";
-import {
-  compareLots,
-  formatDate,
-  formatEuro,
-  loadLots,
-  saveLots,
-  statsLot,
-  type Lot,
-} from "@/lib/lots";
+import { Badge } from "@/components/ui/badge";
+import { getPatrimoine } from "@/lib/isis.functions";
+import { isLogement, typeLotLabel } from "@/lib/isis";
 
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "Suivi des lots immobiliers — travaux réalisés et à venir" },
+      { title: "Patrimoine — tranches, lots et locataires" },
       {
         name: "description",
         content:
-          "Pilotez des milliers de lots classés par tranche, copropriété, bâtiment et entrée : historique des travaux réalisés et anticipation des travaux à venir.",
+          "Vue consolidée du patrimoine issu d'ISIS : villes, tranches, bâtiments, lots, locataires et travaux réalisés ou à anticiper.",
       },
-      { property: "og:title", content: "Suivi des lots immobiliers — travaux réalisés et à venir" },
+      { property: "og:title", content: "Patrimoine — tranches, lots et locataires" },
       {
         property: "og:description",
         content:
-          "Liste triable de lots par tranche, copro, bâtiment et entrée, avec suivi des travaux réalisés et planifiés.",
+          "Pilotez des milliers de lots classés par ville, tranche, bâtiment et lot, avec l'historique des travaux.",
       },
       { property: "og:type", content: "website" },
-      { name: "twitter:card", content: "summary_large_image" },
+      { name: "twitter:card", content: "summary" },
     ],
   }),
   component: Index,
 });
 
-type Filtre = "tous" | "realise" | "planifie" | "a_prevoir" | "aucun";
+const PAGE = 50;
 
 function Index() {
-  const [lots, setLots] = useState<Lot[]>([]);
-  const [hydrated, setHydrated] = useState(false);
+  const fetchPatrimoine = useServerFn(getPatrimoine);
+  const { data, isLoading } = useQuery({
+    queryKey: ["patrimoine"],
+    queryFn: () => fetchPatrimoine(),
+  });
+
   const [q, setQ] = useState("");
+  const [ville, setVille] = useState("toutes");
   const [tranche, setTranche] = useState("toutes");
-  const [copro, setCopro] = useState("toutes");
-  const [filtre, setFiltre] = useState<Filtre>("tous");
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [selected, setSelected] = useState<Lot | null>(null);
+  const [type, setType] = useState("tous");
+  const [page, setPage] = useState(0);
 
-  useEffect(() => {
-    setLots(loadLots());
-    setHydrated(true);
-  }, []);
+  const lots = data?.lots ?? [];
+  const tranches = data?.tranches ?? [];
 
-  useEffect(() => {
-    if (hydrated) saveLots(lots);
-  }, [lots, hydrated]);
+  const trancheLabel = useMemo(
+    () => new Map(tranches.map((t) => [t.code, t.localite ?? ""])),
+    [tranches],
+  );
 
-  const tranches = useMemo(
-    () => [...new Set(lots.map((l) => l.tranche))].sort(),
+  const villes = useMemo(
+    () => [...new Set(lots.map((l) => l.ville).filter(Boolean))].sort() as string[],
     [lots],
   );
-  const copros = useMemo(() => [...new Set(lots.map((l) => l.copro))].sort(), [lots]);
+  const codesTranches = useMemo(
+    () =>
+      [...new Set(lots.filter((l) => ville === "toutes" || l.ville === ville).map((l) => l.tranche_code))].sort(),
+    [lots, ville],
+  );
 
   const visibles = useMemo(() => {
     const needle = q.trim().toLowerCase();
     return lots
       .filter((l) => {
-        if (tranche !== "toutes" && l.tranche !== tranche) return false;
-        if (copro !== "toutes" && l.copro !== copro) return false;
-        if (filtre === "aucun" && l.travaux.length > 0) return false;
-        if (filtre !== "tous" && filtre !== "aucun" && !l.travaux.some((t) => t.statut === filtre))
-          return false;
+        if (ville !== "toutes" && l.ville !== ville) return false;
+        if (tranche !== "toutes" && l.tranche_code !== tranche) return false;
+        if (type === "logements" && !isLogement(l.type_lot)) return false;
+        if (type === "annexes" && isLogement(l.type_lot)) return false;
         if (!needle) return true;
-        return [l.numeroLot, l.designation, l.batiment, l.entree, l.copro, l.tranche]
+        return [l.code_patrimoine, l.tranche_code, l.adresse, l.locataire_nom, l.batiment]
           .join(" ")
           .toLowerCase()
           .includes(needle);
       })
-      .sort(compareLots);
-  }, [lots, q, tranche, copro, filtre]);
+      .sort(
+        (a, b) =>
+          a.tranche_code.localeCompare(b.tranche_code, "fr", { numeric: true }) ||
+          (a.batiment ?? "").localeCompare(b.batiment ?? "", "fr", { numeric: true }) ||
+          (a.etage ?? "").localeCompare(b.etage ?? "", "fr", { numeric: true }) ||
+          a.code_patrimoine.localeCompare(b.code_patrimoine, "fr", { numeric: true }),
+      );
+  }, [lots, q, ville, tranche, type]);
 
   const totaux = useMemo(() => {
-    const s = visibles.map(statsLot);
-    return {
-      lots: visibles.length,
-      realises: s.reduce((a, x) => a + x.realises, 0),
-      aVenir: s.reduce((a, x) => a + x.planifies + x.aPrevoir, 0),
-      budget: s.reduce((a, x) => a + x.coutAVenir, 0),
-    };
+    const logements = visibles.filter((l) => isLogement(l.type_lot)).length;
+    const dpe = visibles.filter((l) => l.dpe && "EFG".includes(l.dpe)).length;
+    const occupes = visibles.filter((l) => l.locataire_nom).length;
+    return { total: visibles.length, logements, dpe, occupes };
   }, [visibles]);
 
-  const upsert = (lot: Lot) =>
-    setLots((prev) =>
-      prev.some((l) => l.id === lot.id) ? prev.map((l) => (l.id === lot.id ? lot : l)) : [...prev, lot],
-    );
-
-  const openLot = (lot: Lot | null) => {
-    setSelected(lot);
-    setDialogOpen(true);
+  const pageItems = visibles.slice(page * PAGE, page * PAGE + PAGE);
+  const pages = Math.max(1, Math.ceil(visibles.length / PAGE));
+  const reset = <T,>(setter: (v: T) => void) => (v: T) => {
+    setter(v);
+    setPage(0);
   };
 
   return (
@@ -126,23 +125,25 @@ function Index() {
             <Building2 className="size-5" />
           </div>
           <div className="mr-auto">
-            <h1 className="text-lg font-semibold leading-tight">Suivi des lots</h1>
+            <h1 className="text-lg font-semibold leading-tight">Patrimoine</h1>
             <p className="text-sm text-muted-foreground">
-              Tranche · Copropriété · Bâtiment · Entrée · Lot
+              Ville · Tranche · Bâtiment · Lot · Locataire
             </p>
           </div>
-          <Button onClick={() => openLot(null)}>
-            <Plus className="size-4" /> Nouveau lot
+          <Button asChild variant="outline">
+            <Link to="/import">
+              <Upload className="size-4" /> Import ISIS
+            </Link>
           </Button>
         </div>
       </header>
 
       <main className="mx-auto max-w-7xl space-y-5 px-4 py-6 sm:px-6">
         <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <Stat label="Lots affichés" value={String(totaux.lots)} />
-          <Stat label="Travaux réalisés" value={String(totaux.realises)} />
-          <Stat label="Travaux à venir" value={String(totaux.aVenir)} />
-          <Stat label="Budget à engager" value={formatEuro(totaux.budget)} />
+          <Stat label="Lots" value={String(totaux.total)} />
+          <Stat label="Logements" value={String(totaux.logements)} />
+          <Stat label="Lots occupés" value={String(totaux.occupes)} />
+          <Stat label="DPE E, F ou G" value={String(totaux.dpe)} />
         </section>
 
         <section className="rounded-xl border bg-card shadow-panel">
@@ -151,168 +152,159 @@ function Index() {
               <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 className="pl-9"
-                placeholder="Rechercher un lot…"
+                placeholder="Code lot, adresse, locataire…"
                 value={q}
-                onChange={(e) => setQ(e.target.value)}
+                onChange={(e) => reset(setQ)(e.target.value)}
               />
             </div>
-            <Select value={tranche} onValueChange={setTranche}>
+            <Select
+              value={ville}
+              onValueChange={(v) => {
+                reset(setVille)(v);
+                setTranche("toutes");
+              }}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Ville" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="toutes">Toutes les villes</SelectItem>
+                {villes.map((v) => (
+                  <SelectItem key={v} value={v}>
+                    {v}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={tranche} onValueChange={reset(setTranche)}>
               <SelectTrigger>
                 <SelectValue placeholder="Tranche" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="toutes">Toutes les tranches</SelectItem>
-                {tranches.map((t) => (
+                {codesTranches.map((t) => (
                   <SelectItem key={t} value={t}>
-                    Tranche {t}
+                    Tranche {t} — {trancheLabel.get(t)}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
-            <Select value={copro} onValueChange={setCopro}>
-              <SelectTrigger>
-                <SelectValue placeholder="Copropriété" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="toutes">Toutes les copros</SelectItem>
-                {copros.map((c) => (
-                  <SelectItem key={c} value={c}>
-                    {c}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select value={filtre} onValueChange={(v) => setFiltre(v as Filtre)}>
+            <Select value={type} onValueChange={reset(setType)}>
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="tous">Tous les travaux</SelectItem>
-                <SelectItem value="realise">Avec travaux réalisés</SelectItem>
-                <SelectItem value="planifie">Avec travaux planifiés</SelectItem>
-                <SelectItem value="a_prevoir">Avec travaux à prévoir</SelectItem>
-                <SelectItem value="aucun">Sans aucun travail</SelectItem>
+                <SelectItem value="tous">Tous les types</SelectItem>
+                <SelectItem value="logements">Logements uniquement</SelectItem>
+                <SelectItem value="annexes">Annexes (parking, box…)</SelectItem>
               </SelectContent>
             </Select>
           </div>
 
-          <div className="flex items-center gap-2 border-b px-3 py-2 text-xs text-muted-foreground">
-            <ArrowUpDown className="size-3.5" />
-            Tri fixe : tranche, puis copropriété, bâtiment, entrée et numéro de lot.
-          </div>
-
-          {/* Tableau — écrans larges */}
-          <div className="hidden md:block">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Lot</TableHead>
-                  <TableHead>Tranche</TableHead>
-                  <TableHead>Copro</TableHead>
-                  <TableHead>Bât. / Entrée</TableHead>
-                  <TableHead className="text-right">Réalisés</TableHead>
-                  <TableHead>Prochain travail</TableHead>
-                  <TableHead className="text-right">Budget à venir</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {visibles.map((lot) => {
-                  const s = statsLot(lot);
-                  return (
-                    <TableRow
-                      key={lot.id}
-                      className="cursor-pointer"
-                      onClick={() => openLot(lot)}
-                    >
-                      <TableCell>
-                        <span className="font-mono font-medium">{lot.numeroLot}</span>
-                        <span className="block text-xs text-muted-foreground">
-                          {lot.designation || "—"}
-                        </span>
-                      </TableCell>
-                      <TableCell className="tabnum">{lot.tranche}</TableCell>
-                      <TableCell className="font-mono text-sm">{lot.copro}</TableCell>
-                      <TableCell className="text-sm">
-                        {lot.batiment || "—"} / {lot.entree || "—"}
-                      </TableCell>
-                      <TableCell className="tabnum text-right">{s.realises}</TableCell>
-                      <TableCell>
-                        {s.prochaine ? (
-                          <div className="flex flex-col gap-1">
-                            <span className="text-sm">{s.prochaine.libelle || "Sans intitulé"}</span>
-                            <span className="flex items-center gap-2">
-                              <StatutBadge statut={s.prochaine.statut} />
-                              <span className="text-xs text-muted-foreground">
-                                {formatDate(s.prochaine.date)}
-                              </span>
-                            </span>
-                          </div>
-                        ) : (
-                          <span className="text-sm text-muted-foreground">Rien de prévu</span>
-                        )}
-                      </TableCell>
-                      <TableCell className="tabnum text-right">{formatEuro(s.coutAVenir)}</TableCell>
+          {isLoading ? (
+            <p className="p-8 text-center text-sm text-muted-foreground">Chargement du patrimoine…</p>
+          ) : visibles.length === 0 ? (
+            <div className="space-y-3 p-8 text-center">
+              <p className="text-sm text-muted-foreground">
+                Aucun lot. Importez votre export ISIS pour alimenter la base.
+              </p>
+              <Button asChild>
+                <Link to="/import">
+                  <Upload className="size-4" /> Importer l'export ISIS
+                </Link>
+              </Button>
+            </div>
+          ) : (
+            <>
+              <div className="hidden md:block">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Lot</TableHead>
+                      <TableHead>Tranche</TableHead>
+                      <TableHead>Bât. / Étage</TableHead>
+                      <TableHead>Type</TableHead>
+                      <TableHead>Adresse</TableHead>
+                      <TableHead>Locataire</TableHead>
+                      <TableHead className="text-right">DPE</TableHead>
                     </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </div>
-
-          {/* Cartes — mobile */}
-          <ul className="divide-y md:hidden">
-            {visibles.map((lot) => {
-              const s = statsLot(lot);
-              return (
-                <li key={lot.id}>
-                  <button
-                    type="button"
-                    onClick={() => openLot(lot)}
-                    className="w-full space-y-2 p-4 text-left transition-colors hover:bg-muted/60"
-                  >
-                    <div className="flex items-baseline justify-between gap-2">
-                      <span className="font-mono font-semibold">{lot.numeroLot}</span>
-                      <span className="text-xs text-muted-foreground">
-                        {lot.tranche} · {lot.copro} · {lot.batiment}/{lot.entree}
-                      </span>
-                    </div>
-                    <p className="text-sm text-muted-foreground">{lot.designation || "—"}</p>
-                    <div className="flex flex-wrap items-center gap-2">
-                      {s.prochaine ? (
-                        <>
-                          <StatutBadge statut={s.prochaine.statut} />
-                          <span className="text-xs text-muted-foreground">
-                            {s.prochaine.libelle} · {formatDate(s.prochaine.date)}
+                  </TableHeader>
+                  <TableBody>
+                    {pageItems.map((l) => (
+                      <TableRow key={l.code_patrimoine}>
+                        <TableCell className="font-mono text-sm font-medium">
+                          {l.code_patrimoine}
+                        </TableCell>
+                        <TableCell className="tabnum">
+                          {l.tranche_code}
+                          <span className="block text-xs text-muted-foreground">
+                            {trancheLabel.get(l.tranche_code)}
                           </span>
-                        </>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">Rien de prévu</span>
-                      )}
-                    </div>
-                    <div className="tabnum text-xs text-muted-foreground">
-                      {s.realises} réalisé(s) · {formatEuro(s.coutAVenir)} à engager
-                    </div>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
+                        </TableCell>
+                        <TableCell className="text-sm">
+                          {l.batiment || "—"} / {l.etage || "—"}
+                        </TableCell>
+                        <TableCell className="text-sm">{typeLotLabel(l.type_lot)}</TableCell>
+                        <TableCell className="max-w-56 truncate text-sm">
+                          {l.adresse} · {l.ville}
+                        </TableCell>
+                        <TableCell className="max-w-48 truncate text-sm">
+                          {l.locataire_nom || (
+                            <span className="text-muted-foreground">Vacant</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {l.dpe ? <Badge variant="secondary">{l.dpe}</Badge> : "—"}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
 
-          {hydrated && visibles.length === 0 && (
-            <p className="p-10 text-center text-sm text-muted-foreground">
-              Aucun lot ne correspond à ces critères.
-            </p>
+              <ul className="divide-y md:hidden">
+                {pageItems.map((l) => (
+                  <li key={l.code_patrimoine} className="space-y-1 p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-mono text-sm font-medium">{l.code_patrimoine}</span>
+                      <Badge variant="secondary">{typeLotLabel(l.type_lot)}</Badge>
+                    </div>
+                    <p className="text-sm">{l.adresse} · {l.ville}</p>
+                    <p className="text-xs text-muted-foreground">
+                      Tranche {l.tranche_code} · Bât. {l.batiment || "—"} ·{" "}
+                      {l.locataire_nom || "Vacant"}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+
+              <div className="flex items-center justify-between gap-2 border-t p-3 text-sm">
+                <span className="text-muted-foreground">
+                  {visibles.length} lots · page {page + 1}/{pages}
+                </span>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={page === 0}
+                    onClick={() => setPage((p) => p - 1)}
+                  >
+                    Précédent
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={page >= pages - 1}
+                    onClick={() => setPage((p) => p + 1)}
+                  >
+                    Suivant
+                  </Button>
+                </div>
+              </div>
+            </>
           )}
         </section>
       </main>
-
-      <LotDialog
-        open={dialogOpen}
-        onOpenChange={setDialogOpen}
-        lot={selected}
-        onSave={upsert}
-        onDelete={(id) => setLots((prev) => prev.filter((l) => l.id !== id))}
-      />
     </div>
   );
 }
