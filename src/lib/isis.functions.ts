@@ -137,24 +137,34 @@ export const finalizeIsisImport = createServerFn({ method: "POST" })
 export const getPatrimoine = createServerFn({ method: "GET" }).handler(async () => {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
-  const [tranches, lots] = await Promise.all([
-    supabaseAdmin
-      .from("tranches")
-      .select("code, libelle, localite, copro_numero, sous_secteur, nb_logements, actif")
-      .eq("actif", true)
-      .order("code"),
-    supabaseAdmin
+  const tranches = await supabaseAdmin
+    .from("tranches")
+    .select("code, libelle, localite, copro_numero, sous_secteur, nb_logements, actif")
+    .eq("actif", true)
+    .order("code");
+  if (tranches.error) throw new Error(tranches.error.message);
+
+  // PostgREST plafonne à 1000 lignes : on pagine jusqu'à récupérer tout le patrimoine.
+  const PAGE = 1000;
+  const lots: NonNullable<Awaited<ReturnType<typeof fetchLotsPage>>> = [];
+  async function fetchLotsPage(from: number) {
+    const { data, error } = await supabaseAdmin
       .from("lots")
       .select(
-        "code_patrimoine, tranche_code, type_lot, batiment, etage, porte, surface_utile, dpe, ville, adresse, locataire_nom, date_achevement_travaux, actif",
+        "code_patrimoine, tranche_code, type_lot, batiment, etage, porte, surface_utile, dpe, ville, code_postal, adresse, locataire_nom, date_achevement_travaux",
       )
       .eq("actif", true)
-      .order("tranche_code")
-      .limit(20000),
-  ]);
+      .order("code_patrimoine")
+      .range(from, from + PAGE - 1);
+    if (error) throw new Error(error.message);
+    return data ?? [];
+  }
 
-  if (tranches.error) throw new Error(tranches.error.message);
-  if (lots.error) throw new Error(lots.error.message);
+  for (let from = 0; ; from += PAGE) {
+    const page = await fetchLotsPage(from);
+    lots.push(...page);
+    if (page.length < PAGE) break;
+  }
 
-  return { tranches: tranches.data ?? [], lots: lots.data ?? [] };
+  return { tranches: tranches.data ?? [], lots };
 });
