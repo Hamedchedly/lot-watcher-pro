@@ -72,7 +72,7 @@ function AdressesPage() {
   const { q, ville, rue, entree, bat } = Route.useSearch();
   const navigate = useNavigate({ from: Route.fullPath });
   const setSearch = (patch: Partial<AdressesSearch>) =>
-    navigate({ search: (prev) => ({ ...prev, ...patch }) });
+    navigate({ search: (prev: AdressesSearch) => ({ ...prev, ...patch }) });
 
   const fetchPatrimoine = useServerFn(getPatrimoine);
   const { data, isLoading } = useQuery({
