@@ -14,6 +14,42 @@ export type Database = {
   }
   public: {
     Tables: {
+      adresses_geo: {
+        Row: {
+          adresse: string
+          cle: string
+          created_at: string
+          id: string
+          lat: number | null
+          lng: number | null
+          statut: string
+          updated_at: string
+          ville: string
+        }
+        Insert: {
+          adresse: string
+          cle: string
+          created_at?: string
+          id?: string
+          lat?: number | null
+          lng?: number | null
+          statut?: string
+          updated_at?: string
+          ville: string
+        }
+        Update: {
+          adresse?: string
+          cle?: string
+          created_at?: string
+          id?: string
+          lat?: number | null
+          lng?: number | null
+          statut?: string
+          updated_at?: string
+          ville?: string
+        }
+        Relationships: []
+      }
       imports: {
         Row: {
           created_at: string
