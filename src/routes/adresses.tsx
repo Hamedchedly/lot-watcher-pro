@@ -29,9 +29,9 @@ import { collator, entreeDe, pushRecent, rueDe, type LotItem } from "@/lib/adres
 type AdressesSearch = {
   q: string;
   ville: string;
-  rue?: string;
-  entree?: string;
-  bat?: string;
+  rue: string | undefined;
+  entree: string | undefined;
+  bat: string | undefined;
 };
 
 export const Route = createFileRoute("/adresses")({
