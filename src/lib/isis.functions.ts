@@ -151,7 +151,7 @@ export const getPatrimoine = createServerFn({ method: "GET" }).handler(async () 
     const { data, error } = await supabaseAdmin
       .from("lots")
       .select(
-        "code_patrimoine, tranche_code, type_lot, batiment, etage, porte, surface_utile, dpe, ville, code_postal, adresse, locataire_nom, date_achevement_travaux",
+        "code_patrimoine, tranche_code, type_lot, batiment, etage, porte, surface_utile, dpe, ville, code_postal, adresse, locataire_nom, locataire_telephone, locataire_email, date_entree, date_achevement_travaux",
       )
       .eq("actif", true)
       .order("code_patrimoine")
@@ -168,3 +168,19 @@ export const getPatrimoine = createServerFn({ method: "GET" }).handler(async () 
 
   return { tranches: tranches.data ?? [], lots };
 });
+
+const occupantsSchema = z.object({ lotCode: z.string().min(1).max(64) });
+
+/** Occupants enregistrés pour un lot (fiche locataire). */
+export const getOccupants = createServerFn({ method: "POST" })
+  .inputValidator((d: unknown) => occupantsSchema.parse(d))
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: rows, error } = await supabaseAdmin
+      .from("occupants")
+      .select("nom, prenom, date_naissance, date_entree")
+      .eq("lot_code", data.lotCode)
+      .order("date_entree", { ascending: false });
+    if (error) throw new Error(error.message);
+    return rows ?? [];
+  });

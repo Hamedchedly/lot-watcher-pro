@@ -110,9 +110,9 @@ function Index() {
                         search={{
                           q: "",
                           ville: r.ville,
-                          rue: r.rue,
-                          entree: undefined,
-                          bat: undefined,
+                          tranche: undefined,
+                          rue: undefined,
+                          garages: false,
                         }}
                         className="flex items-center gap-3 p-3 transition-colors hover:bg-accent/50"
                       >
@@ -136,7 +136,7 @@ function Index() {
             <Button asChild className="w-full" size="lg">
               <Link
                 to="/adresses"
-                search={{ q: "", ville: "toutes", rue: undefined, entree: undefined, bat: undefined }}
+                search={{ q: "", ville: undefined, tranche: undefined, rue: undefined, garages: false }}
               >
                 <ListTree className="size-4" /> Afficher toutes les adresses
               </Link>
