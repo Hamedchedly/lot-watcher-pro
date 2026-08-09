@@ -151,7 +151,7 @@ export const getPatrimoine = createServerFn({ method: "GET" }).handler(async () 
     const { data, error } = await supabaseAdmin
       .from("lots")
       .select(
-        "code_patrimoine, tranche_code, type_lot, batiment, etage, porte, surface_utile, dpe, ville, code_postal, adresse, locataire_nom, date_achevement_travaux",
+        "code_patrimoine, tranche_code, type_lot, batiment, etage, porte, surface_utile, dpe, ville, code_postal, adresse, locataire_nom, locataire_telephone, locataire_email, date_entree, date_achevement_travaux",
       )
       .eq("actif", true)
       .order("code_patrimoine")
