@@ -168,3 +168,19 @@ export const getPatrimoine = createServerFn({ method: "GET" }).handler(async () 
 
   return { tranches: tranches.data ?? [], lots };
 });
+
+const occupantsSchema = z.object({ lotCode: z.string().min(1).max(64) });
+
+/** Occupants enregistrés pour un lot (fiche locataire). */
+export const getOccupants = createServerFn({ method: "POST" })
+  .inputValidator((d: unknown) => occupantsSchema.parse(d))
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: rows, error } = await supabaseAdmin
+      .from("occupants")
+      .select("nom, prenom, date_naissance, date_entree")
+      .eq("lot_code", data.lotCode)
+      .order("date_entree", { ascending: false });
+    if (error) throw new Error(error.message);
+    return rows ?? [];
+  });
