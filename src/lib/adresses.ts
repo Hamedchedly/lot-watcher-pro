@@ -11,9 +11,19 @@ export type LotItem = {
   code_postal: string | null;
   adresse: string | null;
   locataire_nom: string | null;
+  locataire_telephone?: string | null;
+  locataire_email?: string | null;
+  date_entree?: string | null;
 };
 
+/** Garages, boxes et parkings : code lot en ER.G… ou type PAR/GAR/BOX/MOT. */
+export function estGarage(lot: Pick<LotItem, "code_patrimoine" | "type_lot">) {
+  if (/^ER\.G/i.test(lot.code_patrimoine)) return true;
+  return ["PAR", "GAR", "BOX", "MOT"].includes((lot.type_lot ?? "").toUpperCase());
+}
+
 export const collator = new Intl.Collator("fr", { numeric: true, sensitivity: "base" });
+
 
 /** « 25-27  RUE DE RUZE » → « RUE DE RUZE » : on retire le numéro pour regrouper la rue. */
 export function rueDe(adresse: string | null) {
