@@ -110,9 +110,9 @@ function Index() {
                         search={{
                           q: "",
                           ville: r.ville,
-                          rue: r.rue,
-                          entree: undefined,
-                          bat: undefined,
+                          tranche: undefined,
+                          rue: undefined,
+                          garages: false,
                         }}
                         className="flex items-center gap-3 p-3 transition-colors hover:bg-accent/50"
                       >
