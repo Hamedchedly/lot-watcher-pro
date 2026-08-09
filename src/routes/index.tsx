@@ -136,7 +136,7 @@ function Index() {
             <Button asChild className="w-full" size="lg">
               <Link
                 to="/adresses"
-                search={{ q: "", ville: "toutes", rue: undefined, entree: undefined, bat: undefined }}
+                search={{ q: "", ville: undefined, tranche: undefined, rue: undefined, garages: false }}
               >
                 <ListTree className="size-4" /> Afficher toutes les adresses
               </Link>
