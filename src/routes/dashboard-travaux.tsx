@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis, Legend } from "recharts";
-import { AlertTriangle, ArrowDownUp, FilterX, LayoutDashboard, ListFilter, RotateCcw, Search, Upload, Wrench, ChevronRight, MapPin, History } from "lucide-react";
+import { AlertTriangle, ArrowDownUp, FilterX, LayoutDashboard, ListFilter, RotateCcw, Search, Upload, Wrench, MapPin, History, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -54,12 +54,12 @@ const yearOf = (row: Commande) => {
 function Kpi({ label, value, detail, trend }: { label: string; value: string; detail?: string; trend?: string }) {
   return (
     <div className="rounded-xl border bg-card p-4 shadow-sm hover:shadow-md transition-shadow">
-      <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{label}</p>
+      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{label}</p>
       <div className="mt-1 flex items-baseline gap-2">
-        <p className="text-2xl font-bold text-slate-900">{value}</p>
-        {trend && <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">{trend}</span>}
+        <p className="text-2xl font-black text-slate-900">{value}</p>
+        {trend && <span className="text-[9px] font-black text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded uppercase tracking-tighter">{trend}</span>}
       </div>
-      {detail && <p className="mt-1 text-xs text-muted-foreground">{detail}</p>}
+      {detail && <p className="mt-1 text-[10px] font-bold text-slate-400">{detail}</p>}
     </div>
   );
 }
@@ -183,7 +183,7 @@ function DashboardTravauxPage() {
     setPage(1);
   };
 
-  if (isLoading) return <div className="flex h-screen items-center justify-center bg-slate-50 font-medium text-slate-500">Initialisation du Dashboard Pro...</div>;
+  if (isLoading) return <div className="flex h-screen items-center justify-center bg-slate-50 font-black text-slate-300 uppercase tracking-widest">Initialisation du Dashboard Pro...</div>;
 
   return (
     <main className="min-h-screen bg-slate-50/50 pb-12 text-slate-900 font-sans">
@@ -195,13 +195,13 @@ function DashboardTravauxPage() {
               <Wrench className="size-5" />
             </div>
             <div>
-              <h1 className="text-lg font-extrabold tracking-tight">TRAVAUX ANALYTICS</h1>
-              <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-widest">Pilotage Immobilier 2023-2024</p>
+              <h1 className="text-lg font-black tracking-tight uppercase">TRAVAUX ANALYTICS</h1>
+              <p className="text-[9px] text-muted-foreground font-black uppercase tracking-widest">Pilotage Immobilier Pro</p>
             </div>
           </div>
           <div className="flex gap-2">
-            <Button asChild variant="ghost" size="sm" className="font-bold text-xs"><Link to="/">ACCUEIL</Link></Button>
-            <Button asChild size="sm" className="bg-slate-900 hover:bg-slate-800 text-xs font-bold px-4"><Link to="/import-travaux"><Upload className="size-3.5 mr-2" /> NOUVEL IMPORT</Link></Button>
+            <Button asChild variant="ghost" size="sm" className="font-black text-[10px] tracking-widest"><Link to="/">ACCUEIL</Link></Button>
+            <Button asChild size="sm" className="bg-slate-900 hover:bg-slate-800 text-[10px] font-black tracking-widest px-4"><Link to="/import-travaux"><Upload className="size-3.5 mr-2" /> NOUVEL IMPORT</Link></Button>
           </div>
         </div>
       </header>
@@ -210,23 +210,23 @@ function DashboardTravauxPage() {
         {/* SECTION FILTRES */}
         <section className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-5">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 text-xs font-black text-slate-400 uppercase tracking-widest">
+            <div className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-widest">
               <ListFilter className="size-4" /> Filtres Dynamiques
             </div>
-            <Button variant="ghost" size="sm" onClick={reset} className="text-[10px] font-bold text-slate-400 hover:text-red-500">
+            <Button variant="ghost" size="sm" onClick={reset} className="text-[9px] font-black text-slate-400 hover:text-red-500 uppercase tracking-widest">
               <RotateCcw className="size-3 mr-1" /> RÉINITIALISER
             </Button>
           </div>
           
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-8">
             <div className="space-y-3">
-              <Label className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">Années d'exercice</Label>
+              <Label className="text-[9px] font-black uppercase text-slate-400 tracking-wider">Années d'exercice</Label>
               <div className="flex flex-wrap gap-1.5">
                 {options.years.map(y => (
                   <button 
                     key={y} 
                     onClick={() => setSelectedYears(prev => prev.includes(y) ? prev.filter(a => a !== y) : [...prev, y])}
-                    className={`px-3 py-1 rounded-full text-[11px] font-bold transition-all border ${
+                    className={`px-3 py-1 rounded-full text-[10px] font-black transition-all border ${
                       selectedYears.includes(y) ? 'bg-slate-900 text-white border-slate-900 shadow-md' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400'
                     }`}
                   >
@@ -237,13 +237,13 @@ function DashboardTravauxPage() {
             </div>
 
             <div className="space-y-3">
-              <Label className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">Programmation</Label>
+              <Label className="text-[9px] font-black uppercase text-slate-400 tracking-wider">Programmation</Label>
               <div className="flex gap-4 items-center h-8">
-                <label className="flex items-center gap-2 text-xs font-bold text-slate-600 cursor-pointer group">
+                <label className="flex items-center gap-2 text-[10px] font-black text-slate-600 cursor-pointer group">
                   <Checkbox checked={progFilter.prog} onCheckedChange={(v) => setProgFilter(p => ({ ...p, prog: !!v }))} />
                   <span className={progFilter.prog ? "text-blue-600" : ""}>PROGRAMMÉE</span>
                 </label>
-                <label className="flex items-center gap-2 text-xs font-bold text-slate-600 cursor-pointer group">
+                <label className="flex items-center gap-2 text-[10px] font-black text-slate-600 cursor-pointer group">
                   <Checkbox checked={progFilter.hors} onCheckedChange={(v) => setProgFilter(p => ({ ...p, hors: !!v }))} />
                   <span className={progFilter.hors ? "text-orange-600" : ""}>HORS BUDGET</span>
                 </label>
@@ -251,10 +251,10 @@ function DashboardTravauxPage() {
             </div>
 
             <div className="space-y-3">
-              <Label className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">Secteur</Label>
+              <Label className="text-[9px] font-black uppercase text-slate-400 tracking-wider">Secteur</Label>
               <div className="flex gap-4 items-center h-8">
                 {SECTEURS.map(s => (
-                  <label key={s} className="flex items-center gap-2 text-xs font-bold text-slate-600 cursor-pointer">
+                  <label key={s} className="flex items-center gap-2 text-[10px] font-black text-slate-600 cursor-pointer">
                     <Checkbox checked={selectedSectors.includes(s)} onCheckedChange={(v) => setSelectedSectors(prev => v ? [...prev, s] : prev.filter(x => x !== s))} />
                     {s}
                   </label>
@@ -263,11 +263,11 @@ function DashboardTravauxPage() {
             </div>
 
             <div className="space-y-3 lg:col-span-2">
-              <Label className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">Tranche / Ensemble Résidentiel</Label>
+              <Label className="text-[9px] font-black uppercase text-slate-400 tracking-wider">Tranche / Ensemble Résidentiel</Label>
               <select 
                 value={selectedTranche} 
                 onChange={(e) => setSelectedTranche(e.target.value)}
-                className="w-full h-9 rounded-xl border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-bold shadow-inner focus:ring-2 focus:ring-blue-500 outline-none"
+                className="w-full h-9 rounded-xl border border-slate-200 bg-slate-50 px-3 py-1 text-[10px] font-black uppercase shadow-inner focus:ring-2 focus:ring-blue-500 outline-none"
               >
                 <option value="Toutes">TOUTES LES TRANCHES</option>
                 {options.tranches.map(t => <option key={t} value={t}>{t}</option>)}
@@ -278,7 +278,7 @@ function DashboardTravauxPage() {
 
         {/* SECTION VISUALISATIONS (KPIs) */}
         <section className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <Kpi label="Budget Total" value={money(stats.budget)} trend="PRO" />
+          <Kpi label="Budget Total" value={money(stats.budget)} trend="PREV" />
           <Kpi label="% Hors Budget" value={`${stats.pctHors}%`} trend="ALERTE" />
           <Kpi label="% Programmé" value={`${stats.pctProg}%`} trend="OK" />
           <Kpi label="Terminés" value={stats.done.toString()} detail={`sur ${stats.total} commandes`} trend="STATUT" />
@@ -289,8 +289,8 @@ function DashboardTravauxPage() {
           {/* Donut Chart - Répartition GT/GE/CP */}
           <article className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
             <div className="flex items-center justify-between mb-6">
-              <h3 className="text-xs font-black uppercase tracking-widest text-slate-400">Répartition par Secteur (Engagé)</h3>
-              <div className="text-[10px] font-bold text-blue-600 bg-blue-50 px-2 py-1 rounded">INTERACTIF</div>
+              <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400">Répartition par Secteur (Engagé)</h3>
+              <div className="text-[9px] font-black text-blue-600 bg-blue-50 px-2 py-1 rounded uppercase">Interactif</div>
             </div>
             <div className="h-72">
               <ResponsiveContainer width="100%" height="100%">
@@ -311,40 +311,37 @@ function DashboardTravauxPage() {
                       <Cell key={entry.name} fill={SECTOR_COLORS[entry.name as keyof typeof SECTOR_COLORS]} />
                     ))}
                   </Pie>
-                  <Tooltip formatter={(v) => money(v)} contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }} />
-                  <Legend verticalAlign="bottom" height={36} iconType="circle" />
+                  <Tooltip formatter={(v) => money(v)} contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', fontSize: '10px', fontWeight: 'bold' }} />
+                  <Legend verticalAlign="bottom" height={36} iconType="circle" wrapperStyle={{ fontSize: '10px', fontWeight: 'black', textTransform: 'uppercase' }} />
                 </PieChart>
               </ResponsiveContainer>
             </div>
-            <p className="mt-4 text-[10px] text-center text-slate-400 font-bold">CLIQUEZ SUR UN SECTEUR POUR VOIR LE DÉTAIL DES CORPS D'ÉTAT</p>
+            <p className="mt-4 text-[9px] text-center text-slate-400 font-black uppercase tracking-widest">CLIQUEZ SUR UN SECTEUR POUR DRILL-DOWN</p>
           </article>
 
           {/* Heatmap Géographique - Dépenses par ville */}
           <article className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
             <div className="flex items-center justify-between mb-6">
-              <h3 className="text-xs font-black uppercase tracking-widest text-slate-400">Dépenses par Ville (Heatmap)</h3>
+              <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400">Heatmap Dépenses par Ville</h3>
               <MapPin className="size-4 text-red-500" />
             </div>
             <div className="space-y-3 h-72 overflow-y-auto pr-2 custom-scrollbar">
               {dataHeatmap.map(([city, val], idx) => {
                 const max = dataHeatmap[0]?.[1] || 1;
                 const pct = (val / max) * 100;
-                const colorClass = pct > 70 ? 'bg-red-500' : pct > 30 ? 'bg-blue-500' : 'bg-slate-300';
+                // Nuancier Bleu (bas) -> Rouge (élevé)
+                const color = pct > 70 ? 'bg-red-500' : pct > 30 ? 'bg-blue-500' : 'bg-blue-200';
                 return (
                   <div key={city} className="group relative">
                     <div className="flex items-center justify-between mb-1">
-                      <span className="text-[11px] font-bold text-slate-700 truncate max-w-[150px]">{city}</span>
+                      <span className="text-[10px] font-black text-slate-700 uppercase truncate max-w-[150px]">{city}</span>
                       <span className="text-[10px] font-black text-slate-900">{money(val)}</span>
                     </div>
                     <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
                       <div 
-                        className={`h-full rounded-full transition-all duration-1000 ${colorClass}`} 
+                        className={`h-full rounded-full transition-all duration-1000 ${color}`} 
                         style={{ width: `${pct}%` }}
                       />
-                    </div>
-                    {/* Tooltip simple au hover */}
-                    <div className="opacity-0 group-hover:opacity-100 absolute -top-8 right-0 bg-slate-900 text-white text-[9px] font-bold px-2 py-1 rounded pointer-events-none transition-opacity">
-                      {Math.round(pct)}% du max
                     </div>
                   </div>
                 );
@@ -356,23 +353,22 @@ function DashboardTravauxPage() {
         {/* Classement Tranches */}
         <article className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
           <div className="flex items-center justify-between mb-6">
-            <h3 className="text-xs font-black uppercase tracking-widest text-slate-400">Classement des Tranches (Top Dépenses)</h3>
-            <Button variant="outline" size="sm" onClick={() => setShowAllTranches(!showAllTranches)} className="text-[10px] font-bold border-slate-200">
+            <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400">Classement Tranches (Engagé)</h3>
+            <Button variant="outline" size="sm" onClick={() => setShowAllTranches(!showAllTranches)} className="text-[9px] font-black uppercase tracking-widest border-slate-200">
               {showAllTranches ? "VOIR TOP 5" : "VOIR PLUS (TOP 20)"}
             </Button>
           </div>
           <div className="h-80">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={dataTranche} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                <XAxis dataKey="name" fontSize={10} fontWeight="bold" axisLine={false} tickLine={false} />
-                <YAxis tickFormatter={(v) => `${Math.round(v/1000)}k`} fontSize={10} axisLine={false} tickLine={false} />
+              <BarChart data={dataTranche} layout="vertical" margin={{ left: 20, right: 30 }}>
+                <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
+                <XAxis type="number" hide />
+                <YAxis dataKey="name" type="category" fontSize={9} fontWeight="black" width={100} axisLine={false} tickLine={false} />
                 <Tooltip 
                   formatter={(v) => money(v)} 
-                  contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
-                  labelStyle={{ fontWeight: 'bold', fontSize: '12px' }}
+                  contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', fontSize: '10px', fontWeight: 'bold' }}
                 />
-                <Bar dataKey="value" fill="#2563eb" radius={[6, 6, 0, 0]} barSize={40}>
+                <Bar dataKey="value" fill="#2563eb" radius={[0, 6, 6, 0]} barSize={25}>
                   {dataTranche.map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={index === 0 ? "#1e40af" : "#3b82f6"} />
                   ))}
@@ -386,8 +382,8 @@ function DashboardTravauxPage() {
         <section className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="p-5 border-b bg-slate-50/50 flex flex-wrap items-center justify-between gap-4">
             <div className="flex items-center gap-2">
-              <h3 className="text-xs font-black uppercase tracking-widest text-slate-900">Journal des Commandes</h3>
-              <span className="bg-slate-200 text-slate-700 text-[9px] font-black px-2 py-0.5 rounded-full">{filtered.length} LIGNES</span>
+              <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-900">Journal des Commandes</h3>
+              <span className="bg-slate-200 text-slate-700 text-[9px] font-black px-2 py-0.5 rounded-full uppercase tracking-tighter">{filtered.length} LIGNES</span>
             </div>
             <div className="relative w-full md:w-72">
               <Search className="absolute left-3 top-2.5 size-3.5 text-slate-400" />
@@ -395,13 +391,13 @@ function DashboardTravauxPage() {
                 value={search} 
                 onChange={(e) => { setSearch(e.target.value); setPage(1); }} 
                 placeholder="RECHERCHER ADRESSE, TRANCHE..." 
-                className="h-9 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-4 text-[11px] font-bold focus:ring-2 focus:ring-blue-500 outline-none transition-all shadow-sm" 
+                className="h-9 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-4 text-[10px] font-black uppercase focus:ring-2 focus:ring-blue-500 outline-none transition-all shadow-sm" 
               />
             </div>
           </div>
           
           <div className="overflow-x-auto custom-scrollbar">
-            <table className="w-full text-left text-[11px] border-collapse">
+            <table className="w-full text-left text-[10px] border-collapse">
               <thead className="bg-slate-50 border-b text-slate-400 font-black uppercase tracking-widest">
                 <tr>
                   <th className="p-4 w-10">ACT.</th>
@@ -441,14 +437,14 @@ function DashboardTravauxPage() {
                           {row.tranche_code || "—"}
                         </Link>
                       </td>
-                      <td className="p-4 font-bold text-slate-600 truncate max-w-[120px]">{row.adresse || "—"}</td>
+                      <td className="p-4 font-bold text-slate-600 truncate max-w-[120px] uppercase">{row.adresse || "—"}</td>
                       <td className="p-4 text-slate-500 truncate max-w-[180px]">{row.descriptif || "—"}</td>
                       <td className="p-4 text-right font-medium text-slate-400">{money(row.budget)}</td>
                       <td className="p-4 text-right font-black text-slate-900">{money(row.engage)}</td>
                       <td className="p-4 text-right text-slate-600">{money(row.paye)}</td>
                       <td className="p-4 text-right font-bold text-slate-400">{money(row.solde)}</td>
                       <td className="p-4">
-                        <span className={`px-2 py-0.5 rounded text-[9px] font-black ${
+                        <span className={`px-2 py-0.5 rounded text-[8px] font-black ${
                           sect === 'GT' ? 'bg-blue-100 text-blue-700' : 
                           sect === 'GE' ? 'bg-teal-100 text-teal-700' : 
                           'bg-orange-100 text-orange-700'
@@ -457,7 +453,7 @@ function DashboardTravauxPage() {
                         </span>
                       </td>
                       <td className="p-4">
-                        <span className="text-slate-400 font-bold uppercase text-[9px]">{row.etat_travaux || row.etat_commande || "—"}</span>
+                        <span className="text-slate-400 font-black uppercase text-[8px]">{row.etat_travaux || row.etat_commande || "—"}</span>
                       </td>
                       <td className="p-4">
                         <div className={`size-2 rounded-full ${isProg ? 'bg-green-500 shadow-green-200' : 'bg-slate-300'} shadow-sm`} title={isProg ? 'Programmée' : 'Hors Budget'} />
@@ -470,12 +466,12 @@ function DashboardTravauxPage() {
           </div>
           
           <div className="p-4 bg-slate-50/50 border-t flex items-center justify-between">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+            <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">
               PAGE {page} SUR {Math.ceil(filtered.length / PAGE_SIZE) || 1}
             </span>
             <div className="flex gap-2">
-              <Button variant="outline" size="sm" className="h-8 font-black text-[10px] rounded-xl" disabled={page === 1} onClick={() => setPage(p => p - 1)}>PRÉCÉDENT</Button>
-              <Button variant="outline" size="sm" className="h-8 font-black text-[10px] rounded-xl" disabled={page * PAGE_SIZE >= filtered.length} onClick={() => setPage(p => p + 1)}>SUIVANT</Button>
+              <Button variant="outline" size="sm" className="h-8 font-black text-[9px] rounded-xl uppercase tracking-widest" disabled={page === 1} onClick={() => setPage(p => p - 1)}>PRÉCÉDENT</Button>
+              <Button variant="outline" size="sm" className="h-8 font-black text-[9px] rounded-xl uppercase tracking-widest" disabled={page * PAGE_SIZE >= filtered.length} onClick={() => setPage(p => p + 1)}>SUIVANT</Button>
             </div>
           </div>
         </section>
@@ -483,24 +479,24 @@ function DashboardTravauxPage() {
 
       {/* MODALE DRILL-DOWN SECTEUR */}
       <Dialog open={!!drilldownSector} onOpenChange={(o) => !o && setDrilldownSector(null)}>
-        <DialogContent className="max-w-xl rounded-2xl">
+        <DialogContent className="max-w-xl rounded-2xl border-none shadow-2xl">
           <DialogHeader>
             <DialogTitle className="text-lg font-black uppercase tracking-tight">Détail Secteur : {drilldownSector}</DialogTitle>
-            <DialogDescription className="text-xs font-bold text-slate-400">Répartition de l'engagé par corps d'état</DialogDescription>
+            <DialogDescription className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Répartition Engagé par Corps d'état</DialogDescription>
           </DialogHeader>
           <div className="py-4 space-y-2 max-h-[60vh] overflow-y-auto pr-2 custom-scrollbar">
             {dataDrilldown.map((d, i) => (
               <div key={d.name} className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-100 hover:border-blue-200 transition-colors">
                 <div className="flex items-center gap-3">
-                  <span className="text-[10px] font-black text-slate-300">#0{i+1}</span>
-                  <span className="text-xs font-bold text-slate-700">{d.name}</span>
+                  <span className="text-[9px] font-black text-slate-300">#0{i+1}</span>
+                  <span className="text-[10px] font-black text-slate-700 uppercase">{d.name}</span>
                 </div>
-                <span className="text-xs font-black text-blue-600">{money(d.value)}</span>
+                <span className="text-[10px] font-black text-blue-600">{money(d.value)}</span>
               </div>
             ))}
           </div>
           <DialogFooter>
-            <Button onClick={() => setDrilldownSector(null)} className="w-full bg-slate-900 font-bold text-xs rounded-xl">FERMER</Button>
+            <Button onClick={() => setDrilldownSector(null)} className="w-full bg-slate-900 font-black text-[10px] rounded-xl uppercase tracking-widest">FERMER</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -513,30 +509,30 @@ function DashboardTravauxPage() {
               <AlertTriangle className="size-8" />
               <div>
                 <h2 className="text-xl font-black uppercase tracking-tight">Alerte Modification Détectée</h2>
-                <p className="text-xs font-bold opacity-80 uppercase tracking-widest">
+                <p className="text-[10px] font-black opacity-80 uppercase tracking-widest">
                   Commande N° {(selectedModif as any)?.travaux_commandes?.numero_commande || "—"} • Modifié le {selectedModif ? new Date(selectedModif.created_at).toLocaleDateString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : ''}
                 </p>
               </div>
             </div>
           </div>
           
-          <div className="p-8 space-y-8">
+          <div className="p-8 space-y-8 bg-white">
             <div className="grid grid-cols-2 gap-8">
               {/* Version A */}
               <div className={`rounded-2xl border-2 p-6 transition-all ${versionChoice === 'A' ? 'border-blue-600 bg-blue-50/30 ring-4 ring-blue-50' : 'border-slate-100 bg-slate-50'}`}>
                 <div className="flex items-center justify-between mb-4">
-                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">VERSION A (ORIGINAL)</span>
+                  <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">VERSION A (ORIGINAL)</span>
                   <RadioGroup value={versionChoice} onValueChange={(v) => setVersionChoice(v as "A" | "B")}>
                     <div className="flex items-center space-x-2">
                       <RadioGroupItem value="A" id="vA" className="border-slate-300 text-blue-600" />
-                      <Label htmlFor="vA" className="text-xs font-black cursor-pointer">GARDER A</Label>
+                      <Label htmlFor="vA" className="text-[10px] font-black cursor-pointer uppercase tracking-widest">GARDER A</Label>
                     </div>
                   </RadioGroup>
                 </div>
                 <div className="space-y-3">
                   {selectedModif?.avant && Object.entries(selectedModif.avant).map(([k, v]) => (
-                    <div key={k} className="flex justify-between text-[11px] border-b border-slate-100 pb-1">
-                      <span className="text-slate-400 font-bold uppercase">{k.replace(/_/g, ' ')}</span>
+                    <div key={k} className="flex justify-between text-[10px] border-b border-slate-100 pb-1">
+                      <span className="text-slate-400 font-black uppercase tracking-tighter">{k.replace(/_/g, ' ')}</span>
                       <span className="text-slate-900 font-bold">{text(v)}</span>
                     </div>
                   ))}
@@ -546,11 +542,11 @@ function DashboardTravauxPage() {
               {/* Version B */}
               <div className={`rounded-2xl border-2 p-6 transition-all ${versionChoice === 'B' ? 'border-blue-600 bg-blue-50/30 ring-4 ring-blue-50' : 'border-slate-100 bg-slate-50'}`}>
                 <div className="flex items-center justify-between mb-4">
-                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">VERSION B (MODIFIÉ)</span>
+                  <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">VERSION B (MODIFIÉ)</span>
                   <RadioGroup value={versionChoice} onValueChange={(v) => setVersionChoice(v as "A" | "B")}>
                     <div className="flex items-center space-x-2">
                       <RadioGroupItem value="B" id="vB" className="border-slate-300 text-blue-600" />
-                      <Label htmlFor="vB" className="text-xs font-black cursor-pointer">GARDER B</Label>
+                      <Label htmlFor="vB" className="text-[10px] font-black cursor-pointer uppercase tracking-widest">GARDER B</Label>
                     </div>
                   </RadioGroup>
                 </div>
@@ -558,8 +554,8 @@ function DashboardTravauxPage() {
                   {selectedModif?.apres && Object.entries(selectedModif.apres).map(([k, v]) => {
                     const changed = JSON.stringify(selectedModif.avant?.[k]) !== JSON.stringify(v);
                     return (
-                      <div key={k} className={`flex justify-between text-[11px] border-b border-slate-100 pb-1 ${changed ? 'text-blue-600 font-black bg-blue-50 -mx-2 px-2 rounded' : ''}`}>
-                        <span className="text-slate-400 font-bold uppercase">{k.replace(/_/g, ' ')}</span>
+                      <div key={k} className={`flex justify-between text-[10px] border-b border-slate-100 pb-1 ${changed ? 'text-blue-600 font-black bg-blue-50 -mx-2 px-2 rounded' : ''}`}>
+                        <span className="text-slate-400 font-black uppercase tracking-tighter">{k.replace(/_/g, ' ')}</span>
                         <span>{text(v)}</span>
                       </div>
                     );
@@ -569,7 +565,7 @@ function DashboardTravauxPage() {
             </div>
             
             <Button 
-              className="w-full h-12 bg-slate-900 hover:bg-slate-800 text-white font-black rounded-2xl shadow-xl shadow-slate-200 transition-all hover:-translate-y-1 active:translate-y-0"
+              className="w-full h-12 bg-slate-900 hover:bg-slate-800 text-white font-black text-[11px] uppercase tracking-[0.2em] rounded-2xl shadow-xl shadow-slate-200 transition-all hover:-translate-y-1 active:translate-y-0"
               onClick={() => setSelectedModif(null)}
             >
               VALIDER LA DÉCISION

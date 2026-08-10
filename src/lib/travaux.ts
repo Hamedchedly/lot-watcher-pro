@@ -27,6 +27,9 @@ export type CommandeTravaux = {
   date_communication: string | null;
   lot_code: string | null;
   batiment: string | null;
+  annee_exercice?: number | null;
+  classification_programmation?: string | null;
+  classification_secteur?: string | null;
 };
 
 export type TravauxParseIssue = { line: number; message: string; numero_commande: string | null };
@@ -82,56 +85,73 @@ export function parseTravauxWorkbook(data: ArrayBuffer): ParsedTravaux {
   const sheet = workbook.Sheets[workbook.SheetNames[0]!];
   if (!sheet) throw new Error("Le classeur ne contient aucune feuille.");
   const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: null });
-  const headerIndex = matrix.findIndex((row) => row.some((cell) => normalizeHeader(cell) === "no commande"));
-  if (headerIndex < 0) throw new Error("Colonne obligatoire introuvable : No commande.");
-  const headers = (matrix[headerIndex] ?? []).map((cell) => headerAliases[normalizeHeader(cell)] ?? null);
+  
+  // Recherche de la ligne contenant "No commande"
+  const mainHeaderIndex = matrix.findIndex((row) => row.some((cell) => normalizeHeader(cell) === "no commande"));
+  if (mainHeaderIndex < 0) throw new Error("Colonne obligatoire introuvable : No commande.");
+  
+  // On récupère la ligne principale et la ligne au-dessus pour fusionner les en-têtes
+  const rowAbove = (mainHeaderIndex > 0 ? matrix[mainHeaderIndex - 1] : []) as unknown[];
+  const rowMain = (matrix[mainHeaderIndex] || []) as unknown[];
+  
+  const headers: (keyof CommandeTravaux | null)[] = [];
+  const maxCols = Math.max(rowAbove.length, rowMain.length);
+  
+  for (let i = 0; i < maxCols; i++) {
+    const h1 = normalizeHeader(rowAbove[i]);
+    const h2 = normalizeHeader(rowMain[i]);
+    
+    // On cherche d'abord dans les alias avec la ligne principale, puis la ligne du dessus
+    const alias = headerAliases[h2] || headerAliases[h1];
+    headers.push(alias || null);
+  }
+
   const commandes = new Map<string, CommandeTravaux>();
   const conflits: TravauxParseIssue[] = [];
   const erreurs: TravauxParseIssue[] = [];
   let doublons = 0;
 
-  for (let index = headerIndex + 1; index < matrix.length; index += 1) {
+  for (let index = mainHeaderIndex + 1; index < matrix.length; index += 1) {
     const row = matrix[index] ?? [];
     if (row.every((cell) => text(cell) === null)) continue;
+    
     const raw: Raw = {};
     headers.forEach((key, column) => { if (key) raw[key] = row[column]; });
+    
     const numero = text(raw["numero_commande"]);
-    const hasMappedValue = headers.some((key, column) => key && text(row[column]) !== null);
-    if (!numero) {
-      if (hasMappedValue) erreurs.push({ line: index + 1, numero_commande: null, message: "Numéro de commande manquant" });
-      continue;
-    }
-    const commande = Object.fromEntries([
-      "numero_commande", "secteur", "tranche_code", "charge_clientele", "adresse", "nature_analytique", "corps_etat",
-      "charge_operation", "ligne_budget", "descriptif", "budget", "numero_fournisseur", "fournisseur", "etat_commande",
-      "engage", "ecart", "paye", "solde", "etat_travaux", "date_demarrage", "date_fin_travaux", "observations",
-      "support_communication", "date_communication",
-    ].map((key) => [key, null])) as unknown as CommandeTravaux;
-    for (const key of Object.values(headerAliases)) {
-      const value = raw[key];
-      commande[key] = (moneyFields.has(key) ? number(value) : dateFields.has(key) ? date(value) : text(value)) as never;
-    }
-    commande.numero_commande = numero;
-    commande.lot_code = null;
-    commande.batiment = null;
+    if (!numero) continue;
+
+    const commande = {
+      numero_commande: numero,
+      secteur: null, tranche_code: null, charge_clientele: null, adresse: null, nature_analytique: null,
+      corps_etat: null, charge_operation: null, ligne_budget: null, descriptif: null, budget: null,
+      numero_fournisseur: null, fournisseur: null, etat_commande: null, engage: null, ecart: null,
+      paye: null, solde: null, etat_travaux: null, date_demarrage: null, date_fin_travaux: null,
+      observations: null, support_communication: null, date_communication: null, lot_code: null, batiment: null
+    } as CommandeTravaux;
+
+    headers.forEach((key, column) => {
+      if (key) {
+        const value = row[column];
+        (commande as any)[key] = (moneyFields.has(key) ? number(value) : dateFields.has(key) ? date(value) : text(value));
+      }
+    });
+
     const previous = commandes.get(numero);
     if (previous) {
       doublons += 1;
-      if (JSON.stringify(previous) !== JSON.stringify(commande)) conflictos(conflits, index + 1, numero);
+      if (JSON.stringify(previous) !== JSON.stringify(commande)) {
+        conflits.push({ line: index + 1, numero_commande: numero, message: "Doublon avec des valeurs différentes" });
+      }
       continue;
     }
     commandes.set(numero, commande);
   }
-  return { commandes: [...commandes.values()], lignes: matrix.length - headerIndex - 1, doublons, conflits, erreurs };
-}
-
-function conflictos(issues: TravauxParseIssue[], line: number, numero: string) {
-  issues.push({ line, numero_commande: numero, message: "Doublon avec des valeurs différentes" });
+  return { commandes: [...commandes.values()], lignes: matrix.length - mainHeaderIndex - 1, doublons, conflits, erreurs };
 }
 
 export const TRAVAUX_FIELDS = [
   "secteur", "tranche_code", "charge_clientele", "adresse", "nature_analytique", "corps_etat", "charge_operation", "ligne_budget",
   "descriptif", "budget", "numero_fournisseur", "fournisseur", "etat_commande", "engage", "ecart", "paye", "solde", "etat_travaux",
   "date_demarrage", "date_fin_travaux", "observations", "support_communication", "date_communication", "lot_code", "batiment",
-  "annee_exercice", "classification_programmation", "classification_secteur",
 ] as const;

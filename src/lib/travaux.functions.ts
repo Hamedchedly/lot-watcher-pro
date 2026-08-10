@@ -57,22 +57,32 @@ export const importTravauxBatch = createServerFn({ method: "POST" })
 
     const annee_exercice = data.annee_exercice;
 
+    // Liste des colonnes réellement présentes dans la table travaux_commandes selon types.ts
+    const VALID_COLUMNS = [
+      "numero_commande", "secteur", "tranche_code", "lot_code", "batiment", "charge_clientele", "adresse",
+      "nature_analytique", "corps_etat", "charge_operation", "ligne_budget", "descriptif", "budget",
+      "numero_fournisseur", "fournisseur", "etat_commande", "engage", "ecart", "paye", "solde",
+      "etat_travaux", "date_demarrage", "date_fin_travaux", "observations", "support_communication",
+      "date_communication", "vu_dans_import_id", "actif"
+    ];
+
     for (const source of data.commandes) {
-      // On retire les colonnes de classification si elles causent des erreurs de cache
-      const row = { 
+      const fullRow = { 
         ...source, 
         tranche_code: source.tranche_code && validTranches.has(source.tranche_code) ? source.tranche_code : null, 
         vu_dans_import_id: data.importId, 
         actif: true,
       };
-      // On supprime les champs qui pourraient ne pas exister dans la DB
-      delete (row as any).annee_exercice;
-      delete (row as any).classification_programmation;
-      delete (row as any).classification_secteur;
+      
+      // Filtrage strict pour ne garder que les colonnes valides
+      const row = Object.fromEntries(
+        Object.entries(fullRow).filter(([key]) => VALID_COLUMNS.includes(key))
+      );
+
       if (source.tranche_code && !validTranches.has(source.tranche_code)) ignorees += 1;
       const before = existing.get(source.numero_commande) as Record<string, unknown> | undefined;
       const changed = !before || JSON.stringify(comparable(before)) !== JSON.stringify(comparable(row));
-      let commande = before;
+      
       if (changed) {
         const result = before
           ? await db.from("travaux_commandes").update(row).eq("id", before["id"]).select("*").single()
