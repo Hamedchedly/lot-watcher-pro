@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState, useEffect, lazy, Suspense } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Link, createFileRoute } from "@tanstack/react-router";
@@ -13,10 +13,6 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Badge } from "@/components/ui/badge";
-import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
-import L from "leaflet";
-import "leaflet/dist/leaflet.css";
-
 import {
   getTravauxDashboard,
   updateCommandeTravaux,
@@ -26,15 +22,6 @@ import {
   type TravauxDashboardData,
   type ImportTravaux,
 } from "@/lib/travaux.dashboard.functions";
-
-// Fix pour les icônes Leaflet par défaut
-const DefaultIcon = L.icon({
-  iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
-  shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
-});
-L.Marker.prototype.options.icon = DefaultIcon;
 
 export const Route = createFileRoute("/dashboard-travaux")({
   head: () => ({ meta: [{ title: "Dashboard suivi travaux" }, { name: "description", content: "Pilotage des commandes de travaux par programmation, secteur et tranche." }] }),
@@ -112,6 +99,20 @@ function MultiSelect({ label, options, selected, onChange, icon: Icon }: { label
         </div>
       </PopoverContent>
     </Popover>
+  );
+}
+
+const DashboardMap = lazy(() => import("@/components/DashboardMap"));
+
+function ClientOnlyMap({ dataHeatmap, money }: { dataHeatmap: [string, number][], money: (v: any) => string }) {
+  const [isClient, setIsClient] = useState(false);
+  useEffect(() => { setIsClient(true); }, []);
+  if (!isClient) return <div className="h-full w-full bg-slate-50 flex items-center justify-center text-[10px] font-black uppercase text-slate-300">Chargement carte...</div>;
+  
+  return (
+    <Suspense fallback={<div className="h-full w-full bg-slate-50 flex items-center justify-center text-[10px] font-black uppercase text-slate-300">Chargement carte...</div>}>
+      <DashboardMap dataHeatmap={dataHeatmap} money={money} />
+    </Suspense>
   );
 }
 
@@ -395,14 +396,7 @@ function DashboardTravauxPage() {
             </div>
             {mapMode === "map" ? (
               <div className="absolute inset-0 z-0">
-                <MapContainer center={[48.8566, 2.3522]} zoom={10} className="h-full w-full grayscale-[0.5] contrast-[1.2]">
-                  <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-                  {dataHeatmap.map(([city, val]) => (
-                    <Marker key={city} position={[48.8566 + (Math.random() - 0.5) * 0.1, 2.3522 + (Math.random() - 0.5) * 0.1]}>
-                      <Popup><div className="p-2 font-sans"><p className="text-[10px] font-black uppercase text-slate-400 mb-1">{city}</p><p className="text-sm font-black text-blue-600">{money(val)}</p></div></Popup>
-                    </Marker>
-                  ))}
-                </MapContainer>
+                <ClientOnlyMap dataHeatmap={dataHeatmap} money={money} />
               </div>
             ) : (
               <div className="space-y-4 h-[350px] overflow-y-auto pr-2 custom-scrollbar mt-4">
