@@ -44,6 +44,7 @@ export type HistoriqueTravaux = {
   avant: Record<string, string | number | boolean | null> | null;
   apres: Record<string, string | number | boolean | null> | null;
   created_at: string;
+  resolu: boolean;
 };
 
 export type ImportTravaux = {
@@ -81,7 +82,7 @@ export const getTravauxDashboard = createServerFn({ method: "GET" }).handler(asy
   const db = supabaseAdmin as any;
   const [commandesResult, historiqueResult, importsResult, tranchesResult] = await Promise.all([
     db.from("travaux_commandes").select("*").eq("actif", true).order("engage", { ascending: false, nullsFirst: false }),
-    db.from("travaux_commandes_historique").select("*, travaux_commandes(numero_commande)").eq("operation", "modification").order("created_at", { ascending: false }),
+    db.from("travaux_commandes_historique").select("*, travaux_commandes(numero_commande)").eq("operation", "modification").eq("resolu", false).order("created_at", { ascending: false }),
     db.from("import_travaux").select("*").order("demarre_at", { ascending: false }).limit(5),
     db.from("tranches").select("code, libelle, localite, nb_logements").eq("actif", true),
   ]);
@@ -111,7 +112,7 @@ export const updateCommandeTravaux = createServerFn({ method: "POST" })
     const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
     const db = supabaseAdmin as any;
     
-    // Liste des colonnes autorisées pour l'update (basée sur VALID_COLUMNS de travaux.functions.ts)
+    // Liste des colonnes autorisées pour l'update
     const VALID_COLUMNS = [
       "numero_commande", "secteur", "tranche_code", "lot_code", "batiment", "charge_clientele", "adresse",
       "nature_analytique", "corps_etat", "charge_operation", "ligne_budget", "descriptif", "budget",
@@ -140,3 +141,29 @@ export const getTravauxStats = createServerFn({ method: "GET" }).handler(async (
   if (error) throw new Error(error.message);
   return data;
 });
+
+export const resolveHistoriqueTravaux = createServerFn({ method: "POST" })
+  .inputValidator((d: unknown) => {
+    const { z } = require("zod");
+    return z.object({
+      id: z.string().uuid(),
+      keepVersion: z.enum(["A", "B"]),
+      commandeId: z.string().uuid(),
+      data: z.record(z.any())
+    }).parse(d);
+  })
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
+    const db = supabaseAdmin as any;
+    
+    // 1. Si l'utilisateur a choisi une version spécifique, on met à jour la commande
+    if (data.data && Object.keys(data.data).length > 0) {
+      const { error: updateError } = await db.from("travaux_commandes").update(data.data).eq("id", data.commandeId);
+      if (updateError) throw new Error(`Mise à jour commande : ${updateError.message}`);
+    }
+    
+    // 2. On marque l'historique comme résolu
+    const { data: updated, error } = await db.from("travaux_commandes_historique").update({ resolu: true }).eq("id", data.id).select("*").single();
+    if (error) throw new Error(`Résolution historique échouée : ${error.message}`);
+    return updated;
+  });
