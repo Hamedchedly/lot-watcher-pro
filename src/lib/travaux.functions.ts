@@ -19,12 +19,12 @@ const batchSchema = z.object({ importId: z.string().uuid(), commandes: z.array(c
 const comparable = (row: Record<string, unknown>) => Object.fromEntries(TRAVAUX_FIELDS.map((field) => [field, row[field] ?? null]));
 
 export const createTravauxImport = createServerFn({ method: "POST" })
-  .inputValidator((d: unknown) => z.object({ fichier: z.string().min(1), lignes: z.number(), doublons: z.number(), erreurs: z.number() }).parse(d))
+  .inputValidator((d: unknown) => z.object({ fichier: z.string().min(1), lignes: z.number(), doublons: z.number(), erreurs: z.number(), annee_exercice: z.number() }).parse(d))
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
     const db = supabaseAdmin as any;
     const { data: execution, error } = await db.from("import_travaux").insert({
-      fichier: data.fichier, lignes: data.lignes, doublons: data.doublons, erreurs: data.erreurs,
+      fichier: data.fichier, lignes: data.lignes, doublons: data.doublons, erreurs: data.erreurs, annee_exercice: data.annee_exercice,
     }).select("id").single();
     if (error) throw new Error(`Création de l'import : ${error.message}`);
     return execution as { id: string };
@@ -50,8 +50,11 @@ export const importTravauxBatch = createServerFn({ method: "POST" })
     let inchangees = 0;
     let ignorees = 0;
 
+    const { data: importData } = await db.from("import_travaux").select("annee_exercice").eq("id", data.importId).single();
+    const annee_exercice = importData?.annee_exercice;
+
     for (const source of data.commandes) {
-      const row = { ...source, tranche_code: source.tranche_code && validTranches.has(source.tranche_code) ? source.tranche_code : null, vu_dans_import_id: data.importId, actif: true };
+      const row = { ...source, tranche_code: source.tranche_code && validTranches.has(source.tranche_code) ? source.tranche_code : null, vu_dans_import_id: data.importId, annee_exercice, actif: true };
       if (source.tranche_code && !validTranches.has(source.tranche_code)) ignorees += 1;
       const before = existing.get(source.numero_commande) as Record<string, unknown> | undefined;
       const changed = !before || JSON.stringify(comparable(before)) !== JSON.stringify(comparable(row));

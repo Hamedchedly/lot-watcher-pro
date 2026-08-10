@@ -1,9 +1,11 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
-import { FileSpreadsheet, Upload } from "lucide-react";
+import { FileSpreadsheet, Upload, Calendar } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Label } from "@/components/ui/label";
 import { parseTravauxWorkbook, type ParsedTravaux } from "@/lib/travaux";
 import { createTravauxImport, failTravauxImport, finalizeTravauxImport, importTravauxBatch } from "@/lib/travaux.functions";
 
@@ -26,6 +28,7 @@ function ImportTravauxPage() {
   const [preview, setPreview] = useState<ParsedTravaux | null>(null);
   const [report, setReport] = useState<Report | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [anneeExercice, setAnneeExercice] = useState<string>(new Date().getFullYear().toString());
 
   const handleFile = async (file: File) => {
     setBusy(true); setError(null); setReport(null); setPreview(null); setProgress(0);
@@ -34,7 +37,7 @@ function ImportTravauxPage() {
       setMessage("Analyse du fichier…");
       const parsed = parseTravauxWorkbook(await file.arrayBuffer());
       setPreview(parsed);
-      execution = await createImport({ data: { fichier: file.name, lignes: parsed.lignes, doublons: parsed.doublons, erreurs: parsed.erreurs.length } });
+      execution = await createImport({ data: { fichier: file.name, lignes: parsed.lignes, doublons: parsed.doublons, erreurs: parsed.erreurs.length, annee_exercice: parseInt(anneeExercice) } });
       const parts = Array.from({ length: Math.ceil(parsed.commandes.length / 100) }, (_, index) => parsed.commandes.slice(index * 100, index * 100 + 100));
       let totals = { creees: 0, modifiees: 0, inchangees: 0, ignorees: 0 };
       for (let index = 0; index < parts.length; index += 1) {
@@ -61,11 +64,31 @@ function ImportTravauxPage() {
         <div className="space-y-1"><h1 className="text-2xl font-semibold tracking-tight">Import commandes travaux</h1><p className="text-sm text-muted-foreground">Flux indépendant d’ISIS : les commandes sont rapprochées par numéro, les changements sont historisés et les absentes archivées.</p></div>
         <Button asChild variant="outline"><Link to="/">Accueil</Link></Button>
       </header>
-      <div className="rounded-xl border border-dashed bg-surface p-8 text-center">
-        <FileSpreadsheet className="mx-auto size-8 text-muted-foreground" />
-        <p className="mt-3 text-sm text-muted-foreground">Export Excel des commandes de travaux (.xlsx ou .xls)</p>
-        <input ref={inputRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) void handleFile(file); }} />
-        <Button className="mt-4" disabled={busy} onClick={() => inputRef.current?.click()}><Upload className="size-4" /> Choisir le fichier</Button>
+      <div className="rounded-xl border border-dashed bg-surface p-8 text-center space-y-6">
+        <div className="mx-auto max-w-xs text-left space-y-2">
+          <Label htmlFor="annee-exercice" className="flex items-center gap-2">
+            <Calendar className="size-4" /> Année de l'exercice
+          </Label>
+          <Select value={anneeExercice} onValueChange={setAnneeExercice} disabled={busy}>
+            <SelectTrigger id="annee-exercice">
+              <SelectValue placeholder="Sélectionner l'année" />
+            </SelectTrigger>
+            <SelectContent>
+              {Array.from({ length: 10 }, (_, i) => new Date().getFullYear() - 5 + i).map((year) => (
+                <SelectItem key={year} value={year.toString()}>
+                  {year}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="pt-4 border-t border-dashed">
+          <FileSpreadsheet className="mx-auto size-8 text-muted-foreground" />
+          <p className="mt-3 text-sm text-muted-foreground">Export Excel des commandes de travaux (.xlsx ou .xls)</p>
+          <input ref={inputRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) void handleFile(file); }} />
+          <Button className="mt-4" disabled={busy} onClick={() => inputRef.current?.click()}><Upload className="size-4" /> Choisir le fichier</Button>
+        </div>
       </div>
       {busy || message ? <div className="space-y-2"><Progress value={progress} /><p className="text-sm text-muted-foreground">{message}</p></div> : null}
       {error ? <p className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">{error}</p> : null}
