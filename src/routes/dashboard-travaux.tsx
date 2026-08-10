@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis, Legend } from "recharts";
-import { AlertTriangle, ArrowDownUp, FilterX, LayoutDashboard, ListFilter, RotateCcw, Search, Upload, Wrench, MapPin, History, ChevronRight } from "lucide-react";
+import { AlertTriangle, ArrowDownUp, FilterX, LayoutDashboard, ListFilter, RotateCcw, Search, Upload, Wrench, MapPin, History, ChevronRight, Info, Building2, Calendar, FileText, User, Euro, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -83,6 +83,7 @@ function DashboardTravauxPage() {
   // États Modales
   const [drilldownSector, setDrilldownSector] = useState<string | null>(null);
   const [selectedModif, setSelectedModif] = useState<HistoriqueTravaux | null>(null);
+  const [selectedDetail, setSelectedDetail] = useState<Commande | null>(null);
   const [versionChoice, setVersionChoice] = useState<"A" | "B">("B");
 
   const options = useMemo(() => {
@@ -101,7 +102,7 @@ function DashboardTravauxPage() {
       const matchesProg = (isProg && progFilter.prog) || (!isProg && progFilter.hors);
       const matchesSect = selectedSectors.includes(sect);
       const matchesTranche = selectedTranche === "Toutes" || row.tranche_code === selectedTranche;
-      const matchesSearch = !search || [row.numero_commande, row.adresse, row.descriptif, row.fournisseur].some(v => text(v).toLowerCase().includes(search.toLowerCase()));
+      const matchesSearch = !search || [row.numero_commande, row.adresse, row.descriptif, row.fournisseur, row.numero_fournisseur].some(v => text(v).toLowerCase().includes(search.toLowerCase()));
 
       return matchesYear && matchesProg && matchesSect && matchesTranche && matchesSearch;
     });
@@ -329,7 +330,6 @@ function DashboardTravauxPage() {
               {dataHeatmap.map(([city, val], idx) => {
                 const max = dataHeatmap[0]?.[1] || 1;
                 const pct = (val / max) * 100;
-                // Nuancier Bleu (bas) -> Rouge (élevé)
                 const color = pct > 70 ? 'bg-red-500' : pct > 30 ? 'bg-blue-500' : 'bg-blue-200';
                 return (
                   <div key={city} className="group relative">
@@ -401,6 +401,8 @@ function DashboardTravauxPage() {
               <thead className="bg-slate-50 border-b text-slate-400 font-black uppercase tracking-widest">
                 <tr>
                   <th className="p-4 w-10">ACT.</th>
+                  <th className="p-4">N° Commande</th>
+                  <th className="p-4">Entreprise</th>
                   <th className="p-4">Tranche</th>
                   <th className="p-4">Adresse</th>
                   <th className="p-4">Descriptif</th>
@@ -433,6 +435,13 @@ function DashboardTravauxPage() {
                         )}
                       </td>
                       <td className="p-4 font-black text-blue-600">
+                        <button onClick={() => setSelectedDetail(row)} className="hover:underline flex items-center gap-1">
+                          {row.numero_commande}
+                          <Info className="size-3 opacity-0 group-hover:opacity-100 transition-opacity" />
+                        </button>
+                      </td>
+                      <td className="p-4 font-bold text-slate-500">{row.numero_fournisseur || "—"}</td>
+                      <td className="p-4 font-black text-slate-700">
                         <Link to="/adresses" search={{ q: "", ville: undefined, tranche: row.tranche_code || undefined, rue: undefined, adresse: undefined }} className="hover:underline">
                           {row.tranche_code || "—"}
                         </Link>
@@ -476,6 +485,146 @@ function DashboardTravauxPage() {
           </div>
         </section>
       </div>
+
+      {/* MODALE FICHE DÉTAILLÉE COMMANDE */}
+      <Dialog open={!!selectedDetail} onOpenChange={(o) => !o && setSelectedDetail(null)}>
+        <DialogContent className="max-w-4xl rounded-3xl p-0 overflow-hidden border-none shadow-2xl">
+          <div className="bg-slate-900 p-8 text-white relative">
+            <div className="flex items-center gap-4 mb-6">
+              <div className="bg-blue-600 p-3 rounded-2xl shadow-lg">
+                <FileText className="size-8" />
+              </div>
+              <div>
+                <h2 className="text-2xl font-black uppercase tracking-tighter">Fiche Commande #{selectedDetail?.numero_commande}</h2>
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em]">Détail exhaustif des travaux</p>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+              <div className="space-y-1">
+                <p className="text-[9px] font-black text-slate-500 uppercase">Secteur</p>
+                <p className="text-sm font-black">{selectedDetail ? sectorOf(selectedDetail) : "—"}</p>
+              </div>
+              <div className="space-y-1">
+                <p className="text-[9px] font-black text-slate-500 uppercase">Tranche</p>
+                <p className="text-sm font-black text-blue-400">{selectedDetail?.tranche_code || "—"}</p>
+              </div>
+              <div className="space-y-1">
+                <p className="text-[9px] font-black text-slate-500 uppercase">État</p>
+                <p className="text-sm font-black uppercase text-amber-400">{selectedDetail?.etat_travaux || selectedDetail?.etat_commande || "—"}</p>
+              </div>
+              <div className="space-y-1">
+                <p className="text-[9px] font-black text-slate-500 uppercase">Programmation</p>
+                <p className="text-sm font-black uppercase">{selectedDetail?.ligne_budget ? "Programmée" : "Hors Budget"}</p>
+              </div>
+            </div>
+          </div>
+          
+          <div className="p-8 grid grid-cols-1 md:grid-cols-2 gap-12 bg-white">
+            <div className="space-y-8">
+              <section>
+                <h3 className="flex items-center gap-2 text-xs font-black uppercase tracking-widest text-slate-400 mb-4">
+                  <Building2 className="size-4 text-blue-600" /> Informations Générales
+                </h3>
+                <div className="space-y-4">
+                  <div className="flex justify-between border-b border-slate-50 pb-2">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase">Adresse</span>
+                    <span className="text-xs font-black text-slate-700">{selectedDetail?.adresse || "—"}</span>
+                  </div>
+                  <div className="flex justify-between border-b border-slate-50 pb-2">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase">Corps d'état</span>
+                    <span className="text-xs font-black text-slate-700">{selectedDetail?.corps_etat || "—"}</span>
+                  </div>
+                  <div className="flex justify-between border-b border-slate-50 pb-2">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase">Nature analytique</span>
+                    <span className="text-xs font-black text-slate-700">{selectedDetail?.nature_analytique || "—"}</span>
+                  </div>
+                  <div className="flex justify-between border-b border-slate-50 pb-2">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase">Ligne Budget</span>
+                    <span className="text-xs font-black text-slate-700">{selectedDetail?.ligne_budget || "—"}</span>
+                  </div>
+                </div>
+              </section>
+
+              <section>
+                <h3 className="flex items-center gap-2 text-xs font-black uppercase tracking-widest text-slate-400 mb-4">
+                  <User className="size-4 text-blue-600" /> Intervenants
+                </h3>
+                <div className="space-y-4">
+                  <div className="flex justify-between border-b border-slate-50 pb-2">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase">Entreprise</span>
+                    <span className="text-xs font-black text-slate-700">{selectedDetail?.fournisseur || "—"} ({selectedDetail?.numero_fournisseur})</span>
+                  </div>
+                  <div className="flex justify-between border-b border-slate-50 pb-2">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase">Chargé d'opération</span>
+                    <span className="text-xs font-black text-slate-700">{selectedDetail?.charge_operation || "—"}</span>
+                  </div>
+                  <div className="flex justify-between border-b border-slate-50 pb-2">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase">Chargé de clientèle</span>
+                    <span className="text-xs font-black text-slate-700">{selectedDetail?.charge_clientele || "—"}</span>
+                  </div>
+                </div>
+              </section>
+            </div>
+
+            <div className="space-y-8">
+              <section>
+                <h3 className="flex items-center gap-2 text-xs font-black uppercase tracking-widest text-slate-400 mb-4">
+                  <Euro className="size-4 text-blue-600" /> Données Financières
+                </h3>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="bg-slate-50 p-4 rounded-2xl">
+                    <p className="text-[9px] font-black text-slate-400 uppercase">Budget Initial</p>
+                    <p className="text-lg font-black">{money(selectedDetail?.budget)}</p>
+                  </div>
+                  <div className="bg-blue-50 p-4 rounded-2xl border border-blue-100">
+                    <p className="text-[9px] font-black text-blue-400 uppercase">Montant Engagé</p>
+                    <p className="text-lg font-black text-blue-700">{money(selectedDetail?.engage)}</p>
+                  </div>
+                  <div className="bg-slate-50 p-4 rounded-2xl">
+                    <p className="text-[9px] font-black text-slate-400 uppercase">Montant Payé</p>
+                    <p className="text-lg font-black">{money(selectedDetail?.paye)}</p>
+                  </div>
+                  <div className="bg-slate-50 p-4 rounded-2xl">
+                    <p className="text-[9px] font-black text-slate-400 uppercase">Solde Restant</p>
+                    <p className="text-lg font-black">{money(selectedDetail?.solde)}</p>
+                  </div>
+                </div>
+              </section>
+
+              <section>
+                <h3 className="flex items-center gap-2 text-xs font-black uppercase tracking-widest text-slate-400 mb-4">
+                  <Calendar className="size-4 text-blue-600" /> Calendrier & Suivi
+                </h3>
+                <div className="space-y-4">
+                  <div className="flex justify-between border-b border-slate-50 pb-2">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase">Date Démarrage</span>
+                    <span className="text-xs font-black text-slate-700">{selectedDetail?.date_demarrage || "—"}</span>
+                  </div>
+                  <div className="flex justify-between border-b border-slate-50 pb-2">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase">Date Fin Travaux</span>
+                    <span className="text-xs font-black text-slate-700">{selectedDetail?.date_fin_travaux || "—"}</span>
+                  </div>
+                  <div className="flex justify-between border-b border-slate-50 pb-2">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase">Support Com.</span>
+                    <span className="text-xs font-black text-slate-700">{selectedDetail?.support_communication || "—"}</span>
+                  </div>
+                </div>
+              </section>
+            </div>
+          </div>
+          
+          <div className="p-8 bg-slate-50 border-t">
+            <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Descriptif complet</h3>
+            <p className="text-xs text-slate-600 leading-relaxed font-medium bg-white p-4 rounded-2xl border border-slate-200">
+              {selectedDetail?.descriptif || "Aucun descriptif renseigné pour cette commande."}
+            </p>
+          </div>
+
+          <DialogFooter className="p-6 bg-white">
+            <Button onClick={() => setSelectedDetail(null)} className="w-full bg-slate-900 font-black text-xs uppercase tracking-widest rounded-2xl h-12">FERMER LA FICHE</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* MODALE DRILL-DOWN SECTEUR */}
       <Dialog open={!!drilldownSector} onOpenChange={(o) => !o && setDrilldownSector(null)}>

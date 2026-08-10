@@ -44,7 +44,9 @@ export type ParsedTravaux = {
 type Raw = Record<string, unknown>;
 const text = (value: unknown) => {
   if (value === null || value === undefined) return null;
-  const result = String(value).trim();
+  let result = String(value).trim();
+  // Suppression du guillemet simple au début (souvent présent dans Excel pour forcer le texte)
+  if (result.startsWith("'")) result = result.substring(1);
   return result === "" || result === "..." ? null : result;
 };
 const number = (value: unknown) => {
