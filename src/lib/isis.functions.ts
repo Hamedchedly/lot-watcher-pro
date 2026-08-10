@@ -226,9 +226,25 @@ export const getTravaux = createServerFn({ method: "POST" })
       .order("date_travaux", { ascending: false, nullsFirst: false })
       .in("tranche_code", trancheCodes);
 
-    const travauxResults =
+    // Récupération des commandes de travaux (issues des imports Excel)
+    const commandesSelect = "id, tranche_code, lot_code, batiment, descriptif, engage, date_demarrage, etat_travaux, corps_etat";
+    let commandesQuery = supabaseAdmin
+      .from("travaux_commandes")
+      .select(commandesSelect)
+      .eq("actif", true)
+      .order("date_demarrage", { ascending: false, nullsFirst: false });
+    
+    if (data.niveau === "tranche" && data.trancheCode) {
+      commandesQuery = commandesQuery.eq("tranche_code", data.trancheCode);
+    } else if (data.niveau === "lot" && data.lotCode) {
+      commandesQuery = commandesQuery.eq("lot_code", data.lotCode);
+    } else if (data.niveau === "ville") {
+      commandesQuery = commandesQuery.in("tranche_code", trancheCodes);
+    }
+
+    const [travauxResults, commandesResult] = await Promise.all([
       data.niveau === "lot"
-        ? await Promise.all([
+        ? Promise.all([
             travauxParTranche,
             supabaseAdmin
               .from("travaux")
@@ -236,18 +252,38 @@ export const getTravaux = createServerFn({ method: "POST" })
               .order("date_travaux", { ascending: false, nullsFirst: false })
               .eq("lot_code", data.lotCode!),
           ])
-        : [await travauxParTranche];
-    const travauxErrors = travauxResults.filter((result) => result.error);
-    const firstTravauxError = travauxErrors[0]?.error;
-    if (firstTravauxError) throw new Error(firstTravauxError.message);
+        : Promise.all([travauxParTranche]),
+      commandesQuery
+    ]);
 
-    const travaux = [
+    const travauxErrors = travauxResults.filter((result) => result.error);
+    if (travauxErrors[0]?.error) throw new Error(travauxErrors[0].error.message);
+    if (commandesResult.error) throw new Error(commandesResult.error.message);
+
+    const baseTravaux = [
       ...new Map(
         travauxResults
           .flatMap((result) => result.data ?? [])
           .map((travail) => [travail.id, travail]),
       ).values(),
     ];
+
+    // Conversion des commandes au format "travaux" pour l'affichage
+    const commandesTravaux = (commandesResult.data ?? []).map(c => ({
+      id: c.id,
+      niveau: c.lot_code ? "lot" : "tranche",
+      tranche_code: c.tranche_code,
+      batiment: c.batiment,
+      lot_code: c.lot_code,
+      libelle: c.descriptif || `Commande ${c.corps_etat || ""}`,
+      statut: c.etat_travaux || "En cours",
+      date_travaux: c.date_demarrage,
+      cout: c.engage,
+      note: `Commande importée - Corps d'état: ${c.corps_etat || "N/A"}`,
+      is_commande: true
+    }));
+
+    const travaux = [...baseTravaux, ...commandesTravaux];
 
     const lotsByCode = new Map(lots.map((lot) => [lot.code_patrimoine, lot]));
     return travaux
