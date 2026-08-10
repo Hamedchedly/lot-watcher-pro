@@ -20,6 +20,7 @@ import { z } from "zod";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -38,6 +39,7 @@ import {
   type LotItem,
   type TravauxScope,
 } from "@/lib/isis.functions";
+import { estGarage } from "@/lib/adresses";
 
 const searchSchema = z.object({
   q: z.string().optional(),
@@ -70,9 +72,17 @@ function AdressesPage() {
 
   type AdresseTree = Record<string, Record<string, Record<string, LotItem[]>>>;
 
+  const [showGarages, setShowGarages] = useState(false);
+
+  // Lots affichés : garages et boxes masqués par défaut (codes ER.G / types PAR/GAR/BOX/MOT).
+  const visibleLots = useMemo(
+    () => ((data as LotItem[]) ?? []).filter((lot) => showGarages || !estGarage(lot)),
+    [data, showGarages],
+  );
+
   const hierarchy = useMemo(() => {
-    if (!data) return null;
-    const lots = data as LotItem[];
+    if (!visibleLots.length) return null;
+    const lots = visibleLots;
 
     // Groupement hiérarchique
     const tree: AdresseTree = {};
@@ -87,7 +97,7 @@ function AdressesPage() {
       tree[v][t][r].push(lot);
     });
     return tree;
-  }, [data]);
+  }, [visibleLots]);
 
   const [selectedLot, setSelectedLot] = useState<LotItem | null>(null);
   const [selectedLocataire, setSelectedLocataire] = useState<LotItem | null>(null);
@@ -146,7 +156,14 @@ function AdressesPage() {
             <Building2 className="size-5 text-primary" />
             <h1 className="text-lg font-semibold leading-tight">Patrimoine</h1>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="flex cursor-pointer select-none items-center gap-2 text-xs font-medium text-muted-foreground">
+              <Checkbox
+                checked={showGarages}
+                onCheckedChange={(checked) => setShowGarages(checked === true)}
+              />
+              Afficher les garages
+            </label>
             <div className="relative w-64">
               <Search className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
               <Input
@@ -235,10 +252,10 @@ function AdressesPage() {
                   <table className="w-full border-collapse text-left text-sm">
                     <thead className="border-b bg-muted/50 font-medium text-muted-foreground">
                       <tr>
-                        <th className="px-4 py-3">Ville</th>
-                        <th className="px-4 py-3">Tranches</th>
-                        <th className="px-4 py-3">Lots</th>
-                        <th className="px-4 py-3 text-right">Actions</th>
+                        <th className="w-full px-4 py-3">Ville</th>
+                        <th className="whitespace-nowrap px-4 py-3">Tranches</th>
+                        <th className="whitespace-nowrap px-4 py-3">Lots</th>
+                        <th className="whitespace-nowrap px-4 py-3 text-right">Actions</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y">
@@ -247,7 +264,7 @@ function AdressesPage() {
                           <td className="px-4 py-3 font-medium">
                             <button
                               onClick={() => navigate({ search: { ville: row.ville } })}
-                              className="flex items-center gap-2 text-primary hover:underline"
+                              className="flex w-full items-center gap-2 text-left text-primary hover:underline"
                             >
                               <MapPin className="size-4 shrink-0" /> {row.ville}
                             </button>
@@ -294,10 +311,10 @@ function AdressesPage() {
                   <table className="w-full border-collapse text-left text-sm">
                     <thead className="border-b bg-muted/50 font-medium text-muted-foreground">
                       <tr>
-                        <th className="px-4 py-3">Tranche</th>
-                        <th className="px-4 py-3">Adresses</th>
-                        <th className="px-4 py-3">Lots</th>
-                        <th className="px-4 py-3 text-right">Actions</th>
+                        <th className="w-full px-4 py-3">Tranche</th>
+                        <th className="whitespace-nowrap px-4 py-3">Adresses</th>
+                        <th className="whitespace-nowrap px-4 py-3">Lots</th>
+                        <th className="whitespace-nowrap px-4 py-3 text-right">Actions</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y">
@@ -306,7 +323,7 @@ function AdressesPage() {
                           <td className="px-4 py-3 font-medium">
                             <button
                               onClick={() => navigate({ search: { ville, tranche: row.code } })}
-                              className="flex items-center gap-2 text-primary hover:underline"
+                              className="flex w-full items-center gap-2 text-left text-primary hover:underline"
                             >
                               <Building2 className="size-4 shrink-0" /> {row.code}
                             </button>
@@ -353,9 +370,9 @@ function AdressesPage() {
                   <table className="w-full border-collapse text-left text-sm">
                     <thead className="border-b bg-muted/50 font-medium text-muted-foreground">
                       <tr>
-                        <th className="px-4 py-3">Adresse</th>
-                        <th className="px-4 py-3">Lots</th>
-                        <th className="px-4 py-3 text-right">Actions</th>
+                        <th className="w-full px-4 py-3">Adresse</th>
+                        <th className="whitespace-nowrap px-4 py-3">Lots</th>
+                        <th className="whitespace-nowrap px-4 py-3 text-right">Actions</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y">
@@ -366,7 +383,7 @@ function AdressesPage() {
                               onClick={() =>
                                 navigate({ search: { ville, tranche, rue: row.adresse } })
                               }
-                              className="flex items-center gap-2 text-primary hover:underline"
+                              className="flex w-full items-center gap-2 text-left text-primary hover:underline"
                             >
                               <MapPin className="size-4 shrink-0" /> {row.adresse}
                             </button>
@@ -405,26 +422,26 @@ function AdressesPage() {
                     {rue ? ` · ${rue}` : q ? ` · recherche « ${q} »` : ""}
                   </h2>
                   <span className="text-xs text-muted-foreground">
-                    {(data as LotItem[]).length} lot{(data as LotItem[]).length > 1 ? "s" : ""}
+                    {visibleLots.length} lot{visibleLots.length > 1 ? "s" : ""}
                   </span>
                 </header>
                 <div className="overflow-x-auto">
                   <table className="w-full border-collapse text-left text-sm">
                     <thead className="border-b bg-muted/50 font-medium text-muted-foreground">
                       <tr>
-                        <th className="px-4 py-3">Lot</th>
-                        <th className="px-4 py-3">Bâtiment / Porte</th>
-                        <th className="px-4 py-3">Locataire</th>
-                        <th className="px-4 py-3 text-right">Actions</th>
+                        <th className="w-full px-4 py-3">Lot</th>
+                        <th className="whitespace-nowrap px-4 py-3">Bâtiment / Porte</th>
+                        <th className="whitespace-nowrap px-4 py-3">Locataire</th>
+                        <th className="whitespace-nowrap px-4 py-3 text-right">Actions</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y">
-                      {(data as LotItem[]).map((lot) => (
+                      {visibleLots.map((lot) => (
                         <tr key={lot.code_patrimoine} className="hover:bg-muted/50 transition-colors">
                           <td className="px-4 py-3 font-medium">
                             <button
                               onClick={() => setSelectedLot(lot)}
-                              className="text-primary hover:underline"
+                              className="flex w-full items-center gap-2 text-left text-primary hover:underline"
                             >
                               {lot.code_patrimoine}
                             </button>
@@ -766,14 +783,6 @@ function TravauxList({ scope }: { scope: TravauxScope }) {
                     {travail.batiment ? ` · Bât. ${travail.batiment}` : ""}
                   </span>
                   <span>
-                    {travail.is_commande && (
-                      <Badge
-                        variant="outline"
-                        className="mr-2 bg-blue-50 text-blue-600 border-blue-200 text-[9px] font-black uppercase py-0 px-1"
-                      >
-                        commande importée
-                      </Badge>
-                    )}
                     {travail.date_travaux ? formatDate(travail.date_travaux) : "Date non précisée"}
                   </span>
                   <span className="font-semibold text-foreground">

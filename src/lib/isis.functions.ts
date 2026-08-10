@@ -225,9 +225,21 @@ export const getAdresses = createServerFn({ method: "POST" })
     if (data.rue) query = query.ilike("adresse", `%${data.rue}%`);
     if (data.adresse) query = query.eq("adresse", data.adresse);
 
-    const { data: rows, error } = await query.order("code_patrimoine");
-    if (error) throw new Error(error.message);
-    return rows ?? [];
+    // PostgREST plafonne chaque requête à 1000 lignes : on pagine par blocs.
+    const results: LotItem[] = [];
+    const PAGE = 1000;
+    let from = 0;
+    for (;;) {
+      const { data: rows, error } = await query
+        .order("code_patrimoine")
+        .range(from, from + PAGE - 1);
+      if (error) throw new Error(error.message);
+      if (!rows?.length) break;
+      results.push(...(rows as LotItem[]));
+      if (rows.length < PAGE) break;
+      from += PAGE;
+    }
+    return results;
   });
 
 export const travauxScopeSchema = z.object({
@@ -283,7 +295,7 @@ export const getTravaux = createServerFn({ method: "POST" })
 
     // Récupération des commandes de travaux (issues des imports Excel)
     const commandesSelect =
-      "id, tranche_code, lot_code, batiment, descriptif, engage, date_demarrage, etat_travaux, corps_etat";
+      "id, tranche_code, lot_code, batiment, adresse, descriptif, engage, date_demarrage, etat_travaux, corps_etat";
     let commandesQuery = supabaseAdmin
       .from("travaux_commandes")
       .select(commandesSelect)
@@ -326,7 +338,10 @@ export const getTravaux = createServerFn({ method: "POST" })
 
     // Conversion des commandes au format "travaux" pour l'affichage
     const commandesTravaux = (commandesResult.data ?? []).map((c) => {
-      const corps_etat = c.corps_etat?.toLowerCase() || "";
+      const corps_etat = (c.corps_etat ?? "")
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "");
       let type = "GT";
       if (["electricite", "couvertures", "halls", "cages"].some((k) => corps_etat.includes(k)))
         type = "GE";
@@ -343,11 +358,13 @@ export const getTravaux = createServerFn({ method: "POST" })
         tranche_code: c.tranche_code,
         batiment: c.batiment,
         lot_code: c.lot_code,
+        type,
         libelle: `[${type}] ${c.descriptif || c.corps_etat || "Commande"}`,
         statut: c.etat_travaux || "En cours",
         date_travaux: c.date_demarrage,
         cout: c.engage,
-        note: `Corps d'état: ${c.corps_etat || "N/A"}`,
+        adresse: c.adresse ?? null,
+        note: `${type}${c.corps_etat ? ` - ${c.corps_etat}` : ""}`,
         is_commande: true,
       };
     });
@@ -371,7 +388,10 @@ export const getTravaux = createServerFn({ method: "POST" })
           (data.niveau === "lot" ? lots[0] : undefined);
         return {
           ...travail,
-          adresse: lot?.adresse ?? null,
+          adresse:
+            "adresse" in travail
+              ? travail.adresse ?? lot?.adresse ?? null
+              : lot?.adresse ?? null,
           code_postal: lot?.code_postal ?? null,
           ville: lot?.ville ?? null,
           etage: lot?.etage ?? null,
