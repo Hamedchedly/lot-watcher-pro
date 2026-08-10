@@ -5,7 +5,8 @@ import path from 'path'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const PORT = process.env.PORT || 3000
-const HOST = process.env.HOST || 'localhost'
+// Railway joint le conteneur via son réseau interne : on écoute sur toutes les interfaces.
+const HOST = process.env.HOST || '0.0.0.0'
 
 // The generated Start server entry exports a fetch(request, env, ctx) handler
 // (an H3-compatible SSR entry). It must receive a standard Web `Request` with a
@@ -19,7 +20,7 @@ const server = createServer(async (req, res) => {
     for (const [key, value] of Object.entries(req.headers)) {
       headers[key] = Array.isArray(value) ? value.join(', ') : value
     }
-    const url = `http://${HOST}:${PORT}${req.url || '/'}`
+    const url = `http://localhost:${PORT}${req.url || '/'}`
     const init = { method: req.method || 'GET', headers: new Headers(headers) }
     // Node IncomingMessage is a readable stream usable as a Request body
     if (req.method && !['GET', 'HEAD'].includes(req.method)) {
@@ -42,6 +43,6 @@ const server = createServer(async (req, res) => {
   }
 })
 
-server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`)
+server.listen(PORT, HOST, () => {
+  console.log(`Server running on ${HOST}:${PORT}`)
 })

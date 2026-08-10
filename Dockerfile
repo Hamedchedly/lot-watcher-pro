@@ -1,20 +1,26 @@
 FROM node:22-alpine AS build
-
 WORKDIR /app
-RUN npm install -g pnpm
 
-COPY package.json pnpm-lock.yaml ./
-RUN pnpm install --frozen-lockfile
+# Dépendances (npm, lockfile package-lock.json)
+COPY package.json package-lock.json ./
+RUN npm ci
 
-COPY . ./
-RUN NITRO_PRESET=node-server pnpm run build
+# Sources + build Vite (SSR TanStack Start -> dist/)
+COPY . .
+RUN npm run build
 
+# Image runtime
 FROM node:22-alpine
-
 WORKDIR /app
-COPY --from=build /app/.output ./.output
-COPY --from=build /app/package.json ./
+ENV NODE_ENV=production
+
+# Dépendances de production uniquement (le bundle SSR en a besoin)
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
+
+# Build SSR + serveur d'entrée
+COPY --from=build /app/dist ./dist
+COPY server.js ./server.js
 
 EXPOSE 3000
-ENV PORT=3000
-CMD ["node", ".output/server/index.mjs"]
+CMD ["node", "server.js"]
