@@ -25,9 +25,9 @@ export const createTravauxImport = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
     const db = supabaseAdmin as any;
-    // On ne stocke pas annee_exercice dans import_travaux si la colonne n'existe pas
+    // On stocke annee_exercice dans import_travaux
     const { data: execution, error } = await db.from("import_travaux").insert({
-      fichier: data.fichier, lignes: data.lignes, doublons: data.doublons, erreurs: data.erreurs,
+      fichier: data.fichier, lignes: data.lignes, doublons: data.doublons, erreurs: data.erreurs, annee_exercice: data.annee_exercice,
     }).select("id").single();
     if (error) throw new Error(`Création de l'import : ${error.message}`);
     
@@ -63,7 +63,7 @@ export const importTravauxBatch = createServerFn({ method: "POST" })
       "nature_analytique", "corps_etat", "charge_operation", "ligne_budget", "descriptif", "budget",
       "numero_fournisseur", "fournisseur", "etat_commande", "engage", "ecart", "paye", "solde",
       "etat_travaux", "date_demarrage", "date_fin_travaux", "observations", "support_communication",
-      "date_communication", "vu_dans_import_id", "actif"
+      "date_communication", "vu_dans_import_id", "actif", "annee_exercice", "classification_programmation", "classification_secteur"
     ];
 
     for (const source of data.commandes) {
@@ -71,6 +71,7 @@ export const importTravauxBatch = createServerFn({ method: "POST" })
         ...source, 
         tranche_code: source.tranche_code && validTranches.has(source.tranche_code) ? source.tranche_code : null, 
         vu_dans_import_id: data.importId, 
+        annee_exercice: data.annee_exercice,
         actif: true,
       };
       

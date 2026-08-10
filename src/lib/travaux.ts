@@ -156,4 +156,5 @@ export const TRAVAUX_FIELDS = [
   "secteur", "tranche_code", "charge_clientele", "adresse", "nature_analytique", "corps_etat", "charge_operation", "ligne_budget",
   "descriptif", "budget", "numero_fournisseur", "fournisseur", "etat_commande", "engage", "ecart", "paye", "solde", "etat_travaux",
   "date_demarrage", "date_fin_travaux", "observations", "support_communication", "date_communication", "lot_code", "batiment",
+  "annee_exercice", "classification_programmation", "classification_secteur",
 ] as const;

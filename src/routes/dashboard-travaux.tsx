@@ -64,6 +64,7 @@ const sectorOf = (row: Commande) => {
 };
 
 const yearOf = (row: Commande) => {
+  if (row.annee_exercice) return String(row.annee_exercice);
   const date = row.date_demarrage || row.date_fin_travaux || row.date_communication;
   return date ? date.slice(0, 4) : "Sans année";
 };

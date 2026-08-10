@@ -52,6 +52,7 @@ export type Database = {
       }
       import_travaux: {
         Row: {
+          annee_exercice: number | null
           archivees: number
           creees: number
           demarre_at: string
@@ -67,6 +68,7 @@ export type Database = {
           termine_at: string | null
         }
         Insert: {
+          annee_exercice?: number | null
           archivees?: number
           creees?: number
           demarre_at?: string
@@ -82,6 +84,7 @@ export type Database = {
           termine_at?: string | null
         }
         Update: {
+          annee_exercice?: number | null
           archivees?: number
           creees?: number
           demarre_at?: string
@@ -364,10 +367,13 @@ export type Database = {
         Row: {
           actif: boolean
           adresse: string | null
+          annee_exercice: number | null
           batiment: string | null
           budget: number | null
           charge_clientele: string | null
           charge_operation: string | null
+          classification_programmation: string | null
+          classification_secteur: string | null
           corps_etat: string | null
           created_at: string
           date_communication: string | null
@@ -397,10 +403,13 @@ export type Database = {
         Insert: {
           actif?: boolean
           adresse?: string | null
+          annee_exercice?: number | null
           batiment?: string | null
           budget?: number | null
           charge_clientele?: string | null
           charge_operation?: string | null
+          classification_programmation?: string | null
+          classification_secteur?: string | null
           corps_etat?: string | null
           created_at?: string
           date_communication?: string | null
@@ -430,10 +439,13 @@ export type Database = {
         Update: {
           actif?: boolean
           adresse?: string | null
+          annee_exercice?: number | null
           batiment?: string | null
           budget?: number | null
           charge_clientele?: string | null
           charge_operation?: string | null
+          classification_programmation?: string | null
+          classification_secteur?: string | null
           corps_etat?: string | null
           created_at?: string
           date_communication?: string | null

@@ -59,6 +59,7 @@ export type ImportTravaux = {
   statut: string;
   demarre_at: string;
   termine_at: string | null;
+  annee_exercice: number | null;
 };
 
 export type TrancheDetail = {
@@ -118,7 +119,7 @@ export const updateCommandeTravaux = createServerFn({ method: "POST" })
       "nature_analytique", "corps_etat", "charge_operation", "ligne_budget", "descriptif", "budget",
       "numero_fournisseur", "fournisseur", "etat_commande", "engage", "ecart", "paye", "solde",
       "etat_travaux", "date_demarrage", "date_fin_travaux", "observations", "support_communication",
-      "date_communication"
+      "date_communication", "annee_exercice", "classification_programmation", "classification_secteur"
     ];
     
     const filteredData = Object.fromEntries(
@@ -137,7 +138,7 @@ export const getTravauxStats = createServerFn({ method: "GET" }).handler(async (
   // Agrégation par ville, secteur, programmation, etc.
   // Note: Comme on ne peut pas modifier le schéma, on fait l'agrégation sur les données brutes
   // mais on pourrait utiliser des fonctions RPC Supabase pour plus d'efficacité si besoin.
-  const { data, error } = await db.from("travaux_commandes").select("engage, budget, paye, ligne_budget, corps_etat, secteur, adresse, date_demarrage, date_fin_travaux, date_communication").eq("actif", true);
+  const { data, error } = await db.from("travaux_commandes").select("engage, budget, paye, ligne_budget, corps_etat, secteur, adresse, date_demarrage, date_fin_travaux, date_communication, annee_exercice").eq("actif", true);
   if (error) throw new Error(error.message);
   return data;
 });
