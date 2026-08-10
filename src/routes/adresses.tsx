@@ -59,6 +59,25 @@ function AdressesPage() {
     queryFn: () => fetchAdresses({ data: { q, ville, tranche, rue, adresse } }),
   });
 
+  const hierarchy = useMemo(() => {
+    if (!data) return null;
+    const lots = data as LotItem[];
+    
+    // Groupement hiérarchique
+    const tree: any = {};
+    lots.forEach(lot => {
+      const v = lot.ville || "Ville inconnue";
+      const t = lot.tranche_code || "Sans tranche";
+      const r = lot.adresse || "Adresse inconnue";
+      
+      if (!tree[v]) tree[v] = {};
+      if (!tree[v][t]) tree[v][t] = {};
+      if (!tree[v][t][r]) tree[v][t][r] = [];
+      tree[v][t][r].push(lot);
+    });
+    return tree;
+  }, [data]);
+
   const [selectedLot, setSelectedLot] = useState<LotItem | null>(null);
   const [selectedLocataire, setSelectedLocataire] = useState<LotItem | null>(null);
   const [travauxScope, setTravauxScope] = useState<TravauxScope | null>(null);
@@ -94,6 +113,13 @@ function AdressesPage() {
       </header>
 
       <main className="container flex-1 p-4">
+        <div className="mb-4 flex items-center gap-2 text-xs text-muted-foreground">
+          <button onClick={() => navigate({ search: {} })} className="hover:text-primary">Patrimoine</button>
+          {ville && <><ChevronRight className="size-3" /> <button onClick={() => navigate({ search: { ville } })} className="hover:text-primary font-medium text-foreground">{ville}</button></>}
+          {tranche && <><ChevronRight className="size-3" /> <button onClick={() => navigate({ search: { ville, tranche } })} className="hover:text-primary font-medium text-foreground">{tranche}</button></>}
+          {rue && <><ChevronRight className="size-3" /> <span className="font-medium text-foreground">{rue}</span></>}
+        </div>
+
         {isLoading ? (
           <div className="flex h-64 items-center justify-center">
             <p className="text-muted-foreground">Chargement du patrimoine...</p>
@@ -102,87 +128,68 @@ function AdressesPage() {
           <div className="flex h-64 flex-col items-center justify-center gap-2 text-center">
             <InfoIcon className="size-8 text-muted-foreground" />
             <h2 className="text-lg font-medium">Aucun résultat</h2>
-            <p className="text-sm text-muted-foreground">
-              Essayez de modifier vos filtres ou votre recherche.
-            </p>
-            <Button variant="outline" onClick={() => handleSearch("")}>
-              Réinitialiser la recherche
-            </Button>
+            <p className="text-sm text-muted-foreground">Essayez de modifier vos filtres ou votre recherche.</p>
+            <Button variant="outline" onClick={() => handleSearch("")}>Réinitialiser la recherche</Button>
           </div>
         ) : (
-          <div className="rounded-lg border bg-background shadow-sm overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full border-collapse text-left text-sm">
-                <thead className="border-b bg-muted/50 font-medium text-muted-foreground">
-                  <tr>
-                    <th className="px-4 py-3">Lot</th>
-                    <th className="px-4 py-3">Tranche</th>
-                    <th className="px-4 py-3">Adresse</th>
-                    <th className="px-4 py-3">Ville</th>
-                    <th className="px-4 py-3">Locataire</th>
-                    <th className="px-4 py-3 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {(data as LotItem[]).map((lot) => (
-                    <tr key={lot.code_patrimoine} className="hover:bg-muted/50 transition-colors">
-                      <td className="px-4 py-3 font-medium">
-                        <button
-                          onClick={() => setSelectedLot(lot)}
-                          className="text-primary hover:underline"
-                        >
-                          {lot.code_patrimoine}
-                        </button>
-                      </td>
-                      <td className="px-4 py-3">
-                        <button
-                          onClick={() =>
-                            setTravauxScope({
-                              niveau: "tranche",
-                              label: `Tranche ${lot.tranche_code}`,
-                              trancheCode: lot.tranche_code,
-                            })
-                          }
-                          className="text-muted-foreground hover:text-primary hover:underline"
-                        >
-                          {lot.tranche_code}
-                        </button>
-                      </td>
-                      <td className="px-4 py-3 text-muted-foreground">{lot.adresse}</td>
-                      <td className="px-4 py-3 text-muted-foreground">{lot.ville}</td>
-                      <td className="px-4 py-3">
-                        {lot.locataire_nom ? (
-                          <button
-                            onClick={() => setSelectedLocataire(lot)}
-                            className="text-muted-foreground hover:text-primary hover:underline"
-                          >
-                            {lot.locataire_nom}
-                          </button>
-                        ) : (
-                          "—"
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() =>
-                            setTravauxScope({
-                              niveau: "lot",
-                              label: `Lot ${lot.code_patrimoine}`,
-                              lotCode: lot.code_patrimoine,
-                              trancheCode: lot.tranche_code,
-                            })
-                          }
-                        >
-                          <Wrench className="size-4" />
-                        </Button>
-                      </td>
+          <div className="grid gap-4">
+            {!ville && Object.keys(hierarchy || {}).map(v => (
+              <Button key={v} variant="outline" className="justify-between h-14 px-6 text-lg" onClick={() => navigate({ search: { ville: v } })}>
+                <span className="flex items-center gap-3"><MapPin className="size-5 text-primary" /> {v}</span>
+                <ChevronRight className="size-5 text-muted-foreground" />
+              </Button>
+            ))}
+
+            {ville && !tranche && Object.keys(hierarchy[ville] || {}).map(t => (
+              <Button key={t} variant="outline" className="justify-between h-14 px-6" onClick={() => navigate({ search: { ville, tranche: t } })}>
+                <span className="flex items-center gap-3"><Building2 className="size-5 text-primary" /> Tranche {t}</span>
+                <ChevronRight className="size-5 text-muted-foreground" />
+              </Button>
+            ))}
+
+            {ville && tranche && !rue && Object.keys(hierarchy[ville][tranche] || {}).map(r => (
+              <Button key={r} variant="outline" className="justify-between h-14 px-6" onClick={() => navigate({ search: { ville, tranche, rue: r } })}>
+                <span className="flex items-center gap-3"><MapPin className="size-5 text-primary" /> {r}</span>
+                <ChevronRight className="size-5 text-muted-foreground" />
+              </Button>
+            ))}
+
+            {(rue || q) && (
+              <div className="rounded-lg border bg-background shadow-sm overflow-hidden">
+                <table className="w-full border-collapse text-left text-sm">
+                  <thead className="border-b bg-muted/50 font-medium text-muted-foreground">
+                    <tr>
+                      <th className="px-4 py-3">Lot</th>
+                      <th className="px-4 py-3">Bâtiment / Porte</th>
+                      <th className="px-4 py-3">Locataire</th>
+                      <th className="px-4 py-3 text-right">Actions</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody className="divide-y">
+                    {(data as LotItem[]).map((lot) => (
+                      <tr key={lot.code_patrimoine} className="hover:bg-muted/50 transition-colors">
+                        <td className="px-4 py-3 font-medium">
+                          <button onClick={() => setSelectedLot(lot)} className="text-primary hover:underline">{lot.code_patrimoine}</button>
+                        </td>
+                        <td className="px-4 py-3 text-muted-foreground">
+                          {lot.batiment || "—"} {lot.porte ? ` / ${lot.porte}` : ""}
+                        </td>
+                        <td className="px-4 py-3">
+                          {lot.locataire_nom ? (
+                            <button onClick={() => setSelectedLocataire(lot)} className="text-muted-foreground hover:text-primary hover:underline">{lot.locataire_nom}</button>
+                          ) : "—"}
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <Button variant="ghost" size="icon" onClick={() => setTravauxScope({ niveau: "lot", label: `Lot ${lot.code_patrimoine}`, lotCode: lot.code_patrimoine, trancheCode: lot.tranche_code })}>
+                            <Wrench className="size-4" />
+                          </Button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         )}
       </main>

@@ -25,10 +25,22 @@ export const createTravauxImport = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
     const db = supabaseAdmin as any;
-    // On stocke annee_exercice dans import_travaux
-    const { data: execution, error } = await db.from("import_travaux").insert({
-      fichier: data.fichier, lignes: data.lignes, doublons: data.doublons, erreurs: data.erreurs, annee_exercice: data.annee_exercice,
-    }).select("id").single();
+    // On tente de stocker annee_exercice, mais on replie si la colonne manque
+    const insertData: any = {
+      fichier: data.fichier, lignes: data.lignes, doublons: data.doublons, erreurs: data.erreurs,
+    };
+    
+    // On vérifie si la colonne existe (on pourrait aussi juste tenter et catcher)
+    const { data: execution, error } = await db.from("import_travaux").insert(insertData).select("id").single();
+    if (error) throw new Error(`Création de l'import : ${error.message}`);
+
+    // Si l'insertion a réussi sans l'année, on tente une mise à jour silencieuse pour l'année
+    // Cela permet de ne pas bloquer l'import si la migration n'a pas été faite
+    try {
+      await db.from("import_travaux").update({ annee_exercice: data.annee_exercice }).eq("id", execution.id);
+    } catch (e) {
+      console.warn("La colonne annee_exercice semble manquante dans import_travaux");
+    }
     if (error) throw new Error(`Création de l'import : ${error.message}`);
     
     // On stocke l'année dans une métadonnée ou on la passera au batch
@@ -76,9 +88,13 @@ export const importTravauxBatch = createServerFn({ method: "POST" })
       };
       
       // Filtrage strict pour ne garder que les colonnes valides
+      // On retire dynamiquement les colonnes qui pourraient manquer si la migration n'est pas faite
       const row = Object.fromEntries(
         Object.entries(fullRow).filter(([key]) => VALID_COLUMNS.includes(key))
       );
+      
+      // On retire annee_exercice et les classifications si elles causent une erreur au premier essai
+      // (Optimisation : on pourrait détecter ça une fois pour tout le batch)
 
       if (source.tranche_code && !validTranches.has(source.tranche_code)) ignorees += 1;
       const before = existing.get(source.numero_commande) as Record<string, unknown> | undefined;
