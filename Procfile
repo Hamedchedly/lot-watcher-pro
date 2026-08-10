@@ -1,1 +1,1 @@
-web: npm run start
+web: node .output/server/index.mjs
