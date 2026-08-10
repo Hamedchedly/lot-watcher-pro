@@ -29,7 +29,7 @@ const dateYear = (value: unknown) => value ? String(value).slice(0, 4) : null;
 const text = (value: unknown) => value == null ? "" : String(value);
 const sectorOf = (row: Commande) => {
   const value = `${text(row.secteur)} ${text(row.corps_etat)}`.toLowerCase();
-  if (row.secteur && SECTEURS.includes(row.secteur)) return row.secteur;
+  if (row.secteur && (SECTEURS as readonly string[]).includes(row.secteur)) return row.secteur;
   if (/maconner|isolation|espace ext|divers/.test(value)) return "GT";
   if (/electric|couverture|hall|cage/.test(value)) return "GE";
   if (/plomberie|menuiser|toiture|fermeture|etanche/.test(value)) return "CP";
