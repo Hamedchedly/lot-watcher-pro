@@ -7,10 +7,34 @@ import { ArrowLeft } from "lucide-react";
 import { getAdressesGeo, geocodeAdresses } from "@/lib/geo.functions";
 import { cleAdresse, entreeDe, type LotItem } from "@/lib/adresses";
 
+type GoogleLatLng = { lat: number; lng: number };
+type GoogleLatLngBounds = {
+  extend: (point: GoogleLatLng) => void;
+  getCenter: () => GoogleLatLng;
+};
+type GoogleMap = {
+  fitBounds: (bounds: GoogleLatLngBounds) => void;
+  setCenter: (center: GoogleLatLng) => void;
+  setZoom: (zoom: number) => void;
+};
+type GoogleMarker = {
+  addListener: (event: string, cb: () => void) => void;
+  setMap: (map: GoogleMap | null) => void;
+};
+type GoogleInfoWindow = {
+  close: () => void;
+};
+type GoogleMaps = {
+  Map: new (el: HTMLElement, opts: Record<string, unknown>) => GoogleMap;
+  Marker: new (opts: Record<string, unknown>) => GoogleMarker;
+  InfoWindow: new () => GoogleInfoWindow;
+  LatLngBounds: new () => GoogleLatLngBounds;
+};
+
 declare global {
   interface Window {
     __initPatrimoineMap?: () => void;
-    google?: any;
+    google?: { maps?: GoogleMaps };
   }
 }
 
@@ -36,9 +60,9 @@ function loadMapsApi(): Promise<void> {
 export function PatrimoineMap({ lots }: { lots: LotItem[] }) {
   const navigate = useNavigate({ from: "/" });
   const divRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<any>(null);
-  const markersRef = useRef<any[]>([]);
-  const infoRef = useRef<any>(null);
+  const mapRef = useRef<GoogleMap | null>(null);
+  const markersRef = useRef<GoogleMarker[]>([]);
+  const infoRef = useRef<GoogleInfoWindow | null>(null);
   const [ready, setReady] = useState(false);
   const [ville, setVille] = useState<string | null>(null);
 
@@ -149,27 +173,28 @@ export function PatrimoineMap({ lots }: { lots: LotItem[] }) {
   useEffect(() => {
     if (!ready || !divRef.current || !window.google?.maps) return;
     const g = window.google;
+    const maps = g.maps!;
     if (!mapRef.current) {
-      mapRef.current = new g.maps.Map(divRef.current, {
+      mapRef.current = new maps.Map(divRef.current, {
         center: { lat: 48.84, lng: 2.75 },
         zoom: 9,
         mapTypeControl: false,
         streetViewControl: false,
       });
     }
-    if (!infoRef.current) infoRef.current = new g.maps.InfoWindow();
+    if (!infoRef.current) infoRef.current = new maps.InfoWindow();
 
     markersRef.current.forEach((m) => m.setMap(null));
     markersRef.current = [];
     infoRef.current.close();
 
-    const bounds = new g.maps.LatLngBounds();
+    const bounds = new maps.LatLngBounds();
     let n = 0;
 
     if (!ville) {
       for (const v of villes) {
         const position = { lat: v.lat / v.n, lng: v.lng / v.n };
-        const marker = new g.maps.Marker({
+        const marker = new maps.Marker({
           position,
           map: mapRef.current,
           title: `${v.ville} — ${v.adresses} adresses · ${v.lots} lots`,
@@ -185,7 +210,7 @@ export function PatrimoineMap({ lots }: { lots: LotItem[] }) {
         const point = connues.get(a.cle);
         if (!point?.lat || !point?.lng) continue;
         const position = { lat: point.lat, lng: point.lng };
-        const marker = new g.maps.Marker({
+        const marker = new maps.Marker({
           position,
           map: mapRef.current,
           title: `${a.adresse} — ${a.lots} lots`,

@@ -59,17 +59,19 @@ function AdressesPage() {
     queryFn: () => fetchAdresses({ data: { q, ville, tranche, rue, adresse } }),
   });
 
+  type AdresseTree = Record<string, Record<string, Record<string, LotItem[]>>>;
+
   const hierarchy = useMemo(() => {
     if (!data) return null;
     const lots = data as LotItem[];
-    
+
     // Groupement hiérarchique
-    const tree: any = {};
-    lots.forEach(lot => {
+    const tree: AdresseTree = {};
+    lots.forEach((lot) => {
       const v = lot.ville || "Ville inconnue";
       const t = lot.tranche_code || "Sans tranche";
       const r = lot.adresse || "Adresse inconnue";
-      
+
       if (!tree[v]) tree[v] = {};
       if (!tree[v][t]) tree[v][t] = {};
       if (!tree[v][t][r]) tree[v][t][r] = [];
@@ -114,10 +116,37 @@ function AdressesPage() {
 
       <main className="container flex-1 p-4">
         <div className="mb-4 flex items-center gap-2 text-xs text-muted-foreground">
-          <button onClick={() => navigate({ search: {} })} className="hover:text-primary">Patrimoine</button>
-          {ville && <><ChevronRight className="size-3" /> <button onClick={() => navigate({ search: { ville } })} className="hover:text-primary font-medium text-foreground">{ville}</button></>}
-          {tranche && <><ChevronRight className="size-3" /> <button onClick={() => navigate({ search: { ville, tranche } })} className="hover:text-primary font-medium text-foreground">{tranche}</button></>}
-          {rue && <><ChevronRight className="size-3" /> <span className="font-medium text-foreground">{rue}</span></>}
+          <button onClick={() => navigate({ search: {} })} className="hover:text-primary">
+            Patrimoine
+          </button>
+          {ville && (
+            <>
+              <ChevronRight className="size-3" />{" "}
+              <button
+                onClick={() => navigate({ search: { ville } })}
+                className="hover:text-primary font-medium text-foreground"
+              >
+                {ville}
+              </button>
+            </>
+          )}
+          {tranche && (
+            <>
+              <ChevronRight className="size-3" />{" "}
+              <button
+                onClick={() => navigate({ search: { ville, tranche } })}
+                className="hover:text-primary font-medium text-foreground"
+              >
+                {tranche}
+              </button>
+            </>
+          )}
+          {rue && (
+            <>
+              <ChevronRight className="size-3" />{" "}
+              <span className="font-medium text-foreground">{rue}</span>
+            </>
+          )}
         </div>
 
         {isLoading ? (
@@ -128,31 +157,62 @@ function AdressesPage() {
           <div className="flex h-64 flex-col items-center justify-center gap-2 text-center">
             <InfoIcon className="size-8 text-muted-foreground" />
             <h2 className="text-lg font-medium">Aucun résultat</h2>
-            <p className="text-sm text-muted-foreground">Essayez de modifier vos filtres ou votre recherche.</p>
-            <Button variant="outline" onClick={() => handleSearch("")}>Réinitialiser la recherche</Button>
+            <p className="text-sm text-muted-foreground">
+              Essayez de modifier vos filtres ou votre recherche.
+            </p>
+            <Button variant="outline" onClick={() => handleSearch("")}>
+              Réinitialiser la recherche
+            </Button>
           </div>
         ) : (
           <div className="grid gap-4">
-            {!ville && Object.keys(hierarchy || {}).map(v => (
-              <Button key={v} variant="outline" className="justify-between h-14 px-6 text-lg" onClick={() => navigate({ search: { ville: v } })}>
-                <span className="flex items-center gap-3"><MapPin className="size-5 text-primary" /> {v}</span>
-                <ChevronRight className="size-5 text-muted-foreground" />
-              </Button>
-            ))}
+            {!ville &&
+              Object.keys(hierarchy || {}).map((v) => (
+                <Button
+                  key={v}
+                  variant="outline"
+                  className="justify-between h-14 px-6 text-lg"
+                  onClick={() => navigate({ search: { ville: v } })}
+                >
+                  <span className="flex items-center gap-3">
+                    <MapPin className="size-5 text-primary" /> {v}
+                  </span>
+                  <ChevronRight className="size-5 text-muted-foreground" />
+                </Button>
+              ))}
 
-            {ville && !tranche && Object.keys(hierarchy[ville] || {}).map(t => (
-              <Button key={t} variant="outline" className="justify-between h-14 px-6" onClick={() => navigate({ search: { ville, tranche: t } })}>
-                <span className="flex items-center gap-3"><Building2 className="size-5 text-primary" /> Tranche {t}</span>
-                <ChevronRight className="size-5 text-muted-foreground" />
-              </Button>
-            ))}
+            {ville &&
+              !tranche &&
+              Object.keys(hierarchy?.[ville] || {}).map((t) => (
+                <Button
+                  key={t}
+                  variant="outline"
+                  className="justify-between h-14 px-6"
+                  onClick={() => navigate({ search: { ville, tranche: t } })}
+                >
+                  <span className="flex items-center gap-3">
+                    <Building2 className="size-5 text-primary" /> Tranche {t}
+                  </span>
+                  <ChevronRight className="size-5 text-muted-foreground" />
+                </Button>
+              ))}
 
-            {ville && tranche && !rue && Object.keys(hierarchy[ville][tranche] || {}).map(r => (
-              <Button key={r} variant="outline" className="justify-between h-14 px-6" onClick={() => navigate({ search: { ville, tranche, rue: r } })}>
-                <span className="flex items-center gap-3"><MapPin className="size-5 text-primary" /> {r}</span>
-                <ChevronRight className="size-5 text-muted-foreground" />
-              </Button>
-            ))}
+            {ville &&
+              tranche &&
+              !rue &&
+              Object.keys(hierarchy?.[ville]?.[tranche] || {}).map((r) => (
+                <Button
+                  key={r}
+                  variant="outline"
+                  className="justify-between h-14 px-6"
+                  onClick={() => navigate({ search: { ville, tranche, rue: r } })}
+                >
+                  <span className="flex items-center gap-3">
+                    <MapPin className="size-5 text-primary" /> {r}
+                  </span>
+                  <ChevronRight className="size-5 text-muted-foreground" />
+                </Button>
+              ))}
 
             {(rue || q) && (
               <div className="rounded-lg border bg-background shadow-sm overflow-hidden">
@@ -169,18 +229,41 @@ function AdressesPage() {
                     {(data as LotItem[]).map((lot) => (
                       <tr key={lot.code_patrimoine} className="hover:bg-muted/50 transition-colors">
                         <td className="px-4 py-3 font-medium">
-                          <button onClick={() => setSelectedLot(lot)} className="text-primary hover:underline">{lot.code_patrimoine}</button>
+                          <button
+                            onClick={() => setSelectedLot(lot)}
+                            className="text-primary hover:underline"
+                          >
+                            {lot.code_patrimoine}
+                          </button>
                         </td>
                         <td className="px-4 py-3 text-muted-foreground">
                           {lot.batiment || "—"} {lot.porte ? ` / ${lot.porte}` : ""}
                         </td>
                         <td className="px-4 py-3">
                           {lot.locataire_nom ? (
-                            <button onClick={() => setSelectedLocataire(lot)} className="text-muted-foreground hover:text-primary hover:underline">{lot.locataire_nom}</button>
-                          ) : "—"}
+                            <button
+                              onClick={() => setSelectedLocataire(lot)}
+                              className="text-muted-foreground hover:text-primary hover:underline"
+                            >
+                              {lot.locataire_nom}
+                            </button>
+                          ) : (
+                            "—"
+                          )}
                         </td>
                         <td className="px-4 py-3 text-right">
-                          <Button variant="ghost" size="icon" onClick={() => setTravauxScope({ niveau: "lot", label: `Lot ${lot.code_patrimoine}`, lotCode: lot.code_patrimoine, trancheCode: lot.tranche_code })}>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() =>
+                              setTravauxScope({
+                                niveau: "lot",
+                                label: `Lot ${lot.code_patrimoine}`,
+                                lotCode: lot.code_patrimoine,
+                                trancheCode: lot.tranche_code,
+                              })
+                            }
+                          >
                             <Wrench className="size-4" />
                           </Button>
                         </td>
@@ -235,7 +318,10 @@ function FicheLogement({ lot, onClose }: { lot: LotItem | null; onClose: () => v
                 <Info label="Bâtiment" value={lot.batiment} />
                 <Info label="Étage / Porte" value={`${lot.etage || "—"} / ${lot.porte || "—"}`} />
                 <Info label="Type de lot" value={typeLotLabel(lot.type_lot)} />
-                <Info label="Surface" value={lot.surface_utile ? `${lot.surface_utile} m²` : null} />
+                <Info
+                  label="Surface"
+                  value={lot.surface_utile ? `${lot.surface_utile} m²` : null}
+                />
                 <Info label="DPE" value={lot.dpe} />
               </dl>
             </div>
@@ -376,13 +462,7 @@ type TravailRow = {
   is_commande?: boolean;
 };
 
-function TravauxDialog({
-  scope,
-  onClose,
-}: {
-  scope: TravauxScope | null;
-  onClose: () => void;
-}) {
+function TravauxDialog({ scope, onClose }: { scope: TravauxScope | null; onClose: () => void }) {
   return (
     <Dialog open={!!scope} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
@@ -427,7 +507,9 @@ function TravauxList({ scope }: { scope: TravauxScope }) {
     if (!data) return null;
     const groups: Record<string, TravailRow[]> = {};
     (data as TravailRow[]).forEach((t) => {
-      const year = t.date_travaux ? new Date(t.date_travaux).getFullYear().toString() : "Année non précisée";
+      const year = t.date_travaux
+        ? new Date(t.date_travaux).getFullYear().toString()
+        : "Année non précisée";
       if (!groups[year]) groups[year] = [];
       groups[year].push(t);
     });
@@ -439,8 +521,10 @@ function TravauxList({ scope }: { scope: TravauxScope }) {
   }, [data]);
 
   if (isLoading) return <p className="text-sm text-muted-foreground">Chargement des travaux…</p>;
-  if (isError) return <p className="text-sm text-destructive">Impossible de charger les travaux.</p>;
-  if (!data?.length) return <p className="text-sm text-muted-foreground">Aucun travail enregistré.</p>;
+  if (isError)
+    return <p className="text-sm text-destructive">Impossible de charger les travaux.</p>;
+  if (!data?.length)
+    return <p className="text-sm text-muted-foreground">Aucun travail enregistré.</p>;
 
   return (
     <div className="space-y-6">
@@ -459,22 +543,31 @@ function TravauxList({ scope }: { scope: TravauxScope }) {
                 <div className="grid gap-1 text-xs text-muted-foreground sm:grid-cols-2">
                   <span>
                     {travail.adresse || "Adresse non précisée"}
-                    {travail.etage || travail.porte ? ` · ${travail.etage || "—"} / ${travail.porte || "—"}` : ""}
+                    {travail.etage || travail.porte
+                      ? ` · ${travail.etage || "—"} / ${travail.porte || "—"}`
+                      : ""}
                   </span>
                   <span>
-                    {travail.tranche_code ? `Tranche ${travail.tranche_code}` : "Tranche non précisée"}
+                    {travail.tranche_code
+                      ? `Tranche ${travail.tranche_code}`
+                      : "Tranche non précisée"}
                     {travail.batiment ? ` · Bât. ${travail.batiment}` : ""}
                   </span>
                   <span>
                     {travail.is_commande && (
-                      <Badge variant="outline" className="mr-2 bg-blue-50 text-blue-600 border-blue-200 text-[9px] font-black uppercase py-0 px-1">
+                      <Badge
+                        variant="outline"
+                        className="mr-2 bg-blue-50 text-blue-600 border-blue-200 text-[9px] font-black uppercase py-0 px-1"
+                      >
                         commande importée
                       </Badge>
                     )}
                     {travail.date_travaux ? formatDate(travail.date_travaux) : "Date non précisée"}
                   </span>
                   <span className="font-semibold text-foreground">
-                    {new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(travail.cout || 0)}
+                    {new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(
+                      travail.cout || 0,
+                    )}
                   </span>
                 </div>
                 {travail.note && (

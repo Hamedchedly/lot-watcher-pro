@@ -24,7 +24,6 @@ export function estGarage(lot: Pick<LotItem, "code_patrimoine" | "type_lot">) {
 
 export const collator = new Intl.Collator("fr", { numeric: true, sensitivity: "base" });
 
-
 /** « 25-27  RUE DE RUZE » → « RUE DE RUZE » : on retire le numéro pour regrouper la rue. */
 export function rueDe(adresse: string | null) {
   const a = (adresse ?? "").replace(/\s+/g, " ").trim();
@@ -59,9 +58,7 @@ export function loadRecents(): RecentAdresse[] {
 
 export function pushRecent(entry: Omit<RecentAdresse, "at">) {
   if (typeof window === "undefined") return;
-  const others = loadRecents().filter(
-    (r) => !(r.rue === entry.rue && r.ville === entry.ville),
-  );
+  const others = loadRecents().filter((r) => !(r.rue === entry.rue && r.ville === entry.ville));
   const next = [{ ...entry, at: Date.now() }, ...others].slice(0, 5);
   window.localStorage.setItem(RECENTS_KEY, JSON.stringify(next));
 }

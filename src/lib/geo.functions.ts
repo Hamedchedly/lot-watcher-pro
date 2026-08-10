@@ -18,7 +18,7 @@ const inputSchema = z.object({
 
 /** Geocode a small batch of addresses and update the database cache. */
 export const geocodeAdresses = createServerFn({ method: "POST" })
-  .inputValidator((d: unknown) => inputSchema.parse(d))
+  .validator((d: unknown) => inputSchema.parse(d))
   .handler(async ({ data }) => {
     const mapsKey = process.env["GOOGLE_MAPS_API_KEY"];
     if (!mapsKey) throw new Error("GOOGLE_MAPS_API_KEY is missing");

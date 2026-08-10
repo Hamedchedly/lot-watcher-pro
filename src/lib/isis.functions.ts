@@ -55,27 +55,23 @@ const batchSchema = z.object({
 
 /** Upsert d'un lot de lignes ISIS (rapprochement sur la clé métier). */
 export const importIsisBatch = createServerFn({ method: "POST" })
-  .inputValidator((d: unknown) => batchSchema.parse(d))
+  .validator((d: unknown) => batchSchema.parse(d))
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
 
     if (data.tranches.length) {
-      const { error } = await supabaseAdmin
-        .from("tranches")
-        .upsert(
-          data.tranches.map((t) => ({ ...t, actif: true, vu_le: data.runDate })),
-          { onConflict: "code" },
-        );
+      const { error } = await supabaseAdmin.from("tranches").upsert(
+        data.tranches.map((t) => ({ ...t, actif: true, vu_le: data.runDate })),
+        { onConflict: "code" },
+      );
       if (error) throw new Error(`tranches: ${error.message}`);
     }
 
     if (data.lots.length) {
-      const { error } = await supabaseAdmin
-        .from("lots")
-        .upsert(
-          data.lots.map((l) => ({ ...l, actif: true, vu_le: data.runDate })),
-          { onConflict: "code_patrimoine" },
-        );
+      const { error } = await supabaseAdmin.from("lots").upsert(
+        data.lots.map((l) => ({ ...l, actif: true, vu_le: data.runDate })),
+        { onConflict: "code_patrimoine" },
+      );
       if (error) throw new Error(`lots: ${error.message}`);
     }
 
@@ -91,7 +87,7 @@ export const importIsisBatch = createServerFn({ method: "POST" })
 
 /** Clôture de l'import : marque comme sorties de patrimoine les lignes absentes du dernier export. */
 export const finalizeIsisImport = createServerFn({ method: "POST" })
-  .inputValidator((d: unknown) =>
+  .validator((d: unknown) =>
     z.object({ runDate: z.string(), fichier: z.string(), lignes: z.number() }).parse(d),
   )
   .handler(async ({ data }) => {
@@ -175,7 +171,7 @@ const occupantsSchema = z.object({ lotCode: z.string().min(1).max(64) });
 
 /** Occupants enregistrés pour un lot (fiche locataire). */
 export const getOccupants = createServerFn({ method: "POST" })
-  .inputValidator((d: unknown) => occupantsSchema.parse(d))
+  .validator((d: unknown) => occupantsSchema.parse(d))
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
     const { data: rows, error } = await supabaseAdmin
@@ -197,13 +193,15 @@ const searchAdressesSchema = z.object({
 
 /** Recherche filtrée dans le patrimoine (lots). */
 export const getAdresses = createServerFn({ method: "POST" })
-  .inputValidator((d: unknown) => searchAdressesSchema.parse(d))
+  .validator((d: unknown) => searchAdressesSchema.parse(d))
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
     let query = supabaseAdmin.from("lots").select("*").eq("actif", true);
 
     if (data.q) {
-      query = query.or(`code_patrimoine.ilike.%${data.q}%,adresse.ilike.%${data.q}%,locataire_nom.ilike.%${data.q}%`);
+      query = query.or(
+        `code_patrimoine.ilike.%${data.q}%,adresse.ilike.%${data.q}%,locataire_nom.ilike.%${data.q}%`,
+      );
     }
     if (data.ville) query = query.eq("ville", data.ville);
     if (data.tranche) query = query.eq("tranche_code", data.tranche);
@@ -227,7 +225,7 @@ export type TravauxScope = z.infer<typeof travauxScopeSchema>;
 
 /** Travaux d'un périmètre patrimoine, enrichis avec les informations du lot concerné. */
 export const getTravaux = createServerFn({ method: "POST" })
-  .inputValidator((d: unknown) => travauxScopeSchema.parse(d))
+  .validator((d: unknown) => travauxScopeSchema.parse(d))
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
     let lotsQuery = supabaseAdmin
@@ -237,7 +235,10 @@ export const getTravaux = createServerFn({ method: "POST" })
 
     if (data.niveau === "ville") {
       if (!data.ville) return [];
-      lotsQuery = data.ville === "Ville inconnue" ? lotsQuery.is("ville", null) : lotsQuery.eq("ville", data.ville);
+      lotsQuery =
+        data.ville === "Ville inconnue"
+          ? lotsQuery.is("ville", null)
+          : lotsQuery.eq("ville", data.ville);
     } else if (data.niveau === "tranche") {
       if (!data.trancheCode) return [];
       lotsQuery = lotsQuery.eq("tranche_code", data.trancheCode);
@@ -260,13 +261,14 @@ export const getTravaux = createServerFn({ method: "POST" })
       .in("tranche_code", trancheCodes);
 
     // Récupération des commandes de travaux (issues des imports Excel)
-    const commandesSelect = "id, tranche_code, lot_code, batiment, descriptif, engage, date_demarrage, etat_travaux, corps_etat";
+    const commandesSelect =
+      "id, tranche_code, lot_code, batiment, descriptif, engage, date_demarrage, etat_travaux, corps_etat";
     let commandesQuery = supabaseAdmin
       .from("travaux_commandes")
       .select(commandesSelect)
       .eq("actif", true)
       .order("date_demarrage", { ascending: false, nullsFirst: false });
-    
+
     if (data.niveau === "tranche" && data.trancheCode) {
       commandesQuery = commandesQuery.eq("tranche_code", data.trancheCode);
     } else if (data.niveau === "lot" && data.lotCode) {
@@ -286,7 +288,7 @@ export const getTravaux = createServerFn({ method: "POST" })
               .eq("lot_code", data.lotCode!),
           ])
         : Promise.all([travauxParTranche]),
-      commandesQuery
+      commandesQuery,
     ]);
 
     const travauxErrors = travauxResults.filter((result) => result.error);
@@ -302,11 +304,17 @@ export const getTravaux = createServerFn({ method: "POST" })
     ];
 
     // Conversion des commandes au format "travaux" pour l'affichage
-    const commandesTravaux = (commandesResult.data ?? []).map(c => {
+    const commandesTravaux = (commandesResult.data ?? []).map((c) => {
       const corps_etat = c.corps_etat?.toLowerCase() || "";
       let type = "GT";
-      if (["electricite", "couvertures", "halls", "cages"].some(k => corps_etat.includes(k))) type = "GE";
-      if (["plomberie", "menuiseries", "toitures", "fermetures", "etancheite"].some(k => corps_etat.includes(k))) type = "CP";
+      if (["electricite", "couvertures", "halls", "cages"].some((k) => corps_etat.includes(k)))
+        type = "GE";
+      if (
+        ["plomberie", "menuiseries", "toitures", "fermetures", "etancheite"].some((k) =>
+          corps_etat.includes(k),
+        )
+      )
+        type = "CP";
 
       return {
         id: c.id,
@@ -319,7 +327,7 @@ export const getTravaux = createServerFn({ method: "POST" })
         date_travaux: c.date_demarrage,
         cout: c.engage,
         note: `Corps d'état: ${c.corps_etat || "N/A"}`,
-        is_commande: true
+        is_commande: true,
       };
     });
 
@@ -336,7 +344,8 @@ export const getTravaux = createServerFn({ method: "POST" })
         );
       })
       .map((travail) => {
-        const lot = (travail.lot_code ? lotsByCode.get(travail.lot_code) : undefined) ??
+        const lot =
+          (travail.lot_code ? lotsByCode.get(travail.lot_code) : undefined) ??
           lots.find((item) => item.batiment === travail.batiment) ??
           (data.niveau === "lot" ? lots[0] : undefined);
         return {

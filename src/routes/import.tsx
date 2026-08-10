@@ -98,7 +98,8 @@ function ImportPage() {
           <h1 className="text-2xl font-semibold tracking-tight">Import ISIS</h1>
           <p className="text-sm text-muted-foreground">
             Déposez l'export complet. Les lignes connues sont mises à jour, les nouvelles créées, et
-            celles absentes de l'export sont marquées sorties de patrimoine sans perdre l'historique.
+            celles absentes de l'export sont marquées sorties de patrimoine sans perdre
+            l'historique.
           </p>
         </div>
         <Button asChild variant="outline">

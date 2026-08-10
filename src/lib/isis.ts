@@ -217,7 +217,6 @@ export const TYPE_LOT_LABELS: Record<string, string> = {
   FOY: "Foyer",
 };
 
-export const typeLotLabel = (t: string | null) =>
-  t ? (TYPE_LOT_LABELS[t] ?? t) : "—";
+export const typeLotLabel = (t: string | null) => (t ? (TYPE_LOT_LABELS[t] ?? t) : "—");
 
 export const isLogement = (t: string | null) => !!t && /^\d+$/.test(t);

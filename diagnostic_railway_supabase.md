@@ -5,20 +5,20 @@
 
 ## Conclusion
 
-Le service Railway est marqué **Online**, mais l’application ne fonctionne pas : le domaine public renvoie actuellement **HTTP 404**. La cause immédiate est une détection erronée du projet comme **site Vite statique**. Railway copie le dossier `dist` puis démarre Caddy, alors que l’application est une application TanStack Start avec SSR et *server functions*. Le dashboard dépend précisément de ces fonctions serveur ; il ne peut donc pas fonctionner comme un simple site statique.[1]
+Le service Railway est marqué **Online**, mais l’application ne fonctionne pas : le domaine public renvoie actuellement **HTTP 404**. La cause immédiate est une détection erronée du projet comme **site Vite statique**. Railway copie le dossier `dist` puis démarre Caddy, alors que l’application est une application TanStack Start avec SSR et _server functions_. Le dashboard dépend précisément de ces fonctions serveur ; il ne peut donc pas fonctionner comme un simple site statique.[1]
 
 Un second défaut bloquera le rétablissement tant qu’il n’est pas corrigé : les variables `EXT_SUPABASE_URL` et `EXT_SUPABASE_SERVICE_ROLE_KEY`, que le dashboard utilise explicitement, ne sont pas configurées sur Railway. En outre, le schéma Supabase de production ne contient pas trois colonnes aujourd’hui attendues par le code. La connexion Supabase elle-même est saine et les données ne sont pas perdues à l’instant du contrôle : **65 commandes actives**, **0 archivée** et **120 tranches actives** ont été lues avec succès.
 
 > **Priorité immédiate :** ne pas relancer un import de données avant d’avoir corrigé le schéma et la stratégie d’archivage. Le code actuel peut désactiver toutes les commandes absentes d’un import partiel.
 
-| Élément | État vérifié | Conséquence |
-|---|---:|---|
-| Domaine Railway | HTTP 404 | L’application est inaccessible au public. |
-| Déploiement Railway | Réussi techniquement, mais en mode Vite/Caddy statique | Les fonctions serveur et le SSR ne sont pas exécutés. |
-| Variables Supabase Railway | 5 variables présentes, `EXT_*` absentes | Le dashboard échouera dès qu’il sera exécuté côté serveur. |
-| Supabase externe | Connexion de lecture réussie | La base répond et contient les données contrôlées. |
-| Schéma Supabase | 3 colonnes attendues absentes | Imports et fonctions de dashboard partiellement incompatibles. |
-| Import récent | 93 lignes par fichier, mais 0 création/modification | Le fichier répété paraît inchangé ; des erreurs antérieures restent à expliquer. |
+| Élément                    |                                           État vérifié | Conséquence                                                                      |
+| -------------------------- | -----------------------------------------------------: | -------------------------------------------------------------------------------- |
+| Domaine Railway            |                                               HTTP 404 | L’application est inaccessible au public.                                        |
+| Déploiement Railway        | Réussi techniquement, mais en mode Vite/Caddy statique | Les fonctions serveur et le SSR ne sont pas exécutés.                            |
+| Variables Supabase Railway |                5 variables présentes, `EXT_*` absentes | Le dashboard échouera dès qu’il sera exécuté côté serveur.                       |
+| Supabase externe           |                           Connexion de lecture réussie | La base répond et contient les données contrôlées.                               |
+| Schéma Supabase            |                          3 colonnes attendues absentes | Imports et fonctions de dashboard partiellement incompatibles.                   |
+| Import récent              |    93 lignes par fichier, mais 0 création/modification | Le fichier répété paraît inchangé ; des erreurs antérieures restent à expliquer. |
 
 ## 1. Pourquoi Railway ne fonctionne plus
 
@@ -30,7 +30,7 @@ Les journaux du dernier déploiement indiquent que Railway a détecté le projet
 
 Le domaine `https://patrimoine-s11-production.up.railway.app/` retourne **404**, ce qui concorde avec les journaux réseau du conteneur Caddy. Railway ne lance donc pas le serveur Nitro/TanStack Start. Cette détection est favorisée par l’absence de script `start` dans le `package.json` et par le script de build qui copie `.output` vers `dist`.
 
-Or l’application n’est pas purement statique. Le fichier `src/routes/dashboard-travaux.tsx` appelle `getTravauxDashboard`, une *server function*, et les fonctions correspondantes lisent Supabase côté serveur. Railway précise qu’une application TanStack Start doit être déployée comme un service Node exécutant le serveur généré, et non comme un hébergement statique.[1]
+Or l’application n’est pas purement statique. Le fichier `src/routes/dashboard-travaux.tsx` appelle `getTravauxDashboard`, une _server function_, et les fonctions correspondantes lisent Supabase côté serveur. Railway précise qu’une application TanStack Start doit être déployée comme un service Node exécutant le serveur généré, et non comme un hébergement statique.[1]
 
 ### Deuxième défaut à traiter avant tout redéploiement Node
 
@@ -42,12 +42,12 @@ TypeError: __exportAll is not a function
 
 L’erreur provient d’un cycle de modules dans les artefacts SSR générés. Elle est indépendante du 404 actuel, mais elle empêchera le fonctionnement dès que Railway lancera réellement le serveur Node. Le simple changement du mode de déploiement ne suffira donc pas : l’empaquetage SSR et les versions TanStack/Lovable devront être stabilisés avant mise en production.
 
-| Preuve | Observation | Diagnostic |
-|---|---|---|
-| Journaux de build Railway | Détection « vite static site », sortie `dist`, démarrage Caddy | Mauvais type de service pour TanStack Start. |
-| Journaux réseau Railway | Requête `GET /` avec statut 404 | Le domaine fonctionne, mais aucun serveur d’application ne répond. |
-| Test HTTP externe | `GET /` → 404 | Symptôme reproductible hors de Railway. |
-| Test Node local | Le processus écoute, mais `/` → 500 avec `__exportAll` | Défaut SSR supplémentaire à corriger. |
+| Preuve                    | Observation                                                    | Diagnostic                                                         |
+| ------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------ |
+| Journaux de build Railway | Détection « vite static site », sortie `dist`, démarrage Caddy | Mauvais type de service pour TanStack Start.                       |
+| Journaux réseau Railway   | Requête `GET /` avec statut 404                                | Le domaine fonctionne, mais aucun serveur d’application ne répond. |
+| Test HTTP externe         | `GET /` → 404                                                  | Symptôme reproductible hors de Railway.                            |
+| Test Node local           | Le processus écoute, mais `/` → 500 avec `__exportAll`         | Défaut SSR supplémentaire à corriger.                              |
 
 ## 2. Variables Railway : écart avec les besoins du code
 
@@ -55,14 +55,14 @@ Les variables présentes dans Railway sont : `GOOGLE_MAPS_API_KEY`, `SUPABASE_SE
 
 En revanche, le dashboard travaux utilise le client `src/integrations/supabase-ext/client.server.ts`, qui exige exactement `EXT_SUPABASE_URL` et `EXT_SUPABASE_SERVICE_ROLE_KEY`. Ces deux variables ne sont pas présentes dans le service Railway. Par ailleurs, le client serveur standard attend `SUPABASE_URL`, qui est également absent.
 
-| Variable attendue par le code | Présente sur Railway | Usage | Action requise |
-|---|---:|---|---|
-| `EXT_SUPABASE_URL` | Non | Dashboard et import travaux, côté serveur | Ajouter l’URL du projet Supabase externe. |
-| `EXT_SUPABASE_SERVICE_ROLE_KEY` | Non | Dashboard et import travaux, côté serveur | Ajouter la clé de rôle service correspondante, sans l’exposer au navigateur. |
-| `SUPABASE_URL` | Non | Client serveur standard / authentification | Ajouter si les routes associées sont utilisées. |
-| `SUPABASE_SERVICE_ROLE_KEY` | Oui | Client serveur standard | Conserver, puis vérifier qu’elle correspond à `SUPABASE_URL`. |
-| `VITE_SUPABASE_URL` | Oui | Client navigateur | Conserver ; cette variable est intégrée au build. |
-| `VITE_SUPABASE_PUBLISHABLE_KEY` | Oui | Client navigateur | Conserver ; ne pas utiliser une clé service côté navigateur. |
+| Variable attendue par le code   | Présente sur Railway | Usage                                      | Action requise                                                               |
+| ------------------------------- | -------------------: | ------------------------------------------ | ---------------------------------------------------------------------------- |
+| `EXT_SUPABASE_URL`              |                  Non | Dashboard et import travaux, côté serveur  | Ajouter l’URL du projet Supabase externe.                                    |
+| `EXT_SUPABASE_SERVICE_ROLE_KEY` |                  Non | Dashboard et import travaux, côté serveur  | Ajouter la clé de rôle service correspondante, sans l’exposer au navigateur. |
+| `SUPABASE_URL`                  |                  Non | Client serveur standard / authentification | Ajouter si les routes associées sont utilisées.                              |
+| `SUPABASE_SERVICE_ROLE_KEY`     |                  Oui | Client serveur standard                    | Conserver, puis vérifier qu’elle correspond à `SUPABASE_URL`.                |
+| `VITE_SUPABASE_URL`             |                  Oui | Client navigateur                          | Conserver ; cette variable est intégrée au build.                            |
+| `VITE_SUPABASE_PUBLISHABLE_KEY` |                  Oui | Client navigateur                          | Conserver ; ne pas utiliser une clé service côté navigateur.                 |
 
 Les valeurs doivent être saisies dans Railway depuis les paramètres sécurisés du projet. Il ne faut ni les commiter dans Git ni les insérer dans un script public. Les variables préfixées par `VITE_` sont accessibles au code client ; les clés de rôle service ne doivent jamais recevoir ce préfixe.[1]
 
@@ -70,17 +70,17 @@ Les valeurs doivent être saisies dans Railway depuis les paramètres sécurisé
 
 L’audit a utilisé le client externe configuré localement, en lecture seule, avec l’en-tête compatible avec le format de clé Supabase actuel. La connexion au projet `zpkfwsczrtadrhcounof.supabase.co` a réussi.
 
-| Indicateur lu | Résultat |
-|---|---:|
-| Commandes travaux totales | 65 |
-| Commandes actives (`actif = true`) | 65 |
-| Commandes archivées (`actif = false`) | 0 |
-| Tranches actives | 120 |
-| Imports récents visibles | 7 |
-| Fichier d’import récent | `Suivi_Travaux_Secteur_ER_HCHEDLY_2023.xlsx` |
-| Lignes déclarées par import | 93 |
-| Créations / modifications sur les quatre derniers imports | 0 / 0 |
-| Erreurs sur deux imports plus anciens du même jour | 27 puis 17 |
+| Indicateur lu                                             |                                     Résultat |
+| --------------------------------------------------------- | -------------------------------------------: |
+| Commandes travaux totales                                 |                                           65 |
+| Commandes actives (`actif = true`)                        |                                           65 |
+| Commandes archivées (`actif = false`)                     |                                            0 |
+| Tranches actives                                          |                                          120 |
+| Imports récents visibles                                  |                                            7 |
+| Fichier d’import récent                                   | `Suivi_Travaux_Secteur_ER_HCHEDLY_2023.xlsx` |
+| Lignes déclarées par import                               |                                           93 |
+| Créations / modifications sur les quatre derniers imports |                                        0 / 0 |
+| Erreurs sur deux imports plus anciens du même jour        |                                   27 puis 17 |
 
 Ces résultats montrent que **Supabase répond** et que les 65 commandes actuellement présentes sont toutes visibles pour les requêtes du dashboard, à condition que le serveur soit fonctionnel. Ils ne prouvent pas une suppression de données dans le dernier état : aucune commande n’est actuellement marquée archivée.
 
@@ -90,11 +90,11 @@ L’écart entre les **93 lignes** du fichier et les **65 commandes** présentes
 
 Trois colonnes référencées par le code sont absentes de la base de production. Chaque vérification a renvoyé le code PostgreSQL `42703` (« column does not exist »).
 
-| Table | Colonne absente | Effet dans le code |
-|---|---|---|
-| `import_travaux` | `annee_exercice` | L’année de l’import ne peut pas être enregistrée. Le code masque l’échec au lieu de l’arrêter. |
-| `travaux_commandes` | `annee_exercice` | Toute création ou modification effective contenant cette colonne peut échouer. Les imports sans changement peuvent masquer le problème. |
-| `travaux_commandes_historique` | `resolu` | Le dashboard tente un repli de lecture ; la fonction de résolution, elle, ne peut pas fonctionner correctement. |
+| Table                          | Colonne absente  | Effet dans le code                                                                                                                      |
+| ------------------------------ | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `import_travaux`               | `annee_exercice` | L’année de l’import ne peut pas être enregistrée. Le code masque l’échec au lieu de l’arrêter.                                          |
+| `travaux_commandes`            | `annee_exercice` | Toute création ou modification effective contenant cette colonne peut échouer. Les imports sans changement peuvent masquer le problème. |
+| `travaux_commandes_historique` | `resolu`         | Le dashboard tente un repli de lecture ; la fonction de résolution, elle, ne peut pas fonctionner correctement.                         |
 
 La présence de ces références dans les types et dans les fonctions d’import, sans migration correspondante dans la base, est une cause plausible des erreurs sur les imports antérieurs. C’est un constat technique solide ; l’attribution précise des 27 et 17 erreurs exigerait toutefois les réponses détaillées du lot concerné ou les anciens logs applicatifs.
 
@@ -106,12 +106,12 @@ La fonction `finalizeTravauxImport` compare **toutes** les commandes actuellemen
 
 Cela signifie qu’un import partiel, un export filtré par secteur ou un fichier limité à une année peut faire disparaître des commandes auparavant visibles. Au moment de l’audit, ce mécanisme n’a pas laissé de commandes archivées, mais il reste un risque majeur pour le prochain import.
 
-| Risque | Niveau | Mesure recommandée |
-|---|---:|---|
-| Import partiel archive des commandes hors fichier | Critique | Désactiver l’archivage automatique ou le limiter au même périmètre métier. |
-| Année d’exercice absente du schéma | Élevé | Ajouter les colonnes avant le prochain import. |
-| Régression non détectée par l’utilisateur | Élevé | Prévisualiser le nombre de lignes à archiver et exiger une confirmation explicite. |
-| Historique sans statut de résolution | Moyen | Ajouter `resolu` avec une valeur par défaut puis vérifier l’interface de résolution. |
+| Risque                                            |   Niveau | Mesure recommandée                                                                   |
+| ------------------------------------------------- | -------: | ------------------------------------------------------------------------------------ |
+| Import partiel archive des commandes hors fichier | Critique | Désactiver l’archivage automatique ou le limiter au même périmètre métier.           |
+| Année d’exercice absente du schéma                |    Élevé | Ajouter les colonnes avant le prochain import.                                       |
+| Régression non détectée par l’utilisateur         |    Élevé | Prévisualiser le nombre de lignes à archiver et exiger une confirmation explicite.   |
+| Historique sans statut de résolution              |    Moyen | Ajouter `resolu` avec une valeur par défaut puis vérifier l’interface de résolution. |
 
 ## 6. Plan de correction recommandé
 

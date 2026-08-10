@@ -1,19 +1,37 @@
-import express from 'express'
+import { createServer } from 'node:http'
+import { fileURLToPath } from 'node:url'
 import path from 'path'
-import { fileURLToPath } from 'url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const app = express()
 const PORT = process.env.PORT || 3000
 
-// Serve static files from dist
-app.use(express.static(path.join(__dirname, 'dist')))
+async function createHandler() {
+  const { default: entry } = await import('./dist/server/server.js')
+  return entry.fetch.bind(entry)
+}
 
-// SPA fallback: send index.html for all non-file routes
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'dist', 'index.html'))
-})
+createHandler().then((handler) => {
+  const server = createServer(async (req, res) => {
+    try {
+      const response = await handler(req, {}, {})
+      const headers: Record<string, string> = {}
+      response.headers.forEach((value, key) => {
+        headers[key] = value
+      })
+      res.writeHead(response.status, headers)
+      const body = await response.text()
+      res.end(body)
+    } catch (error) {
+      console.error(error)
+      res.writeHead(500, { 'content-type': 'text/html; charset=utf-8' })
+      res.end('<!doctype html><html><body><h1>Server Error</h1></body></html>')
+    }
+  })
 
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`)
+  server.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`)
+  })
+}).catch((error) => {
+  console.error('Failed to load server entry:', error)
+  process.exit(1)
 })

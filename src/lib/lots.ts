@@ -69,10 +69,16 @@ export function statsLot(lot: Lot): LotStats {
 }
 
 export const formatEuro = (n: number) =>
-  new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(n);
+  new Intl.NumberFormat("fr-FR", {
+    style: "currency",
+    currency: "EUR",
+    maximumFractionDigits: 0,
+  }).format(n);
 
 export const formatDate = (d: string) =>
-  d ? new Date(d).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" }) : "—";
+  d
+    ? new Date(d).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" })
+    : "—";
 
 export function loadLots(): Lot[] {
   if (typeof window === "undefined") return [];
@@ -115,22 +121,70 @@ function mk(
 function seedLots(): Lot[] {
   return [
     mk("T1", "COPRO-014", "A", "E1", "0101", "Appartement T3", [
-      { libelle: "Remplacement menuiseries", statut: "realise", date: "2025-03-12", cout: 8400, note: "Double vitrage" },
-      { libelle: "Réfection salle d'eau", statut: "planifie", date: "2026-09-15", cout: 6200, note: "" },
+      {
+        libelle: "Remplacement menuiseries",
+        statut: "realise",
+        date: "2025-03-12",
+        cout: 8400,
+        note: "Double vitrage",
+      },
+      {
+        libelle: "Réfection salle d'eau",
+        statut: "planifie",
+        date: "2026-09-15",
+        cout: 6200,
+        note: "",
+      },
     ]),
     mk("T1", "COPRO-014", "A", "E1", "0102", "Appartement T2", [
-      { libelle: "Mise aux normes électrique", statut: "realise", date: "2024-11-04", cout: 3100, note: "" },
-      { libelle: "Peinture parties privatives", statut: "a_prevoir", date: "", cout: 1800, note: "Après départ locataire" },
+      {
+        libelle: "Mise aux normes électrique",
+        statut: "realise",
+        date: "2024-11-04",
+        cout: 3100,
+        note: "",
+      },
+      {
+        libelle: "Peinture parties privatives",
+        statut: "a_prevoir",
+        date: "",
+        cout: 1800,
+        note: "Après départ locataire",
+      },
     ]),
     mk("T1", "COPRO-014", "B", "E1", "0210", "Local commercial", [
-      { libelle: "Étanchéité toiture terrasse", statut: "planifie", date: "2026-06-01", cout: 14500, note: "Devis validé" },
+      {
+        libelle: "Étanchéité toiture terrasse",
+        statut: "planifie",
+        date: "2026-06-01",
+        cout: 14500,
+        note: "Devis validé",
+      },
     ]),
     mk("T2", "COPRO-027", "A", "E2", "0301", "Appartement T4", [
-      { libelle: "Chaudière individuelle", statut: "realise", date: "2025-10-22", cout: 4700, note: "Garantie 5 ans" },
-      { libelle: "Ravalement façade cour", statut: "a_prevoir", date: "", cout: 22000, note: "Vote AG à obtenir" },
+      {
+        libelle: "Chaudière individuelle",
+        statut: "realise",
+        date: "2025-10-22",
+        cout: 4700,
+        note: "Garantie 5 ans",
+      },
+      {
+        libelle: "Ravalement façade cour",
+        statut: "a_prevoir",
+        date: "",
+        cout: 22000,
+        note: "Vote AG à obtenir",
+      },
     ]),
     mk("T2", "COPRO-027", "C", "E1", "0405", "Appartement T1", [
-      { libelle: "Isolation combles", statut: "planifie", date: "2026-08-20", cout: 5300, note: "" },
+      {
+        libelle: "Isolation combles",
+        statut: "planifie",
+        date: "2026-08-20",
+        cout: 5300,
+        note: "",
+      },
     ]),
     mk("T3", "COPRO-041", "A", "E1", "0502", "Parking couvert", []),
   ];

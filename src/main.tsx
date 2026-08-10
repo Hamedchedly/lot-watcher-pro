@@ -1,15 +1,19 @@
-import React from 'react'
-import ReactDOM from 'react-dom/client'
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
-import App from './routes/__root'
-//import './index.css'
+import React from "react";
+import ReactDOM from "react-dom/client";
+import { getRouter } from "./router";
+import { RouterProvider } from "@tanstack/react-router";
 
-ReactDOM.createRoot(document.getElementById('root')!).render(
+const router = getRouter();
+
+// Register the router for maximum type safety
+declare module "@tanstack/react-router" {
+  interface Register {
+    router: typeof router;
+  }
+}
+
+ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <Router>
-      <Routes>
-        <Route path="*" element={<App />} />
-      </Routes>
-    </Router>
+    <RouterProvider router={router} />
   </React.StrictMode>,
-)
+);

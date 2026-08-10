@@ -1,5 +1,5 @@
-import { createClient } from '@supabase/supabase-js';
-import * as dotenv from 'dotenv';
+import { createClient } from "@supabase/supabase-js";
+import * as dotenv from "dotenv";
 dotenv.config();
 
 const url = process.env.EXT_SUPABASE_URL!;
@@ -9,11 +9,16 @@ const supabase = createClient(url, key);
 
 async function check() {
   console.log("Checking columns for 'import_travaux'...");
-  const { data: importCols, error: importError } = await supabase.rpc('get_table_columns', { table_name: 'import_travaux' });
-  
+  const { data: importCols, error: importError } = await supabase.rpc("get_table_columns", {
+    table_name: "import_travaux",
+  });
+
   // If RPC fails, try a direct query
-  const { data: testData, error: testError } = await supabase.from('import_travaux').select('*').limit(1);
-  
+  const { data: testData, error: testError } = await supabase
+    .from("import_travaux")
+    .select("*")
+    .limit(1);
+
   if (testError) {
     console.error("Error fetching 'import_travaux':", testError.message);
   } else {
@@ -21,7 +26,10 @@ async function check() {
   }
 
   console.log("\nChecking columns for 'travaux_commandes'...");
-  const { data: cmdData, error: cmdError } = await supabase.from('travaux_commandes').select('*').limit(1);
+  const { data: cmdData, error: cmdError } = await supabase
+    .from("travaux_commandes")
+    .select("*")
+    .limit(1);
   if (cmdError) {
     console.error("Error fetching 'travaux_commandes':", cmdError.message);
   } else {
