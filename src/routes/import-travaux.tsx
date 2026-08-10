@@ -37,11 +37,12 @@ function ImportTravauxPage() {
       setMessage("Analyse du fichier…");
       const parsed = parseTravauxWorkbook(await file.arrayBuffer());
       setPreview(parsed);
-      execution = await createImport({ data: { fichier: file.name, lignes: parsed.lignes, doublons: parsed.doublons, erreurs: parsed.erreurs.length, annee_exercice: parseInt(anneeExercice) } });
+      const importResult = await createImport({ data: { fichier: file.name, lignes: parsed.lignes, doublons: parsed.doublons, erreurs: parsed.erreurs.length, annee_exercice: parseInt(anneeExercice) } });
+      execution = { id: importResult.id };
       const parts = Array.from({ length: Math.ceil(parsed.commandes.length / 100) }, (_, index) => parsed.commandes.slice(index * 100, index * 100 + 100));
       let totals = { creees: 0, modifiees: 0, inchangees: 0, ignorees: 0 };
       for (let index = 0; index < parts.length; index += 1) {
-        const result = await runBatch({ data: { importId: execution.id, commandes: parts[index]! } });
+        const result = await runBatch({ data: { importId: importResult.id, annee_exercice: importResult.annee_exercice, commandes: parts[index]! } });
         totals = { creees: totals.creees + result.creees, modifiees: totals.modifiees + result.modifiees, inchangees: totals.inchangees + result.inchangees, ignorees: totals.ignorees + result.ignorees };
         setProgress(Math.round(((index + 1) / Math.max(parts.length, 1)) * 100));
         setMessage(`Synchronisation ${index + 1}/${parts.length} — ${parsed.commandes.length} commandes`);

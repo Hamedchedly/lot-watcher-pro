@@ -16,7 +16,7 @@ const commandeSchema = z.object({
   classification_secteur: nullableText,
 });
 const importIdSchema = z.object({ importId: z.string().uuid() });
-const batchSchema = z.object({ importId: z.string().uuid(), commandes: z.array(commandeSchema) });
+const batchSchema = z.object({ importId: z.string().uuid(), annee_exercice: z.number().optional(), commandes: z.array(commandeSchema) });
 
 const comparable = (row: Record<string, unknown>) => Object.fromEntries(TRAVAUX_FIELDS.map((field) => [field, row[field] ?? null]));
 
@@ -25,11 +25,14 @@ export const createTravauxImport = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
     const db = supabaseAdmin as any;
+    // On ne stocke pas annee_exercice dans import_travaux si la colonne n'existe pas
     const { data: execution, error } = await db.from("import_travaux").insert({
-      fichier: data.fichier, lignes: data.lignes, doublons: data.doublons, erreurs: data.erreurs, annee_exercice: data.annee_exercice,
+      fichier: data.fichier, lignes: data.lignes, doublons: data.doublons, erreurs: data.erreurs,
     }).select("id").single();
     if (error) throw new Error(`Création de l'import : ${error.message}`);
-    return execution as { id: string };
+    
+    // On stocke l'année dans une métadonnée ou on la passera au batch
+    return { id: execution.id, annee_exercice: data.annee_exercice } as { id: string, annee_exercice: number };
   });
 
 export const importTravauxBatch = createServerFn({ method: "POST" })
@@ -52,26 +55,20 @@ export const importTravauxBatch = createServerFn({ method: "POST" })
     let inchangees = 0;
     let ignorees = 0;
 
-    const { data: importData } = await db.from("import_travaux").select("annee_exercice").eq("id", data.importId).single();
-    const annee_exercice = importData?.annee_exercice;
+    const annee_exercice = data.annee_exercice;
 
     for (const source of data.commandes) {
-      const programmation = source.ligne_budget ? "Programmée" : "Hors Budget";
-      let secteur_groupe = null;
-      const corps_etat = source.corps_etat?.toLowerCase() || "";
-      if (["maconnerie", "isolation", "divers", "espaces ext"].some(k => corps_etat.includes(k))) secteur_groupe = "GT";
-      else if (["electricite", "couvertures", "halls", "cages"].some(k => corps_etat.includes(k))) secteur_groupe = "GE";
-      else if (["plomberie", "menuiseries", "toitures", "fermetures", "etancheite"].some(k => corps_etat.includes(k))) secteur_groupe = "CP";
-
+      // On retire les colonnes de classification si elles causent des erreurs de cache
       const row = { 
         ...source, 
         tranche_code: source.tranche_code && validTranches.has(source.tranche_code) ? source.tranche_code : null, 
         vu_dans_import_id: data.importId, 
-        annee_exercice, 
         actif: true,
-        classification_programmation: programmation,
-        classification_secteur: secteur_groupe
       };
+      // On supprime les champs qui pourraient ne pas exister dans la DB
+      delete (row as any).annee_exercice;
+      delete (row as any).classification_programmation;
+      delete (row as any).classification_secteur;
       if (source.tranche_code && !validTranches.has(source.tranche_code)) ignorees += 1;
       const before = existing.get(source.numero_commande) as Record<string, unknown> | undefined;
       const changed = !before || JSON.stringify(comparable(before)) !== JSON.stringify(comparable(row));

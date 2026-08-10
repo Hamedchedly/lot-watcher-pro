@@ -56,12 +56,24 @@ export const getTravauxDashboard = createServerFn({ method: "GET" }).handler(asy
   const db = supabaseAdmin as any;
   const [commandesResult, historiqueResult] = await Promise.all([
     db.from("travaux_commandes").select("*").eq("actif", true).order("engage", { ascending: false, nullsFirst: false }),
-    db.from("travaux_commandes_historique").select("*").eq("operation", "modification").order("created_at", { ascending: false }),
+    db.from("travaux_commandes_historique").select("*, travaux_commandes(numero_commande)").eq("operation", "modification").order("created_at", { ascending: false }),
   ]);
   if (commandesResult.error) throw new Error(`Chargement des commandes : ${commandesResult.error.message}`);
   if (historiqueResult.error) throw new Error(`Chargement de l'historique : ${historiqueResult.error.message}`);
   return {
     commandes: (commandesResult.data ?? []) as CommandeTravaux[],
-    historique: (historiqueResult.data ?? []) as HistoriqueTravaux[],
+    historique: (historiqueResult.data ?? []) as (HistoriqueTravaux & { travaux_commandes: { numero_commande: string } })[],
   } satisfies TravauxDashboardData;
+});
+
+export const getTravauxStats = createServerFn({ method: "GET" }).handler(async () => {
+  const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
+  const db = supabaseAdmin as any;
+  
+  // Agrégation par ville, secteur, programmation, etc.
+  // Note: Comme on ne peut pas modifier le schéma, on fait l'agrégation sur les données brutes
+  // mais on pourrait utiliser des fonctions RPC Supabase pour plus d'efficacité si besoin.
+  const { data, error } = await db.from("travaux_commandes").select("engage, budget, paye, ligne_budget, corps_etat, secteur, adresse, date_demarrage, date_fin_travaux, date_communication").eq("actif", true);
+  if (error) throw new Error(error.message);
+  return data;
 });
