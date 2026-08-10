@@ -6,15 +6,20 @@ import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer,
 import { AlertTriangle, ArrowDownUp, FilterX, Gauge, Search, Upload, Wrench } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { getTravauxDashboard, type TravauxDashboardData } from "@/lib/travaux.dashboard.functions";
+import {
+  getTravauxDashboard,
+  type CommandeTravaux,
+  type HistoriqueTravaux,
+  type TravauxDashboardData,
+} from "@/lib/travaux.dashboard.functions";
 
 export const Route = createFileRoute("/dashboard-travaux")({
   head: () => ({ meta: [{ title: "Dashboard suivi travaux" }, { name: "description", content: "Pilotage des commandes de travaux par programmation, secteur et tranche." }] }),
   component: DashboardTravauxPage,
 });
 
-type Commande = Record<string, any>;
-type History = Record<string, any>;
+type Commande = CommandeTravaux;
+type History = HistoriqueTravaux;
 const SECTEURS = ["GT", "GE", "CP"] as const;
 const SECTOR_COLORS = { GT: "#2563eb", GE: "#0f766e", CP: "#c2410c" };
 const PAGE_SIZE = 20;
