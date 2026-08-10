@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { ArrowLeft } from "lucide-react";
 
@@ -20,8 +21,9 @@ function loadMapsApi(): Promise<void> {
   return new Promise((resolve) => {
     window.__initPatrimoineMap = () => resolve();
     if (existing) return;
-    const key = import.meta.env["VITE_LOVABLE_CONNECTOR_GOOGLE_MAPS_BROWSER_KEY"];
-    const channel = import.meta.env["VITE_LOVABLE_CONNECTOR_GOOGLE_MAPS_TRACKING_ID"] ?? "";
+    const key = import.meta.env["VITE_GOOGLE_MAPS_BROWSER_KEY"];
+    if (!key) return resolve();
+    const channel = import.meta.env["VITE_GOOGLE_MAPS_CHANNEL"] ?? "";
     const s = document.createElement("script");
     s.id = "gmaps-js";
     s.async = true;
@@ -32,6 +34,7 @@ function loadMapsApi(): Promise<void> {
 
 /** Carte à deux niveaux : un pin par ville, puis les adresses exactes de la ville choisie. */
 export function PatrimoineMap({ lots }: { lots: LotItem[] }) {
+  const navigate = useNavigate({ from: "/" });
   const divRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
   const markersRef = useRef<any[]>([]);
@@ -55,8 +58,13 @@ export function PatrimoineMap({ lots }: { lots: LotItem[] }) {
       if (!l.adresse || !l.ville) continue;
       const adresse = entreeDe(l.adresse);
       const cle = cleAdresse(adresse, l.ville);
-      const g =
-        map.get(cle) ?? { cle, adresse, ville: l.ville, lots: 0, tranches: new Set<string>() };
+      const g = map.get(cle) ?? {
+        cle,
+        adresse,
+        ville: l.ville,
+        lots: 0,
+        tranches: new Set<string>(),
+      };
       g.lots += 1;
       g.tranches.add(l.tranche_code);
       map.set(cle, g);
@@ -74,12 +82,28 @@ export function PatrimoineMap({ lots }: { lots: LotItem[] }) {
   const villes = useMemo(() => {
     const map = new Map<
       string,
-      { ville: string; lots: number; tranches: Set<string>; lat: number; lng: number; n: number }
+      {
+        ville: string;
+        adresses: number;
+        lots: number;
+        tranches: Set<string>;
+        lat: number;
+        lng: number;
+        n: number;
+      }
     >();
     for (const a of adresses) {
       const point = connues.get(a.cle);
-      const g =
-        map.get(a.ville) ?? { ville: a.ville, lots: 0, tranches: new Set<string>(), lat: 0, lng: 0, n: 0 };
+      const g = map.get(a.ville) ?? {
+        ville: a.ville,
+        adresses: 0,
+        lots: 0,
+        tranches: new Set<string>(),
+        lat: 0,
+        lng: 0,
+        n: 0,
+      };
+      g.adresses += 1;
       g.lots += a.lots;
       a.tranches.forEach((t) => g.tranches.add(t));
       if (point?.lat && point?.lng) {
@@ -107,7 +131,9 @@ export function PatrimoineMap({ lots }: { lots: LotItem[] }) {
     if (!geo || manquantes.length === 0) return;
     let cancelled = false;
     (async () => {
-      const items = manquantes.slice(0, 25).map(({ cle, adresse, ville }) => ({ cle, adresse, ville }));
+      const items = manquantes
+        .slice(0, 25)
+        .map(({ cle, adresse, ville }) => ({ cle, adresse, ville }));
       try {
         await runGeocode({ data: { items } });
         if (!cancelled) await refetch();
@@ -146,8 +172,8 @@ export function PatrimoineMap({ lots }: { lots: LotItem[] }) {
         const marker = new g.maps.Marker({
           position,
           map: mapRef.current,
-          title: `${v.ville} — ${v.tranches.size} tranches · ${v.lots} lots`,
-          label: { text: String(v.lots), color: "#ffffff", fontSize: "11px" },
+          title: `${v.ville} — ${v.adresses} adresses · ${v.lots} lots`,
+          label: { text: String(v.adresses), color: "#ffffff", fontSize: "11px" },
         });
         marker.addListener("click", () => setVille(v.ville));
         markersRef.current.push(marker);
@@ -163,12 +189,19 @@ export function PatrimoineMap({ lots }: { lots: LotItem[] }) {
           position,
           map: mapRef.current,
           title: `${a.adresse} — ${a.lots} lots`,
+          label: { text: String(a.lots), color: "#ffffff", fontSize: "11px" },
         });
         marker.addListener("click", () => {
-          infoRef.current.setContent(
-            `<div style="font-size:12px"><strong>${a.adresse}</strong><br/>${a.lots} lots</div>`,
-          );
-          infoRef.current.open({ map: mapRef.current, anchor: marker });
+          void navigate({
+            to: "/adresses",
+            search: {
+              q: "",
+              ville: a.ville,
+              tranche: undefined,
+              rue: undefined,
+              adresse: a.adresse,
+            },
+          });
         });
         markersRef.current.push(marker);
         bounds.extend(position);
@@ -181,7 +214,7 @@ export function PatrimoineMap({ lots }: { lots: LotItem[] }) {
       mapRef.current.setCenter(bounds.getCenter());
       mapRef.current.setZoom(15);
     }
-  }, [ready, adresses, connues, villes, ville]);
+  }, [ready, adresses, connues, navigate, villes, ville]);
 
   const placees = adresses.filter((a) => connues.get(a.cle)?.lat).length;
 
@@ -207,4 +240,3 @@ export function PatrimoineMap({ lots }: { lots: LotItem[] }) {
     </div>
   );
 }
-

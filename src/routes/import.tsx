@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { FileSpreadsheet, Upload } from "lucide-react";
@@ -93,12 +93,17 @@ function ImportPage() {
 
   return (
     <main className="mx-auto max-w-2xl space-y-6 p-4 sm:p-8">
-      <header className="space-y-1">
-        <h1 className="text-2xl font-semibold tracking-tight">Import ISIS</h1>
-        <p className="text-sm text-muted-foreground">
-          Déposez l'export complet. Les lignes connues sont mises à jour, les nouvelles créées, et
-          celles absentes de l'export sont marquées sorties de patrimoine sans perdre l'historique.
-        </p>
+      <header className="flex items-start justify-between gap-4">
+        <div className="space-y-1">
+          <h1 className="text-2xl font-semibold tracking-tight">Import ISIS</h1>
+          <p className="text-sm text-muted-foreground">
+            Déposez l'export complet. Les lignes connues sont mises à jour, les nouvelles créées, et
+            celles absentes de l'export sont marquées sorties de patrimoine sans perdre l'historique.
+          </p>
+        </div>
+        <Button asChild variant="outline">
+          <Link to="/">Accueil</Link>
+        </Button>
       </header>
 
       <div className="rounded-xl border border-dashed bg-surface p-8 text-center">

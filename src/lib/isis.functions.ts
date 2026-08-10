@@ -184,3 +184,92 @@ export const getOccupants = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
     return rows ?? [];
   });
+
+const travauxScopeSchema = z.object({
+  niveau: z.enum(["ville", "tranche", "lot"]),
+  ville: z.string().max(160).optional(),
+  trancheCode: z.string().max(64).optional(),
+  lotCode: z.string().max(64).optional(),
+});
+
+/** Travaux d'un périmètre patrimoine, enrichis avec les informations du lot concerné. */
+export const getTravaux = createServerFn({ method: "POST" })
+  .inputValidator((d: unknown) => travauxScopeSchema.parse(d))
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    let lotsQuery = supabaseAdmin
+      .from("lots")
+      .select("code_patrimoine, tranche_code, batiment, etage, porte, adresse, code_postal, ville")
+      .eq("actif", true);
+
+    if (data.niveau === "ville") {
+      if (!data.ville) return [];
+      lotsQuery = data.ville === "Ville inconnue" ? lotsQuery.is("ville", null) : lotsQuery.eq("ville", data.ville);
+    } else if (data.niveau === "tranche") {
+      if (!data.trancheCode) return [];
+      lotsQuery = lotsQuery.eq("tranche_code", data.trancheCode);
+    } else {
+      if (!data.lotCode) return [];
+      lotsQuery = lotsQuery.eq("code_patrimoine", data.lotCode);
+    }
+
+    const { data: lots, error: lotsError } = await lotsQuery;
+    if (lotsError) throw new Error(lotsError.message);
+    if (!lots?.length) return [];
+
+    const trancheCodes = [...new Set(lots.map((lot) => lot.tranche_code))];
+    const travauxSelect =
+      "id, niveau, tranche_code, batiment, lot_code, libelle, statut, date_travaux, cout, note";
+    const travauxParTranche = supabaseAdmin
+      .from("travaux")
+      .select(travauxSelect)
+      .order("date_travaux", { ascending: false, nullsFirst: false })
+      .in("tranche_code", trancheCodes);
+
+    const travauxResults =
+      data.niveau === "lot"
+        ? await Promise.all([
+            travauxParTranche,
+            supabaseAdmin
+              .from("travaux")
+              .select(travauxSelect)
+              .order("date_travaux", { ascending: false, nullsFirst: false })
+              .eq("lot_code", data.lotCode!),
+          ])
+        : [await travauxParTranche];
+    const travauxErrors = travauxResults.filter((result) => result.error);
+    const firstTravauxError = travauxErrors[0]?.error;
+    if (firstTravauxError) throw new Error(firstTravauxError.message);
+
+    const travaux = [
+      ...new Map(
+        travauxResults
+          .flatMap((result) => result.data ?? [])
+          .map((travail) => [travail.id, travail]),
+      ).values(),
+    ];
+
+    const lotsByCode = new Map(lots.map((lot) => [lot.code_patrimoine, lot]));
+    return travaux
+      .filter((travail) => {
+        if (data.niveau !== "lot") return true;
+        return (
+          travail.lot_code === data.lotCode ||
+          (!travail.lot_code && (!travail.batiment || travail.batiment === lots[0]!.batiment)) ||
+          (travail.batiment && travail.batiment === lots[0]!.batiment)
+        );
+      })
+      .map((travail) => {
+        const lot = (travail.lot_code ? lotsByCode.get(travail.lot_code) : undefined) ??
+          lots.find((item) => item.batiment === travail.batiment) ??
+          (data.niveau === "lot" ? lots[0] : undefined);
+        return {
+          ...travail,
+          adresse: lot?.adresse ?? null,
+          code_postal: lot?.code_postal ?? null,
+          ville: lot?.ville ?? null,
+          etage: lot?.etage ?? null,
+          porte: lot?.porte ?? null,
+        };
+      });
+  });
