@@ -3,7 +3,19 @@ import { createRouter } from "@tanstack/react-router";
 import { routeTree } from "./routeTree.gen";
 
 export const getRouter = () => {
-  const queryClient = new QueryClient();
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: {
+        // Évite le re-fetch automatique à chaque retour sur l'onglet navigateur :
+        // avec les défauts de TanStack Query (staleTime: 0, refetchOnWindowFocus: true),
+        // toutes les queries étaient rejouées à chaque focus fenêtre.
+        staleTime: 1000 * 60 * 5,
+        gcTime: 1000 * 60 * 10,
+        refetchOnWindowFocus: false,
+        retry: 1,
+      },
+    },
+  });
 
   const router = createRouter({
     routeTree,
