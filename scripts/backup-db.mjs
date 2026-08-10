@@ -16,14 +16,15 @@ if (!url || !key) {
 const supabase = createClient(url, key);
 
 const TABLES = [
-  "lots",
-  "tranches",
-  "occupants",
-  "travaux",
-  "travaux_commandes",
   "travaux_commandes_historique",
+  "travaux_commandes",
+  "occupants",
+  "lots",
+  "travaux",
   "import_travaux",
+  "imports",
   "adresses_geo",
+  "tranches",
 ];
 
 // PostgREST plafonne chaque requête à 1000 lignes : on pagine par blocs.
