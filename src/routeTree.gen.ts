@@ -11,7 +11,9 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AdressesRouteImport } from './routes/adresses'
+import { Route as DashboardTravauxRouteImport } from './routes/dashboard-travaux'
 import { Route as ImportRouteImport } from './routes/import'
+import { Route as ImportTravauxRouteImport } from './routes/import-travaux'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -23,40 +25,65 @@ const AdressesRoute = AdressesRouteImport.update({
   path: '/adresses',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DashboardTravauxRoute = DashboardTravauxRouteImport.update({
+  id: '/dashboard-travaux',
+  path: '/dashboard-travaux',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ImportRoute = ImportRouteImport.update({
   id: '/import',
   path: '/import',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ImportTravauxRoute = ImportTravauxRouteImport.update({
+  id: '/import-travaux',
+  path: '/import-travaux',
   getParentRoute: () => rootRouteImport,
 } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/adresses': typeof AdressesRoute
+  '/dashboard-travaux': typeof DashboardTravauxRoute
   '/import': typeof ImportRoute
+  '/import-travaux': typeof ImportTravauxRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/adresses': typeof AdressesRoute
+  '/dashboard-travaux': typeof DashboardTravauxRoute
   '/import': typeof ImportRoute
+  '/import-travaux': typeof ImportTravauxRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/adresses': typeof AdressesRoute
+  '/dashboard-travaux': typeof DashboardTravauxRoute
   '/import': typeof ImportRoute
+  '/import-travaux': typeof ImportTravauxRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/adresses' | '/import'
+  fullPaths:
+    '/' | '/adresses' | '/dashboard-travaux' | '/import' | '/import-travaux'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/adresses' | '/import'
-  id: '__root__' | '/' | '/adresses' | '/import'
+  to: '/' | '/adresses' | '/dashboard-travaux' | '/import' | '/import-travaux'
+  id:
+    | '__root__'
+    | '/'
+    | '/adresses'
+    | '/dashboard-travaux'
+    | '/import'
+    | '/import-travaux'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdressesRoute: typeof AdressesRoute
+  DashboardTravauxRoute: typeof DashboardTravauxRoute
   ImportRoute: typeof ImportRoute
+  ImportTravauxRoute: typeof ImportTravauxRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -75,11 +102,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdressesRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/dashboard-travaux': {
+      id: '/dashboard-travaux'
+      path: '/dashboard-travaux'
+      fullPath: '/dashboard-travaux'
+      preLoaderRoute: typeof DashboardTravauxRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/import': {
       id: '/import'
       path: '/import'
       fullPath: '/import'
       preLoaderRoute: typeof ImportRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/import-travaux': {
+      id: '/import-travaux'
+      path: '/import-travaux'
+      fullPath: '/import-travaux'
+      preLoaderRoute: typeof ImportTravauxRouteImport
       parentRoute: typeof rootRouteImport
     }
   }
@@ -88,7 +129,9 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdressesRoute: AdressesRoute,
+  DashboardTravauxRoute: DashboardTravauxRoute,
   ImportRoute: ImportRoute,
+  ImportTravauxRoute: ImportTravauxRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
