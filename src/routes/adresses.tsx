@@ -1,30 +1,24 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
+import { createFileRoute } from "@tanstack/react-router";
 import {
   Building2,
   ChevronRight,
-  Layers,
+  Filter,
+  Info as InfoIcon,
   Mail,
   MapPin,
   Phone,
   Search,
-  Upload,
   User,
   Wrench,
+  Calendar,
 } from "lucide-react";
+import { z } from "zod";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import {
   Dialog,
   DialogContent,
@@ -32,490 +26,254 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Badge } from "@/components/ui/badge";
-import { getOccupants, getPatrimoine, getTravaux } from "@/lib/isis.functions";
-import { isLogement, typeLotLabel } from "@/lib/isis";
-import { collator, entreeDe, estGarage, pushRecent, rueDe, type LotItem } from "@/lib/adresses";
+import { Input } from "@/components/ui/input";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  getAdresses,
+  getOccupants,
+  getTravaux,
+  type LotItem,
+  type TravauxScope,
+} from "@/lib/isis.functions";
 
-type AdressesSearch = {
-  q: string;
-  ville: string | undefined;
-  tranche: string | undefined;
-  rue: string | undefined;
-  adresse: string | undefined;
-};
-
-type TravauxScope =
-  | { niveau: "ville"; label: string; ville: string }
-  | { niveau: "tranche"; label: string; trancheCode: string }
-  | { niveau: "lot"; label: string; lotCode: string; trancheCode: string };
+const searchSchema = z.object({
+  q: z.string().optional(),
+  ville: z.string().optional(),
+  tranche: z.string().optional(),
+  rue: z.string().optional(),
+  adresse: z.string().optional(),
+});
 
 export const Route = createFileRoute("/adresses")({
-  validateSearch: (search: Record<string, unknown>): AdressesSearch => ({
-    q: typeof search["q"] === "string" ? search["q"] : "",
-    ville:
-      typeof search["ville"] === "string" && search["ville"] !== "toutes"
-        ? search["ville"]
-        : undefined,
-    tranche: typeof search["tranche"] === "string" ? search["tranche"] : undefined,
-    rue: typeof search["rue"] === "string" ? search["rue"] : undefined,
-    adresse: typeof search["adresse"] === "string" ? search["adresse"] : undefined,
-  }),
-  head: () => ({
-    meta: [
-      { title: "Patrimoine par ville, tranche et adresse" },
-      {
-        name: "description",
-        content:
-          "Parcourez le patrimoine ville par ville : tranches, adresses puis lots, avec fiche locataire et filtre garages.",
-      },
-      { property: "og:title", content: "Patrimoine par ville, tranche et adresse" },
-      {
-        property: "og:description",
-        content: "Navigation ville → tranche → adresse → lot avec fiches locataires.",
-      },
-      { property: "og:type", content: "website" },
-      { name: "twitter:card", content: "summary" },
-    ],
-  }),
+  validateSearch: searchSchema,
   component: AdressesPage,
-  errorComponent: ({ error }) => (
-    <p role="alert" className="p-8 text-center text-sm text-destructive">
-      {error.message}
-    </p>
-  ),
-  notFoundComponent: () => <p className="p-8 text-center text-sm">Aucune adresse.</p>,
 });
 
 function AdressesPage() {
   const { q, ville, tranche, rue, adresse } = Route.useSearch();
-  const navigate = useNavigate({ from: Route.fullPath });
-  const setSearch = (patch: Partial<AdressesSearch>) =>
-    navigate({ search: (prev: AdressesSearch) => ({ ...prev, ...patch }) });
+  const navigate = Route.useNavigate();
+  const fetchAdresses = useServerFn(getAdresses);
 
-  const fetchPatrimoine = useServerFn(getPatrimoine);
   const { data, isLoading } = useQuery({
-    queryKey: ["patrimoine"],
-    queryFn: () => fetchPatrimoine(),
+    queryKey: ["adresses", q, ville, tranche, rue, adresse],
+    queryFn: () => fetchAdresses({ data: { q, ville, tranche, rue, adresse } }),
   });
 
-  const [fiche, setFiche] = useState<LotItem | null>(null);
-  const [ficheLogement, setFicheLogement] = useState<LotItem | null>(null);
+  const [selectedLot, setSelectedLot] = useState<LotItem | null>(null);
+  const [selectedLocataire, setSelectedLocataire] = useState<LotItem | null>(null);
   const [travauxScope, setTravauxScope] = useState<TravauxScope | null>(null);
 
-  const lots = (data?.lots ?? []) as LotItem[];
-  const libelles = useMemo(
-    () => new Map((data?.tranches ?? []).map((t) => [t.code, t.libelle ?? ""])),
-    [data],
-  );
-
-  const filtres = useMemo(() => {
-    const needle = q.trim().toLowerCase();
-    return lots.filter((l) => {
-      if (estGarage(l)) return false;
-      if (!needle) return true;
-      return [l.code_patrimoine, l.adresse, l.ville, l.locataire_nom, l.tranche_code]
-        .join(" ")
-        .toLowerCase()
-        .includes(needle);
-    });
-  }, [lots, q]);
-
-  const villes = useMemo(() => {
-    const map = new Map<string, { lots: LotItem[]; tranches: Set<string> }>();
-    for (const l of filtres) {
-      const v = l.ville ?? "Ville inconnue";
-      const g = map.get(v) ?? { lots: [], tranches: new Set<string>() };
-      g.lots.push(l);
-      g.tranches.add(l.tranche_code);
-      map.set(v, g);
-    }
-    return [...map.entries()].sort((a, b) => collator.compare(a[0], b[0]));
-  }, [filtres]);
-
-  const dansVille = useMemo(
-    () => (ville ? filtres.filter((l) => (l.ville ?? "Ville inconnue") === ville) : []),
-    [filtres, ville],
-  );
-
-  const tranches = useMemo(() => {
-    const map = new Map<string, LotItem[]>();
-    for (const l of dansVille) map.set(l.tranche_code, [...(map.get(l.tranche_code) ?? []), l]);
-    return [...map.entries()].sort((a, b) => collator.compare(a[0], b[0]));
-  }, [dansVille]);
-
-  const dansTranche = useMemo(
-    () => (tranche ? dansVille.filter((l) => l.tranche_code === tranche) : []),
-    [dansVille, tranche],
-  );
-
-  const rues = useMemo(() => {
-    const map = new Map<string, LotItem[]>();
-    for (const l of dansTranche) {
-      const r = rueDe(l.adresse);
-      map.set(r, [...(map.get(r) ?? []), l]);
-    }
-    return [...map.entries()].sort((a, b) => collator.compare(a[0], b[0]));
-  }, [dansTranche]);
-
-  const lotsAffiches = useMemo(
-    () =>
-      (adresse
-        ? filtres.filter((l) => entreeDe(l.adresse) === adresse)
-        : rue
-          ? dansTranche.filter((l) => rueDe(l.adresse) === rue)
-          : []
-      ).sort(
-        (a, b) =>
-          collator.compare(a.adresse ?? "", b.adresse ?? "") ||
-          collator.compare(a.etage ?? "", b.etage ?? "") ||
-          collator.compare(a.code_patrimoine, b.code_patrimoine),
-      ),
-    [adresse, dansTranche, filtres, rue],
-  );
-
-  const niveau = adresse
-    ? "lots"
-    : !ville
-      ? "villes"
-      : !tranche
-        ? "tranches"
-        : !rue
-          ? "rues"
-          : "lots";
+  const handleSearch = (val: string) => {
+    navigate({ search: (prev) => ({ ...prev, q: val || undefined }) });
+  };
 
   return (
-    <div className="min-h-screen bg-background">
-      <header className="border-b bg-card">
-        <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-3 px-4 py-4 sm:px-6">
-          <div className="mr-auto">
-            <h1 className="text-lg font-semibold leading-tight">Patrimoine</h1>
-            <p className="text-sm text-muted-foreground">Ville → tranche → adresse → lot</p>
+    <div className="flex min-h-screen flex-col bg-muted/30">
+      <header className="sticky top-0 z-10 border-b bg-background/80 backdrop-blur">
+        <div className="container flex h-14 items-center justify-between px-4">
+          <div className="flex items-center gap-2">
+            <Building2 className="size-5 text-primary" />
+            <h1 className="text-lg font-semibold tracking-tight">Patrimoine</h1>
           </div>
-          <Button asChild variant="outline">
-            <Link to="/">Accueil</Link>
-          </Button>
-          <Button asChild variant="outline">
-            <Link to="/import">
-              <Upload className="size-4" /> Import ISIS
-            </Link>
-          </Button>
+          <div className="flex items-center gap-2">
+            <div className="relative w-64">
+              <Search className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
+              <Input
+                type="search"
+                placeholder="Rechercher..."
+                className="pl-9"
+                defaultValue={q}
+                onKeyDown={(e) => e.key === "Enter" && handleSearch(e.currentTarget.value)}
+              />
+            </div>
+            <Button variant="outline" size="icon">
+              <Filter className="size-4" />
+            </Button>
+          </div>
         </div>
       </header>
 
-      <main className="mx-auto max-w-7xl space-y-5 px-4 py-6 sm:px-6">
-        <section className="rounded-xl border bg-card shadow-panel">
-          <div className="border-b p-3">
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                className="pl-9"
-                placeholder="Rue, ville, code lot, locataire…"
-                value={q}
-                onChange={(e) => setSearch({ q: e.target.value })}
-              />
-            </div>
+      <main className="container flex-1 p-4">
+        {isLoading ? (
+          <div className="flex h-64 items-center justify-center">
+            <p className="text-muted-foreground">Chargement du patrimoine...</p>
           </div>
-
-          {(ville || q || adresse) && (
-            <nav className="flex flex-wrap items-center gap-1 border-b p-3 text-sm">
-              <button
-                className="text-primary hover:underline"
-                onClick={() =>
-                  setSearch({
-                    ville: undefined,
-                    tranche: undefined,
-                    rue: undefined,
-                    adresse: undefined,
-                  })
-                }
-              >
-                Toutes les villes
-              </button>
-              {ville && (
-                <>
-                  <ChevronRight className="size-4 text-muted-foreground" />
-                  <button
-                    className={tranche || adresse ? "text-primary hover:underline" : "font-medium"}
-                    onClick={() =>
-                      setSearch({ tranche: undefined, rue: undefined, adresse: undefined })
-                    }
-                  >
-                    {ville}
-                  </button>
-                </>
-              )}
-              {tranche && (
-                <>
-                  <ChevronRight className="size-4 text-muted-foreground" />
-                  <button
-                    className={rue ? "text-primary hover:underline" : "font-medium"}
-                    onClick={() => setSearch({ rue: undefined, adresse: undefined })}
-                  >
-                    Tranche {tranche}
-                  </button>
-                </>
-              )}
-              {rue && (
-                <>
-                  <ChevronRight className="size-4 text-muted-foreground" />
-                  <span className="font-medium">{rue}</span>
-                </>
-              )}
-              {adresse && (
-                <>
-                  <ChevronRight className="size-4 text-muted-foreground" />
-                  <span className="font-medium">{adresse}</span>
-                </>
-              )}
-            </nav>
-          )}
-
-          {isLoading ? (
-            <p className="p-8 text-center text-sm text-muted-foreground">
-              Chargement du patrimoine…
+        ) : !data || data.length === 0 ? (
+          <div className="flex h-64 flex-col items-center justify-center gap-2 text-center">
+            <InfoIcon className="size-8 text-muted-foreground" />
+            <h2 className="text-lg font-medium">Aucun résultat</h2>
+            <p className="text-sm text-muted-foreground">
+              Essayez de modifier vos filtres ou votre recherche.
             </p>
-          ) : filtres.length === 0 ? (
-            <p className="p-8 text-center text-sm text-muted-foreground">Aucun résultat.</p>
-          ) : niveau === "villes" ? (
-            <ul className="divide-y">
-              {villes.map(([v, g]) => (
-                <RowButton
-                  key={v}
-                  icon={<MapPin className="size-4" />}
-                  title={v}
-                  subtitle={`${g.tranches.size} tranches`}
-                  count={`${g.lots.length} lots`}
-                  action={
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        setTravauxScope({ niveau: "ville", label: v, ville: v });
-                      }}
-                    >
-                      <Wrench className="size-4" /> Travaux
-                    </Button>
-                  }
-                  onClick={() =>
-                    setSearch({ ville: v, tranche: undefined, rue: undefined, adresse: undefined })
-                  }
-                />
-              ))}
-            </ul>
-          ) : niveau === "tranches" ? (
-            <ul className="divide-y">
-              {tranches.map(([t, items]) => (
-                <RowButton
-                  key={t}
-                  icon={<Layers className="size-4" />}
-                  title={`Tranche ${t}${libelles.get(t) ? ` — ${libelles.get(t)}` : ""}`}
-                  subtitle={`${new Set(items.map((i) => rueDe(i.adresse))).size} adresses · ${
-                    items.filter((i) => isLogement(i.type_lot)).length
-                  } logements`}
-                  count={`${items.length} lots`}
-                  action={
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        setTravauxScope({ niveau: "tranche", label: `Tranche ${t}`, trancheCode: t });
-                      }}
-                    >
-                      <Wrench className="size-4" /> Travaux
-                    </Button>
-                  }
-                  onClick={() => setSearch({ tranche: t, rue: undefined, adresse: undefined })}
-                />
-              ))}
-            </ul>
-          ) : niveau === "rues" ? (
-            <ul className="divide-y">
-              {rues.map(([r, items]) => (
-                <RowButton
-                  key={r}
-                  icon={<Building2 className="size-4" />}
-                  title={r}
-                  subtitle={ville ?? ""}
-                  count={`${items.length} lots`}
-                  onClick={() => {
-                    pushRecent({ rue: r, ville: ville ?? "", lots: items.length });
-                    setSearch({ rue: r, adresse: undefined });
-                  }}
-                />
-              ))}
-            </ul>
-          ) : (
-            <>
-              <div className="hidden md:block">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Lot</TableHead>
-                      <TableHead>Adresse</TableHead>
-                      <TableHead>Étage / Porte</TableHead>
-                      <TableHead>Type</TableHead>
-                      <TableHead>Surface</TableHead>
-                      <TableHead>Locataire</TableHead>
-                      <TableHead className="text-right">DPE</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {lotsAffiches.map((l) => (
-                      <TableRow key={l.code_patrimoine}>
-                        <TableCell className="font-mono text-sm font-medium">
-                          <div className="flex items-center gap-2">
-                            <LotLien lot={l} onOpen={setFicheLogement} />
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              aria-label={`Afficher les travaux du lot ${l.code_patrimoine}`}
-                              onClick={() =>
-                                setTravauxScope({
-                                  niveau: "lot",
-                                  label: `Lot ${l.code_patrimoine}`,
-                                  lotCode: l.code_patrimoine,
-                                  trancheCode: l.tranche_code,
-                                })
-                              }
-                            >
-                              <Wrench className="size-4" />
-                            </Button>
-                          </div>
-                        </TableCell>
-                        <TableCell className="max-w-56 truncate text-sm">
-                          {l.adresse || "—"}
-                        </TableCell>
-                        <TableCell className="text-sm">
-                          {l.etage || "—"} / {l.porte || "—"}
-                        </TableCell>
-                        <TableCell className="text-sm">{typeLotLabel(l.type_lot)}</TableCell>
-                        <TableCell className="tabnum text-sm">
-                          {l.surface_utile ? `${l.surface_utile} m²` : "—"}
-                        </TableCell>
-                        <TableCell className="max-w-48 truncate text-sm">
-                          <LocataireLien lot={l} onOpen={setFiche} />
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {l.dpe ? <Badge variant="secondary">{l.dpe}</Badge> : "—"}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-
-              <ul className="divide-y md:hidden">
-                {lotsAffiches.map((l) => (
-                  <li key={l.code_patrimoine} className="space-y-1 p-3">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex min-w-0 items-center gap-2">
-                        <LotLien lot={l} onOpen={setFicheLogement} />
+            <Button variant="outline" onClick={() => handleSearch("")}>
+              Réinitialiser la recherche
+            </Button>
+          </div>
+        ) : (
+          <div className="rounded-lg border bg-background shadow-sm overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse text-left text-sm">
+                <thead className="border-b bg-muted/50 font-medium text-muted-foreground">
+                  <tr>
+                    <th className="px-4 py-3">Lot</th>
+                    <th className="px-4 py-3">Tranche</th>
+                    <th className="px-4 py-3">Adresse</th>
+                    <th className="px-4 py-3">Ville</th>
+                    <th className="px-4 py-3">Locataire</th>
+                    <th className="px-4 py-3 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {(data as LotItem[]).map((lot) => (
+                    <tr key={lot.code_patrimoine} className="hover:bg-muted/50 transition-colors">
+                      <td className="px-4 py-3 font-medium">
+                        <button
+                          onClick={() => setSelectedLot(lot)}
+                          className="text-primary hover:underline"
+                        >
+                          {lot.code_patrimoine}
+                        </button>
+                      </td>
+                      <td className="px-4 py-3">
+                        <button
+                          onClick={() =>
+                            setTravauxScope({
+                              niveau: "tranche",
+                              label: `Tranche ${lot.tranche_code}`,
+                              trancheCode: lot.tranche_code,
+                            })
+                          }
+                          className="text-muted-foreground hover:text-primary hover:underline"
+                        >
+                          {lot.tranche_code}
+                        </button>
+                      </td>
+                      <td className="px-4 py-3 text-muted-foreground">{lot.adresse}</td>
+                      <td className="px-4 py-3 text-muted-foreground">{lot.ville}</td>
+                      <td className="px-4 py-3">
+                        {lot.locataire_nom ? (
+                          <button
+                            onClick={() => setSelectedLocataire(lot)}
+                            className="text-muted-foreground hover:text-primary hover:underline"
+                          >
+                            {lot.locataire_nom}
+                          </button>
+                        ) : (
+                          "—"
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-right">
                         <Button
                           variant="ghost"
                           size="icon"
-                          aria-label={`Afficher les travaux du lot ${l.code_patrimoine}`}
                           onClick={() =>
                             setTravauxScope({
                               niveau: "lot",
-                              label: `Lot ${l.code_patrimoine}`,
-                              lotCode: l.code_patrimoine,
-                              trancheCode: l.tranche_code,
+                              label: `Lot ${lot.code_patrimoine}`,
+                              lotCode: lot.code_patrimoine,
+                              trancheCode: lot.tranche_code,
                             })
                           }
                         >
                           <Wrench className="size-4" />
                         </Button>
-                      </div>
-                      <Badge variant="secondary">{typeLotLabel(l.type_lot)}</Badge>
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      {l.adresse} · Étage {l.etage || "—"} · Porte {l.porte || "—"}
-                    </p>
-                    <div className="text-sm">
-                      <LocataireLien lot={l} onOpen={setFiche} />
-                    </div>
-                  </li>
-                ))}
-              </ul>
-
-              <p className="border-t p-3 text-sm text-muted-foreground">
-                {lotsAffiches.length} lots à cette adresse
-              </p>
-            </>
-          )}
-        </section>
-
-        {q.trim() && (
-          <section className="rounded-xl border bg-card p-3 text-sm text-muted-foreground shadow-panel">
-            {filtres.length} lots correspondent à « {q} ». Cliquez sur un lot ou un nom de locataire
-            pour ouvrir sa fiche.
-          </section>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
         )}
       </main>
 
-      <FicheLocataire lot={fiche} onClose={() => setFiche(null)} />
-      <FicheLogement lot={ficheLogement} onClose={() => setFicheLogement(null)} />
+      <FicheLogement lot={selectedLot} onClose={() => setSelectedLot(null)} />
+      <FicheLocataire lot={selectedLocataire} onClose={() => setSelectedLocataire(null)} />
       <TravauxDialog scope={travauxScope} onClose={() => setTravauxScope(null)} />
     </div>
   );
 }
 
-function LotLien({ lot, onOpen }: { lot: LotItem; onOpen: (l: LotItem) => void }) {
-  return (
-    <button
-      className="font-mono text-left font-medium text-primary hover:underline"
-      onClick={() => onOpen(lot)}
-    >
-      {lot.code_patrimoine}
-    </button>
-  );
-}
-
-function LocataireLien({ lot, onOpen }: { lot: LotItem; onOpen: (l: LotItem) => void }) {
-  if (!lot.locataire_nom) return <span className="text-muted-foreground">Vacant</span>;
-  return (
-    <button className="truncate text-left text-primary hover:underline" onClick={() => onOpen(lot)}>
-      {lot.locataire_nom}
-    </button>
-  );
+function typeLotLabel(type: string | null) {
+  const labels: Record<string, string> = {
+    LOG: "Logement",
+    PAR: "Parking",
+    BOX: "Box",
+    GAR: "Garage",
+    COM: "Commerce",
+    BUR: "Bureau",
+  };
+  return labels[type ?? ""] ?? type ?? "—";
 }
 
 function FicheLogement({ lot, onClose }: { lot: LotItem | null; onClose: () => void }) {
   return (
     <Dialog open={!!lot} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-hidden flex flex-col p-0">
         {lot && (
           <>
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-                <Building2 className="size-4 text-primary" /> Fiche logement
-              </DialogTitle>
-              <DialogDescription>
-                Lot {lot.code_patrimoine} · Tranche {lot.tranche_code}
-              </DialogDescription>
-            </DialogHeader>
+            <div className="p-6 pb-0">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <Building2 className="size-4 text-primary" /> Fiche logement
+                </DialogTitle>
+                <DialogDescription>
+                  Lot {lot.code_patrimoine} · Tranche {lot.tranche_code}
+                </DialogDescription>
+              </DialogHeader>
 
-            <dl className="grid grid-cols-2 gap-3 text-sm">
-              <Info label="Adresse" value={lot.adresse} />
-              <Info label="Ville" value={`${lot.code_postal ?? ""} ${lot.ville ?? ""}`.trim()} />
-              <Info label="Bâtiment" value={lot.batiment} />
-              <Info label="Étage / Porte" value={`${lot.etage || "—"} / ${lot.porte || "—"}`} />
-              <Info label="Type de lot" value={typeLotLabel(lot.type_lot)} />
-              <Info label="Surface" value={lot.surface_utile ? `${lot.surface_utile} m²` : null} />
-              <Info label="DPE" value={lot.dpe} />
-            </dl>
+              <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
+                <Info label="Adresse" value={lot.adresse} />
+                <Info label="Ville" value={`${lot.code_postal ?? ""} ${lot.ville ?? ""}`.trim()} />
+                <Info label="Bâtiment" value={lot.batiment} />
+                <Info label="Étage / Porte" value={`${lot.etage || "—"} / ${lot.porte || "—"}`} />
+                <Info label="Type de lot" value={typeLotLabel(lot.type_lot)} />
+                <Info label="Surface" value={lot.surface_utile ? `${lot.surface_utile} m²` : null} />
+                <Info label="DPE" value={lot.dpe} />
+              </dl>
+            </div>
 
-            <TravauxList
-              scope={{
-                niveau: "lot",
-                label: `Lot ${lot.code_patrimoine}`,
-                lotCode: lot.code_patrimoine,
-                trancheCode: lot.tranche_code,
-              }}
-            />
+            <div className="flex-1 overflow-hidden mt-6">
+              <Tabs defaultValue="lot" className="h-full flex flex-col">
+                <div className="px-6 border-b">
+                  <TabsList className="bg-transparent h-auto p-0 gap-6">
+                    <TabsTrigger
+                      value="lot"
+                      className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none px-0 pb-2 text-sm font-medium"
+                    >
+                      Travaux sur ce lot
+                    </TabsTrigger>
+                    <TabsTrigger
+                      value="tranche"
+                      className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none px-0 pb-2 text-sm font-medium"
+                    >
+                      Travaux sur cette tranche
+                    </TabsTrigger>
+                  </TabsList>
+                </div>
+                <div className="flex-1 overflow-y-auto p-6">
+                  <TabsContent value="lot" className="m-0">
+                    <TravauxList
+                      scope={{
+                        niveau: "lot",
+                        label: `Lot ${lot.code_patrimoine}`,
+                        lotCode: lot.code_patrimoine,
+                        trancheCode: lot.tranche_code,
+                      }}
+                    />
+                  </TabsContent>
+                  <TabsContent value="tranche" className="m-0">
+                    <TravauxList
+                      scope={{
+                        niveau: "tranche",
+                        label: `Tranche ${lot.tranche_code}`,
+                        trancheCode: lot.tranche_code,
+                      }}
+                    />
+                  </TabsContent>
+                </div>
+              </Tabs>
+            </div>
           </>
         )}
       </DialogContent>
@@ -608,6 +366,7 @@ type TravailRow = {
   ville: string | null;
   etage: string | null;
   porte: string | null;
+  is_commande?: boolean;
 };
 
 function TravauxDialog({
@@ -619,7 +378,7 @@ function TravauxDialog({
 }) {
   return (
     <Dialog open={!!scope} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-3xl">
+      <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
         {scope && (
           <>
             <DialogHeader>
@@ -628,7 +387,9 @@ function TravauxDialog({
               </DialogTitle>
               <DialogDescription>{scope.label}</DialogDescription>
             </DialogHeader>
-            <TravauxList scope={scope} />
+            <div className="mt-4">
+              <TravauxList scope={scope} />
+            </div>
           </>
         )}
       </DialogContent>
@@ -655,28 +416,71 @@ function TravauxList({ scope }: { scope: TravauxScope }) {
       }),
   });
 
+  const groupedTravaux = useMemo(() => {
+    if (!data) return null;
+    const groups: Record<string, TravailRow[]> = {};
+    (data as TravailRow[]).forEach((t) => {
+      const year = t.date_travaux ? new Date(t.date_travaux).getFullYear().toString() : "Année non précisée";
+      if (!groups[year]) groups[year] = [];
+      groups[year].push(t);
+    });
+    return Object.entries(groups).sort((a, b) => {
+      if (a[0] === "Année non précisée") return 1;
+      if (b[0] === "Année non précisée") return -1;
+      return b[0].localeCompare(a[0]);
+    });
+  }, [data]);
+
   if (isLoading) return <p className="text-sm text-muted-foreground">Chargement des travaux…</p>;
   if (isError) return <p className="text-sm text-destructive">Impossible de charger les travaux.</p>;
   if (!data?.length) return <p className="text-sm text-muted-foreground">Aucun travail enregistré.</p>;
 
   return (
-    <ul className="max-h-[55vh] divide-y overflow-y-auto rounded-lg border">
-      {(data as TravailRow[]).map((travail) => (
-        <li key={travail.id} className="space-y-2 p-3 text-sm">
-          <div className="flex flex-wrap items-start justify-between gap-2">
-            <p className="font-medium">{travail.libelle}</p>
-            <TravauxStatus statut={travail.statut} />
-          </div>
-          <div className="grid gap-1 text-xs text-muted-foreground sm:grid-cols-2">
-            <span>{travail.adresse || "Adresse non précisée"}{travail.etage || travail.porte ? ` · ${travail.etage || "—"} / ${travail.porte || "—"}` : ""}</span>
-            <span>{travail.tranche_code ? `Tranche ${travail.tranche_code}` : "Tranche non précisée"}{travail.batiment ? ` · Bât. ${travail.batiment}` : ""}</span>
-            <span>{travail.date_travaux ? formatDate(travail.date_travaux) : "Date non précisée"}</span>
-            <span>{new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(travail.cout || 0)}</span>
-          </div>
-          {travail.note && <p className="text-xs text-muted-foreground">{travail.note}</p>}
-        </li>
+    <div className="space-y-6">
+      {groupedTravaux?.map(([year, travaux]) => (
+        <div key={year} className="space-y-3">
+          <h4 className="flex items-center gap-2 text-sm font-bold text-primary">
+            <Calendar className="size-4" /> {year}
+          </h4>
+          <ul className="divide-y rounded-lg border bg-card">
+            {travaux.map((travail) => (
+              <li key={travail.id} className="space-y-2 p-3 text-sm">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <p className="font-medium">{travail.libelle}</p>
+                  <TravauxStatus statut={travail.statut} />
+                </div>
+                <div className="grid gap-1 text-xs text-muted-foreground sm:grid-cols-2">
+                  <span>
+                    {travail.adresse || "Adresse non précisée"}
+                    {travail.etage || travail.porte ? ` · ${travail.etage || "—"} / ${travail.porte || "—"}` : ""}
+                  </span>
+                  <span>
+                    {travail.tranche_code ? `Tranche ${travail.tranche_code}` : "Tranche non précisée"}
+                    {travail.batiment ? ` · Bât. ${travail.batiment}` : ""}
+                  </span>
+                  <span>
+                    {travail.is_commande && (
+                      <Badge variant="outline" className="mr-2 bg-blue-50 text-blue-600 border-blue-200 text-[9px] font-black uppercase py-0 px-1">
+                        commande importée
+                      </Badge>
+                    )}
+                    {travail.date_travaux ? formatDate(travail.date_travaux) : "Date non précisée"}
+                  </span>
+                  <span className="font-semibold text-foreground">
+                    {new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(travail.cout || 0)}
+                  </span>
+                </div>
+                {travail.note && (
+                  <p className="text-xs text-muted-foreground bg-muted/50 p-2 rounded italic border-l-2 border-primary/30">
+                    {travail.note}
+                  </p>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
       ))}
-    </ul>
+    </div>
   );
 }
 
@@ -709,43 +513,7 @@ function Info({
       <dt className="flex items-center gap-1 text-xs uppercase tracking-wide text-muted-foreground">
         {icon} {label}
       </dt>
-      <dd className="mt-0.5 break-words">{value || "—"}</dd>
+      <dd className="mt-0.5 break-words font-medium">{value || "—"}</dd>
     </div>
-  );
-}
-
-function RowButton({
-  icon,
-  title,
-  subtitle,
-  count,
-  action,
-  onClick,
-}: {
-  icon: React.ReactNode;
-  title: string;
-  subtitle: string;
-  count: string;
-  action?: React.ReactNode;
-  onClick: () => void;
-}) {
-  return (
-    <li>
-      <button
-        onClick={onClick}
-        className="flex w-full items-center gap-3 p-3 text-left transition-colors hover:bg-accent/50"
-      >
-        <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-          {icon}
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-medium">{title}</span>
-          <span className="block truncate text-xs text-muted-foreground">{subtitle}</span>
-        </span>
-        <span className="tabnum shrink-0 text-xs text-muted-foreground">{count}</span>
-        {action}
-        <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
-      </button>
-    </li>
   );
 }

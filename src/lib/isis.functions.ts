@@ -14,7 +14,7 @@ const trancheSchema = z.object({
   nb_logements: z.number(),
 });
 
-const lotSchema = z.object({
+export const lotSchema = z.object({
   code_patrimoine: z.string(),
   tranche_code: z.string(),
   type_lot: z.string().nullable(),
@@ -35,6 +35,8 @@ const lotSchema = z.object({
   locataire_email: z.string().nullable(),
   date_entree: z.string().nullable(),
 });
+
+export type LotItem = z.infer<typeof lotSchema>;
 
 const occupantSchema = z.object({
   lot_code: z.string(),
@@ -185,12 +187,42 @@ export const getOccupants = createServerFn({ method: "POST" })
     return rows ?? [];
   });
 
-const travauxScopeSchema = z.object({
+const searchAdressesSchema = z.object({
+  q: z.string().optional(),
+  ville: z.string().optional(),
+  tranche: z.string().optional(),
+  rue: z.string().optional(),
+  adresse: z.string().optional(),
+});
+
+/** Recherche filtrée dans le patrimoine (lots). */
+export const getAdresses = createServerFn({ method: "POST" })
+  .inputValidator((d: unknown) => searchAdressesSchema.parse(d))
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
+    let query = supabaseAdmin.from("lots").select("*").eq("actif", true);
+
+    if (data.q) {
+      query = query.or(`code_patrimoine.ilike.%${data.q}%,adresse.ilike.%${data.q}%,locataire_nom.ilike.%${data.q}%`);
+    }
+    if (data.ville) query = query.eq("ville", data.ville);
+    if (data.tranche) query = query.eq("tranche_code", data.tranche);
+    if (data.adresse) query = query.ilike("adresse", `%${data.adresse}%`);
+
+    const { data: rows, error } = await query.order("code_patrimoine").limit(100);
+    if (error) throw new Error(error.message);
+    return rows ?? [];
+  });
+
+export const travauxScopeSchema = z.object({
   niveau: z.enum(["ville", "tranche", "lot"]),
+  label: z.string().optional(),
   ville: z.string().max(160).optional(),
   trancheCode: z.string().max(64).optional(),
   lotCode: z.string().max(64).optional(),
 });
+
+export type TravauxScope = z.infer<typeof travauxScopeSchema>;
 
 /** Travaux d'un périmètre patrimoine, enrichis avec les informations du lot concerné. */
 export const getTravaux = createServerFn({ method: "POST" })
@@ -269,19 +301,26 @@ export const getTravaux = createServerFn({ method: "POST" })
     ];
 
     // Conversion des commandes au format "travaux" pour l'affichage
-    const commandesTravaux = (commandesResult.data ?? []).map(c => ({
-      id: c.id,
-      niveau: c.lot_code ? "lot" : "tranche",
-      tranche_code: c.tranche_code,
-      batiment: c.batiment,
-      lot_code: c.lot_code,
-      libelle: c.descriptif || `Commande ${c.corps_etat || ""}`,
-      statut: c.etat_travaux || "En cours",
-      date_travaux: c.date_demarrage,
-      cout: c.engage,
-      note: `Commande importée - Corps d'état: ${c.corps_etat || "N/A"}`,
-      is_commande: true
-    }));
+    const commandesTravaux = (commandesResult.data ?? []).map(c => {
+      const corps_etat = c.corps_etat?.toLowerCase() || "";
+      let type = "GT";
+      if (["electricite", "couvertures", "halls", "cages"].some(k => corps_etat.includes(k))) type = "GE";
+      if (["plomberie", "menuiseries", "toitures", "fermetures", "etancheite"].some(k => corps_etat.includes(k))) type = "CP";
+
+      return {
+        id: c.id,
+        niveau: c.lot_code ? "lot" : "tranche",
+        tranche_code: c.tranche_code,
+        batiment: c.batiment,
+        lot_code: c.lot_code,
+        libelle: `[${type}] ${c.descriptif || c.corps_etat || "Commande"}`,
+        statut: c.etat_travaux || "En cours",
+        date_travaux: c.date_demarrage,
+        cout: c.engage,
+        note: `Corps d'état: ${c.corps_etat || "N/A"}`,
+        is_commande: true
+      };
+    });
 
     const travaux = [...baseTravaux, ...commandesTravaux];
 
