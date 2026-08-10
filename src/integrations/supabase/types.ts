@@ -50,6 +50,54 @@ export type Database = {
         }
         Relationships: []
       }
+      import_travaux: {
+        Row: {
+          archivees: number
+          creees: number
+          demarre_at: string
+          doublons: number
+          erreurs: number
+          fichier: string
+          id: string
+          ignorees: number
+          inchangees: number
+          lignes: number
+          modifiees: number
+          statut: string
+          termine_at: string | null
+        }
+        Insert: {
+          archivees?: number
+          creees?: number
+          demarre_at?: string
+          doublons?: number
+          erreurs?: number
+          fichier: string
+          id?: string
+          ignorees?: number
+          inchangees?: number
+          lignes?: number
+          modifiees?: number
+          statut?: string
+          termine_at?: string | null
+        }
+        Update: {
+          archivees?: number
+          creees?: number
+          demarre_at?: string
+          doublons?: number
+          erreurs?: number
+          fichier?: string
+          id?: string
+          ignorees?: number
+          inchangees?: number
+          lignes?: number
+          modifiees?: number
+          statut?: string
+          termine_at?: string | null
+        }
+        Relationships: []
+      }
       imports: {
         Row: {
           created_at: string
@@ -311,6 +359,175 @@ export type Database = {
           updated_at?: string
         }
         Relationships: []
+      }
+      travaux_commandes: {
+        Row: {
+          actif: boolean
+          adresse: string | null
+          batiment: string | null
+          budget: number | null
+          charge_clientele: string | null
+          charge_operation: string | null
+          corps_etat: string | null
+          created_at: string
+          date_communication: string | null
+          date_demarrage: string | null
+          date_fin_travaux: string | null
+          descriptif: string | null
+          ecart: number | null
+          engage: number | null
+          etat_commande: string | null
+          etat_travaux: string | null
+          fournisseur: string | null
+          id: string
+          ligne_budget: string | null
+          lot_code: string | null
+          nature_analytique: string | null
+          numero_commande: string
+          numero_fournisseur: string | null
+          observations: string | null
+          paye: number | null
+          secteur: string | null
+          solde: number | null
+          support_communication: string | null
+          tranche_code: string | null
+          updated_at: string
+          vu_dans_import_id: string | null
+        }
+        Insert: {
+          actif?: boolean
+          adresse?: string | null
+          batiment?: string | null
+          budget?: number | null
+          charge_clientele?: string | null
+          charge_operation?: string | null
+          corps_etat?: string | null
+          created_at?: string
+          date_communication?: string | null
+          date_demarrage?: string | null
+          date_fin_travaux?: string | null
+          descriptif?: string | null
+          ecart?: number | null
+          engage?: number | null
+          etat_commande?: string | null
+          etat_travaux?: string | null
+          fournisseur?: string | null
+          id?: string
+          ligne_budget?: string | null
+          lot_code?: string | null
+          nature_analytique?: string | null
+          numero_commande: string
+          numero_fournisseur?: string | null
+          observations?: string | null
+          paye?: number | null
+          secteur?: string | null
+          solde?: number | null
+          support_communication?: string | null
+          tranche_code?: string | null
+          updated_at?: string
+          vu_dans_import_id?: string | null
+        }
+        Update: {
+          actif?: boolean
+          adresse?: string | null
+          batiment?: string | null
+          budget?: number | null
+          charge_clientele?: string | null
+          charge_operation?: string | null
+          corps_etat?: string | null
+          created_at?: string
+          date_communication?: string | null
+          date_demarrage?: string | null
+          date_fin_travaux?: string | null
+          descriptif?: string | null
+          ecart?: number | null
+          engage?: number | null
+          etat_commande?: string | null
+          etat_travaux?: string | null
+          fournisseur?: string | null
+          id?: string
+          ligne_budget?: string | null
+          lot_code?: string | null
+          nature_analytique?: string | null
+          numero_commande?: string
+          numero_fournisseur?: string | null
+          observations?: string | null
+          paye?: number | null
+          secteur?: string | null
+          solde?: number | null
+          support_communication?: string | null
+          tranche_code?: string | null
+          updated_at?: string
+          vu_dans_import_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "travaux_commandes_lot_code_fkey"
+            columns: ["lot_code"]
+            isOneToOne: false
+            referencedRelation: "lots"
+            referencedColumns: ["code_patrimoine"]
+          },
+          {
+            foreignKeyName: "travaux_commandes_tranche_code_fkey"
+            columns: ["tranche_code"]
+            isOneToOne: false
+            referencedRelation: "tranches"
+            referencedColumns: ["code"]
+          },
+          {
+            foreignKeyName: "travaux_commandes_vu_dans_import_id_fkey"
+            columns: ["vu_dans_import_id"]
+            isOneToOne: false
+            referencedRelation: "import_travaux"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      travaux_commandes_historique: {
+        Row: {
+          apres: Json | null
+          avant: Json | null
+          commande_id: string
+          created_at: string
+          id: string
+          import_id: string
+          operation: string
+        }
+        Insert: {
+          apres?: Json | null
+          avant?: Json | null
+          commande_id: string
+          created_at?: string
+          id?: string
+          import_id: string
+          operation: string
+        }
+        Update: {
+          apres?: Json | null
+          avant?: Json | null
+          commande_id?: string
+          created_at?: string
+          id?: string
+          import_id?: string
+          operation?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "travaux_commandes_historique_commande_id_fkey"
+            columns: ["commande_id"]
+            isOneToOne: false
+            referencedRelation: "travaux_commandes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "travaux_commandes_historique_import_id_fkey"
+            columns: ["import_id"]
+            isOneToOne: false
+            referencedRelation: "import_travaux"
+            referencedColumns: ["id"]
+          },
+        ]
       }
     }
     Views: {

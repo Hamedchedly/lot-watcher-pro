@@ -2,7 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { Building2, ChevronRight, Clock, ListTree, MapPin, Upload } from "lucide-react";
+import { BarChart3, Building2, ChevronRight, Clock, ListTree, MapPin, Upload } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { PatrimoineMap } from "@/components/PatrimoineMap";
@@ -59,18 +59,27 @@ function Index() {
     <div className="min-h-screen bg-background">
       <header className="border-b bg-card">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-3 px-4 py-4 sm:px-6">
-          <div className="flex size-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
-            <Building2 className="size-5" />
-          </div>
           <div className="mr-auto">
             <h1 className="text-lg font-semibold leading-tight">Patrimoine</h1>
             <p className="text-sm text-muted-foreground">Carte et accès rapide</p>
           </div>
-          <Button asChild variant="outline">
-            <Link to="/import">
-              <Upload className="size-4" /> Import ISIS
-            </Link>
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button asChild variant="outline">
+              <Link to="/import">
+                <Upload className="size-4" /> Import ISIS
+              </Link>
+            </Button>
+            <Button asChild variant="outline">
+              <Link to="/dashboard-travaux">
+                <BarChart3 className="size-4" /> Dashboard travaux
+              </Link>
+            </Button>
+            <Button asChild>
+              <Link to="/import-travaux">
+                <Upload className="size-4" /> Import travaux
+              </Link>
+            </Button>
+          </div>
         </div>
       </header>
 
@@ -112,7 +121,7 @@ function Index() {
                           ville: r.ville,
                           tranche: undefined,
                           rue: undefined,
-                          garages: false,
+                          adresse: undefined,
                         }}
                         className="flex items-center gap-3 p-3 transition-colors hover:bg-accent/50"
                       >
@@ -136,7 +145,13 @@ function Index() {
             <Button asChild className="w-full" size="lg">
               <Link
                 to="/adresses"
-                search={{ q: "", ville: undefined, tranche: undefined, rue: undefined, garages: false }}
+                search={{
+                  q: "",
+                  ville: undefined,
+                  tranche: undefined,
+                  rue: undefined,
+                  adresse: undefined,
+                }}
               >
                 <ListTree className="size-4" /> Afficher toutes les adresses
               </Link>
