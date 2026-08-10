@@ -46,25 +46,74 @@ export type HistoriqueTravaux = {
   created_at: string;
 };
 
+export type ImportTravaux = {
+  id: string;
+  fichier: string;
+  lignes: number;
+  creees: number;
+  modifiees: number;
+  doublons: number;
+  erreurs: number;
+  archivees: number;
+  statut: string;
+  demarre_at: string;
+  termine_at: string | null;
+};
+
 export type TravauxDashboardData = {
   commandes: CommandeTravaux[];
   historique: HistoriqueTravaux[];
+  imports: ImportTravaux[];
 };
 
 export const getTravauxDashboard = createServerFn({ method: "GET" }).handler(async () => {
   const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
   const db = supabaseAdmin as any;
-  const [commandesResult, historiqueResult] = await Promise.all([
+  const [commandesResult, historiqueResult, importsResult] = await Promise.all([
     db.from("travaux_commandes").select("*").eq("actif", true).order("engage", { ascending: false, nullsFirst: false }),
     db.from("travaux_commandes_historique").select("*, travaux_commandes(numero_commande)").eq("operation", "modification").order("created_at", { ascending: false }),
+    db.from("import_travaux").select("*").order("demarre_at", { ascending: false }).limit(5),
   ]);
   if (commandesResult.error) throw new Error(`Chargement des commandes : ${commandesResult.error.message}`);
   if (historiqueResult.error) throw new Error(`Chargement de l'historique : ${historiqueResult.error.message}`);
+  if (importsResult.error) throw new Error(`Chargement des imports : ${importsResult.error.message}`);
+  
   return {
     commandes: (commandesResult.data ?? []) as CommandeTravaux[],
     historique: (historiqueResult.data ?? []) as (HistoriqueTravaux & { travaux_commandes: { numero_commande: string } })[],
+    imports: (importsResult.data ?? []) as ImportTravaux[],
   } satisfies TravauxDashboardData;
 });
+
+export const updateCommandeTravaux = createServerFn({ method: "POST" })
+  .inputValidator((d: unknown) => {
+    const { z } = require("zod");
+    return z.object({
+      id: z.string().uuid(),
+      data: z.record(z.any())
+    }).parse(d);
+  })
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
+    const db = supabaseAdmin as any;
+    
+    // Liste des colonnes autorisées pour l'update (basée sur VALID_COLUMNS de travaux.functions.ts)
+    const VALID_COLUMNS = [
+      "numero_commande", "secteur", "tranche_code", "lot_code", "batiment", "charge_clientele", "adresse",
+      "nature_analytique", "corps_etat", "charge_operation", "ligne_budget", "descriptif", "budget",
+      "numero_fournisseur", "fournisseur", "etat_commande", "engage", "ecart", "paye", "solde",
+      "etat_travaux", "date_demarrage", "date_fin_travaux", "observations", "support_communication",
+      "date_communication"
+    ];
+    
+    const filteredData = Object.fromEntries(
+      Object.entries(data.data).filter(([key]) => VALID_COLUMNS.includes(key))
+    );
+    
+    const { data: updated, error } = await db.from("travaux_commandes").update(filteredData).eq("id", data.id).select("*").single();
+    if (error) throw new Error(`Mise à jour échouée : ${error.message}`);
+    return updated;
+  });
 
 export const getTravauxStats = createServerFn({ method: "GET" }).handler(async () => {
   const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
