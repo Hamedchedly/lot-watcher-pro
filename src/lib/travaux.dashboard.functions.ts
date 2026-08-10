@@ -49,7 +49,7 @@ export type TravauxDashboardData = {
 };
 
 export const getTravauxDashboard = createServerFn({ method: "GET" }).handler(async () => {
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
   const db = supabaseAdmin as any;
   const [commandesResult, historiqueResult] = await Promise.all([
     db.from("travaux_commandes").select("*").eq("actif", true).order("engage", { ascending: false, nullsFirst: false }),

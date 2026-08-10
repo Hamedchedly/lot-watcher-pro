@@ -55,7 +55,7 @@ const batchSchema = z.object({
 export const importIsisBatch = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => batchSchema.parse(d))
   .handler(async ({ data }) => {
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
 
     if (data.tranches.length) {
       const { error } = await supabaseAdmin
@@ -93,7 +93,7 @@ export const finalizeIsisImport = createServerFn({ method: "POST" })
     z.object({ runDate: z.string(), fichier: z.string(), lignes: z.number() }).parse(d),
   )
   .handler(async ({ data }) => {
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
 
     const disparus = await supabaseAdmin
       .from("lots")
@@ -135,7 +135,7 @@ export const finalizeIsisImport = createServerFn({ method: "POST" })
 
 /** Vue synthétique du patrimoine pour le tableau de bord. */
 export const getPatrimoine = createServerFn({ method: "GET" }).handler(async () => {
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
 
   const tranches = await supabaseAdmin
     .from("tranches")
@@ -175,7 +175,7 @@ const occupantsSchema = z.object({ lotCode: z.string().min(1).max(64) });
 export const getOccupants = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => occupantsSchema.parse(d))
   .handler(async ({ data }) => {
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
     const { data: rows, error } = await supabaseAdmin
       .from("occupants")
       .select("nom, prenom, date_naissance, date_entree")
@@ -196,7 +196,7 @@ const travauxScopeSchema = z.object({
 export const getTravaux = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => travauxScopeSchema.parse(d))
   .handler(async ({ data }) => {
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
     let lotsQuery = supabaseAdmin
       .from("lots")
       .select("code_patrimoine, tranche_code, batiment, etage, porte, adresse, code_postal, ville")

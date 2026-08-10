@@ -21,7 +21,7 @@ const comparable = (row: Record<string, unknown>) => Object.fromEntries(TRAVAUX_
 export const createTravauxImport = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => z.object({ fichier: z.string().min(1), lignes: z.number(), doublons: z.number(), erreurs: z.number() }).parse(d))
   .handler(async ({ data }) => {
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
     const db = supabaseAdmin as any;
     const { data: execution, error } = await db.from("import_travaux").insert({
       fichier: data.fichier, lignes: data.lignes, doublons: data.doublons, erreurs: data.erreurs,
@@ -33,7 +33,7 @@ export const createTravauxImport = createServerFn({ method: "POST" })
 export const importTravauxBatch = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => batchSchema.parse(d))
   .handler(async ({ data }) => {
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
     const db = supabaseAdmin as any;
     const numbers = data.commandes.map((row) => row.numero_commande);
     const { data: existingRows, error: existingError } = await db.from("travaux_commandes").select("*").in("numero_commande", numbers);
@@ -78,7 +78,7 @@ export const importTravauxBatch = createServerFn({ method: "POST" })
 export const failTravauxImport = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => importIdSchema.parse(d))
   .handler(async ({ data }) => {
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
     const db = supabaseAdmin as any;
     const { data: execution, error } = await db.from("import_travaux").update({ statut: "erreur", termine_at: new Date().toISOString() }).eq("id", data.importId).select("*").single();
     if (error) throw new Error(`Échec de l'import : ${error.message}`);
@@ -88,7 +88,7 @@ export const failTravauxImport = createServerFn({ method: "POST" })
 export const finalizeTravauxImport = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => importIdSchema.parse(d))
   .handler(async ({ data }) => {
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
     const db = supabaseAdmin as any;
     const { data: active, error } = await db.from("travaux_commandes").select("id, numero_commande").eq("actif", true);
     if (error) throw new Error(`Recherche des commandes absentes : ${error.message}`);
