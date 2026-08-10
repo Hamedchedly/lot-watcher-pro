@@ -3,7 +3,7 @@ import { z } from "zod";
 
 /** Coordinates already cached in the database. */
 export const getAdressesGeo = createServerFn({ method: "GET" }).handler(async () => {
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
   const { data, error } = await supabaseAdmin
     .from("adresses_geo")
     .select("cle, adresse, ville, lat, lng, statut")
@@ -23,7 +23,7 @@ export const geocodeAdresses = createServerFn({ method: "POST" })
     const mapsKey = process.env["GOOGLE_MAPS_API_KEY"];
     if (!mapsKey) throw new Error("GOOGLE_MAPS_API_KEY is missing");
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
     const rows: Array<{
       cle: string;
       adresse: string;
