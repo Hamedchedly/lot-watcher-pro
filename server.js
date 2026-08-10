@@ -165,9 +165,14 @@ const server = createServer(async (req, res) => {
     }
     const url = `http://localhost:${PORT}${req.url || '/'}`
     const init = { method: req.method || 'GET', headers: new Headers(headers) }
-    // Node IncomingMessage is a readable stream usable as a Request body
+    // Node IncomingMessage is a readable stream usable as a Request body.
+    // Node (>= 18, dont node:22-alpine dans le Docker) exige `duplex: 'half'`
+    // dès qu'un stream est utilisé comme body d'un Web Request, sinon il lève :
+    //   TypeError: RequestInit: duplex option is required when sending a body.
+    // C'est ce qui cassait les POST des Server Functions TanStack Start.
     if (req.method && !['GET', 'HEAD'].includes(req.method)) {
       init.body = req
+      init.duplex = 'half'
     }
     const request = new Request(url, init)
     const response = await entry.fetch(request, process.env, { req, res })
@@ -180,7 +185,14 @@ const server = createServer(async (req, res) => {
     const body = await response.text()
     res.end(body)
   } catch (error) {
-    console.error(error)
+    // Log explicite sans secret : message, nom et stack uniquement.
+    // Aucune variable d'environnement, aucun contenu de body/upload,
+    // aucune donnée utilisateur.
+    console.error('[server] Request handling error:', {
+      name: error instanceof Error ? error.name : typeof error,
+      message: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    })
     res.writeHead(500, { 'content-type': 'text/html; charset=utf-8' })
     res.end('<!doctype html><html><body><h1>Server Error</h1></body></html>')
   }
