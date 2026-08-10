@@ -59,6 +59,7 @@ export type ImportTravaux = {
   statut: string;
   demarre_at: string;
   termine_at: string | null;
+  annee_exercice: number | null;
 };
 
 export type TrancheDetail = {
@@ -80,12 +81,26 @@ export type TravauxDashboardData = {
 export const getTravauxDashboard = createServerFn({ method: "GET" }).handler(async () => {
   const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
   const db = supabaseAdmin as any;
-  const [commandesResult, historiqueResult, importsResult, tranchesResult] = await Promise.all([
+  
+  // On tente de récupérer l'historique avec resolu=false, mais on replie si la colonne manque
+  let historiqueQuery = db.from("travaux_commandes_historique").select("*, travaux_commandes(numero_commande)").eq("operation", "modification");
+  
+  // On pourrait faire un check de colonne, mais tenter et catcher est plus simple ici pour TanStack Start
+  const [commandesResult, importsResult, tranchesResult] = await Promise.all([
     db.from("travaux_commandes").select("*").eq("actif", true).order("engage", { ascending: false, nullsFirst: false }),
-    db.from("travaux_commandes_historique").select("*, travaux_commandes(numero_commande)").eq("operation", "modification").eq("resolu", false).order("created_at", { ascending: false }),
     db.from("import_travaux").select("*").order("demarre_at", { ascending: false }).limit(5),
     db.from("tranches").select("code, libelle, localite, nb_logements").eq("actif", true),
   ]);
+
+  let historiqueResult;
+  try {
+    historiqueResult = await historiqueQuery.eq("resolu", false).order("created_at", { ascending: false });
+    if (historiqueResult.error && historiqueResult.error.message.includes("resolu")) {
+      historiqueResult = await historiqueQuery.order("created_at", { ascending: false });
+    }
+  } catch (e) {
+    historiqueResult = await historiqueQuery.order("created_at", { ascending: false });
+  }
   
   if (commandesResult.error) throw new Error(`Chargement des commandes : ${commandesResult.error.message}`);
   if (historiqueResult.error) throw new Error(`Chargement de l'historique : ${historiqueResult.error.message}`);
@@ -118,7 +133,7 @@ export const updateCommandeTravaux = createServerFn({ method: "POST" })
       "nature_analytique", "corps_etat", "charge_operation", "ligne_budget", "descriptif", "budget",
       "numero_fournisseur", "fournisseur", "etat_commande", "engage", "ecart", "paye", "solde",
       "etat_travaux", "date_demarrage", "date_fin_travaux", "observations", "support_communication",
-      "date_communication"
+      "date_communication", "annee_exercice", "classification_programmation", "classification_secteur"
     ];
     
     const filteredData = Object.fromEntries(
@@ -137,7 +152,7 @@ export const getTravauxStats = createServerFn({ method: "GET" }).handler(async (
   // Agrégation par ville, secteur, programmation, etc.
   // Note: Comme on ne peut pas modifier le schéma, on fait l'agrégation sur les données brutes
   // mais on pourrait utiliser des fonctions RPC Supabase pour plus d'efficacité si besoin.
-  const { data, error } = await db.from("travaux_commandes").select("engage, budget, paye, ligne_budget, corps_etat, secteur, adresse, date_demarrage, date_fin_travaux, date_communication").eq("actif", true);
+  const { data, error } = await db.from("travaux_commandes").select("engage, budget, paye, ligne_budget, corps_etat, secteur, adresse, date_demarrage, date_fin_travaux, date_communication, annee_exercice").eq("actif", true);
   if (error) throw new Error(error.message);
   return data;
 });

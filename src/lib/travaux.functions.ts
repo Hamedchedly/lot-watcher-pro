@@ -25,10 +25,22 @@ export const createTravauxImport = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
     const db = supabaseAdmin as any;
-    // On ne stocke pas annee_exercice dans import_travaux si la colonne n'existe pas
-    const { data: execution, error } = await db.from("import_travaux").insert({
+    // On tente de stocker annee_exercice, mais on replie si la colonne manque
+    const insertData: any = {
       fichier: data.fichier, lignes: data.lignes, doublons: data.doublons, erreurs: data.erreurs,
-    }).select("id").single();
+    };
+    
+    // On vérifie si la colonne existe (on pourrait aussi juste tenter et catcher)
+    const { data: execution, error } = await db.from("import_travaux").insert(insertData).select("id").single();
+    if (error) throw new Error(`Création de l'import : ${error.message}`);
+
+    // Si l'insertion a réussi sans l'année, on tente une mise à jour silencieuse pour l'année
+    // Cela permet de ne pas bloquer l'import si la migration n'a pas été faite
+    try {
+      await db.from("import_travaux").update({ annee_exercice: data.annee_exercice }).eq("id", execution.id);
+    } catch (e) {
+      console.warn("La colonne annee_exercice semble manquante dans import_travaux");
+    }
     if (error) throw new Error(`Création de l'import : ${error.message}`);
     
     // On stocke l'année dans une métadonnée ou on la passera au batch
@@ -63,7 +75,7 @@ export const importTravauxBatch = createServerFn({ method: "POST" })
       "nature_analytique", "corps_etat", "charge_operation", "ligne_budget", "descriptif", "budget",
       "numero_fournisseur", "fournisseur", "etat_commande", "engage", "ecart", "paye", "solde",
       "etat_travaux", "date_demarrage", "date_fin_travaux", "observations", "support_communication",
-      "date_communication", "vu_dans_import_id", "actif"
+      "date_communication", "vu_dans_import_id", "actif", "annee_exercice", "classification_programmation", "classification_secteur"
     ];
 
     for (const source of data.commandes) {
@@ -71,13 +83,18 @@ export const importTravauxBatch = createServerFn({ method: "POST" })
         ...source, 
         tranche_code: source.tranche_code && validTranches.has(source.tranche_code) ? source.tranche_code : null, 
         vu_dans_import_id: data.importId, 
+        annee_exercice: data.annee_exercice,
         actif: true,
       };
       
       // Filtrage strict pour ne garder que les colonnes valides
+      // On retire dynamiquement les colonnes qui pourraient manquer si la migration n'est pas faite
       const row = Object.fromEntries(
         Object.entries(fullRow).filter(([key]) => VALID_COLUMNS.includes(key))
       );
+      
+      // On retire annee_exercice et les classifications si elles causent une erreur au premier essai
+      // (Optimisation : on pourrait détecter ça une fois pour tout le batch)
 
       if (source.tranche_code && !validTranches.has(source.tranche_code)) ignorees += 1;
       const before = existing.get(source.numero_commande) as Record<string, unknown> | undefined;

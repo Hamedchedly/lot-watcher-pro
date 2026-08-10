@@ -207,7 +207,8 @@ export const getAdresses = createServerFn({ method: "POST" })
     }
     if (data.ville) query = query.eq("ville", data.ville);
     if (data.tranche) query = query.eq("tranche_code", data.tranche);
-    if (data.adresse) query = query.ilike("adresse", `%${data.adresse}%`);
+    if (data.rue) query = query.ilike("adresse", `%${data.rue}%`);
+    if (data.adresse) query = query.eq("adresse", data.adresse);
 
     const { data: rows, error } = await query.order("code_patrimoine").limit(100);
     if (error) throw new Error(error.message);
