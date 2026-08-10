@@ -1,11 +1,12 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { createFileRoute } from "@tanstack/react-router";
+import { Link, createFileRoute } from "@tanstack/react-router";
 import {
   Building2,
   ChevronRight,
   Filter,
+  Home,
   Info as InfoIcon,
   Mail,
   MapPin,
@@ -27,11 +28,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   getAdresses,
   getOccupants,
   getTravaux,
+  getVilles,
   type LotItem,
   type TravauxScope,
 } from "@/lib/isis.functions";
@@ -53,8 +56,14 @@ function AdressesPage() {
   const { q, ville, tranche, rue, adresse } = Route.useSearch();
   const navigate = Route.useNavigate();
   const fetchAdresses = useServerFn(getAdresses);
+  const fetchVilles = useServerFn(getVilles);
 
-  const { data, isLoading } = useQuery({
+  const { data: villes, isLoading: isLoadingVilles } = useQuery({
+    queryKey: ["villes"],
+    queryFn: () => fetchVilles({}),
+  });
+
+  const { data, isLoading: isLoadingLots } = useQuery({
     queryKey: ["adresses", q, ville, tranche, rue, adresse],
     queryFn: () => fetchAdresses({ data: { q, ville, tranche, rue, adresse } }),
   });
@@ -84,19 +93,60 @@ function AdressesPage() {
   const [selectedLocataire, setSelectedLocataire] = useState<LotItem | null>(null);
   const [travauxScope, setTravauxScope] = useState<TravauxScope | null>(null);
 
+  // Lignes de chaque niveau hiérarchique avec leurs compteurs.
+  const villeRows = useMemo(() => {
+    const stats = new Map<string, { tranches: number; lots: number }>();
+    if (hierarchy) {
+      for (const [v, tranches] of Object.entries(hierarchy)) {
+        let lots = 0;
+        for (const rues of Object.values(tranches)) {
+          for (const arr of Object.values(rues)) lots += arr.length;
+        }
+        stats.set(v, { tranches: Object.keys(tranches).length, lots });
+      }
+    }
+    return (villes ?? []).map((v) => ({
+      ville: v,
+      tranches: stats.get(v)?.tranches ?? 0,
+      lots: stats.get(v)?.lots ?? 0,
+    }));
+  }, [villes, hierarchy]);
+
+  const trancheRows = useMemo(() => {
+    if (!ville) return [] as { code: string; adresses: number; lots: number }[];
+    return Object.entries(hierarchy?.[ville] || {}).map(([code, rues]) => ({
+      code,
+      adresses: Object.keys(rues).length,
+      lots: Object.values(rues).reduce((sum, arr) => sum + arr.length, 0),
+    }));
+  }, [hierarchy, ville]);
+
+  const rueRows = useMemo(() => {
+    if (!ville || !tranche) return [] as { adresse: string; lots: number }[];
+    return Object.entries(hierarchy?.[ville]?.[tranche] || {}).map(([adresse, lots]) => ({
+      adresse,
+      lots: lots.length,
+    }));
+  }, [hierarchy, ville, tranche]);
+
   const handleSearch = (val: string) => {
     navigate({ search: (prev) => ({ ...prev, q: val || undefined }) });
   };
 
   return (
-    <div className="flex min-h-screen flex-col bg-muted/30">
-      <header className="sticky top-0 z-10 border-b bg-background/80 backdrop-blur">
-        <div className="container flex h-14 items-center justify-between px-4">
+    <div className="flex min-h-screen flex-col bg-background">
+      <header className="border-b bg-card">
+        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-4 py-4 sm:px-6">
           <div className="flex items-center gap-2">
+            <Button asChild variant="ghost" size="icon">
+              <Link to="/">
+                <Home className="size-5" />
+              </Link>
+            </Button>
             <Building2 className="size-5 text-primary" />
-            <h1 className="text-lg font-semibold tracking-tight">Patrimoine</h1>
+            <h1 className="text-lg font-semibold leading-tight">Patrimoine</h1>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <div className="relative w-64">
               <Search className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
               <Input
@@ -114,11 +164,11 @@ function AdressesPage() {
         </div>
       </header>
 
-      <main className="container flex-1 p-4">
+      <main className="mx-auto max-w-7xl flex-1 px-4 py-6 sm:px-6">
         <div className="mb-4 flex items-center gap-2 text-xs text-muted-foreground">
-          <button onClick={() => navigate({ search: {} })} className="hover:text-primary">
+          <Link to="/" className="hover:text-primary">
             Patrimoine
-          </button>
+          </Link>
           {ville && (
             <>
               <ChevronRight className="size-3" />{" "}
@@ -149,7 +199,7 @@ function AdressesPage() {
           )}
         </div>
 
-        {isLoading ? (
+        {isLoadingLots ? (
           <div className="flex h-64 items-center justify-center">
             <p className="text-muted-foreground">Chargement du patrimoine...</p>
           </div>
@@ -165,113 +215,258 @@ function AdressesPage() {
             </Button>
           </div>
         ) : (
-          <div className="grid gap-4">
-            {!ville &&
-              Object.keys(hierarchy || {}).map((v) => (
-                <Button
-                  key={v}
-                  variant="outline"
-                  className="justify-between h-14 px-6 text-lg"
-                  onClick={() => navigate({ search: { ville: v } })}
-                >
-                  <span className="flex items-center gap-3">
-                    <MapPin className="size-5 text-primary" /> {v}
+          <div className="space-y-6">
+            {/* Niveau Ville */}
+            {!ville && !q && (
+              <section className="overflow-hidden rounded-lg border bg-background shadow-sm">
+                <header className="flex flex-wrap items-center justify-between gap-2 border-b bg-muted/50 px-4 py-2.5">
+                  <h2 className="flex items-center gap-2 text-sm font-semibold">
+                    <MapPin className="size-4 text-primary" /> Villes
+                  </h2>
+                  <span className="text-xs text-muted-foreground">
+                    {isLoadingVilles
+                      ? "Chargement…"
+                      : `${villeRows.length} ville${villeRows.length > 1 ? "s" : ""} · ${
+                          villeRows.reduce((s, r) => s + r.lots, 0)
+                        } lots`}
                   </span>
-                  <ChevronRight className="size-5 text-muted-foreground" />
-                </Button>
-              ))}
-
-            {ville &&
-              !tranche &&
-              Object.keys(hierarchy?.[ville] || {}).map((t) => (
-                <Button
-                  key={t}
-                  variant="outline"
-                  className="justify-between h-14 px-6"
-                  onClick={() => navigate({ search: { ville, tranche: t } })}
-                >
-                  <span className="flex items-center gap-3">
-                    <Building2 className="size-5 text-primary" /> Tranche {t}
-                  </span>
-                  <ChevronRight className="size-5 text-muted-foreground" />
-                </Button>
-              ))}
-
-            {ville &&
-              tranche &&
-              !rue &&
-              Object.keys(hierarchy?.[ville]?.[tranche] || {}).map((r) => (
-                <Button
-                  key={r}
-                  variant="outline"
-                  className="justify-between h-14 px-6"
-                  onClick={() => navigate({ search: { ville, tranche, rue: r } })}
-                >
-                  <span className="flex items-center gap-3">
-                    <MapPin className="size-5 text-primary" /> {r}
-                  </span>
-                  <ChevronRight className="size-5 text-muted-foreground" />
-                </Button>
-              ))}
-
-            {(rue || q) && (
-              <div className="rounded-lg border bg-background shadow-sm overflow-hidden">
-                <table className="w-full border-collapse text-left text-sm">
-                  <thead className="border-b bg-muted/50 font-medium text-muted-foreground">
-                    <tr>
-                      <th className="px-4 py-3">Lot</th>
-                      <th className="px-4 py-3">Bâtiment / Porte</th>
-                      <th className="px-4 py-3">Locataire</th>
-                      <th className="px-4 py-3 text-right">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {(data as LotItem[]).map((lot) => (
-                      <tr key={lot.code_patrimoine} className="hover:bg-muted/50 transition-colors">
-                        <td className="px-4 py-3 font-medium">
-                          <button
-                            onClick={() => setSelectedLot(lot)}
-                            className="text-primary hover:underline"
-                          >
-                            {lot.code_patrimoine}
-                          </button>
-                        </td>
-                        <td className="px-4 py-3 text-muted-foreground">
-                          {lot.batiment || "—"} {lot.porte ? ` / ${lot.porte}` : ""}
-                        </td>
-                        <td className="px-4 py-3">
-                          {lot.locataire_nom ? (
-                            <button
-                              onClick={() => setSelectedLocataire(lot)}
-                              className="text-muted-foreground hover:text-primary hover:underline"
-                            >
-                              {lot.locataire_nom}
-                            </button>
-                          ) : (
-                            "—"
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-right">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() =>
-                              setTravauxScope({
-                                niveau: "lot",
-                                label: `Lot ${lot.code_patrimoine}`,
-                                lotCode: lot.code_patrimoine,
-                                trancheCode: lot.tranche_code,
-                              })
-                            }
-                          >
-                            <Wrench className="size-4" />
-                          </Button>
-                        </td>
+                </header>
+                <div className="overflow-x-auto">
+                  <table className="w-full border-collapse text-left text-sm">
+                    <thead className="border-b bg-muted/50 font-medium text-muted-foreground">
+                      <tr>
+                        <th className="px-4 py-3">Ville</th>
+                        <th className="px-4 py-3">Tranches</th>
+                        <th className="px-4 py-3">Lots</th>
+                        <th className="px-4 py-3 text-right">Actions</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody className="divide-y">
+                      {villeRows.map((row) => (
+                        <tr key={row.ville} className="hover:bg-muted/50 transition-colors">
+                          <td className="px-4 py-3 font-medium">
+                            <button
+                              onClick={() => navigate({ search: { ville: row.ville } })}
+                              className="flex items-center gap-2 text-primary hover:underline"
+                            >
+                              <MapPin className="size-4 shrink-0" /> {row.ville}
+                            </button>
+                          </td>
+                          <td className="px-4 py-3 text-muted-foreground">{row.tranches}</td>
+                          <td className="px-4 py-3 text-muted-foreground">{row.lots}</td>
+                          <td className="px-4 py-3 text-right">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              title="Voir les travaux de la ville"
+                              onClick={() =>
+                                setTravauxScope({
+                                  niveau: "ville",
+                                  label: `Ville ${row.ville}`,
+                                  ville: row.ville,
+                                })
+                              }
+                            >
+                              <Wrench className="size-4" />
+                            </Button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            )}
+
+            {/* Niveau Tranche */}
+            {ville && !tranche && !q && (
+              <section className="overflow-hidden rounded-lg border bg-background shadow-sm">
+                <header className="flex flex-wrap items-center justify-between gap-2 border-b bg-muted/50 px-4 py-2.5">
+                  <h2 className="flex items-center gap-2 text-sm font-semibold">
+                    <Building2 className="size-4 text-primary" /> Tranches · {ville}
+                  </h2>
+                  <span className="text-xs text-muted-foreground">
+                    {trancheRows.length} tranche{trancheRows.length > 1 ? "s" : ""} ·{" "}
+                    {trancheRows.reduce((s, r) => s + r.lots, 0)} lots
+                  </span>
+                </header>
+                <div className="overflow-x-auto">
+                  <table className="w-full border-collapse text-left text-sm">
+                    <thead className="border-b bg-muted/50 font-medium text-muted-foreground">
+                      <tr>
+                        <th className="px-4 py-3">Tranche</th>
+                        <th className="px-4 py-3">Adresses</th>
+                        <th className="px-4 py-3">Lots</th>
+                        <th className="px-4 py-3 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {trancheRows.map((row) => (
+                        <tr key={row.code} className="hover:bg-muted/50 transition-colors">
+                          <td className="px-4 py-3 font-medium">
+                            <button
+                              onClick={() => navigate({ search: { ville, tranche: row.code } })}
+                              className="flex items-center gap-2 text-primary hover:underline"
+                            >
+                              <Building2 className="size-4 shrink-0" /> {row.code}
+                            </button>
+                          </td>
+                          <td className="px-4 py-3 text-muted-foreground">{row.adresses}</td>
+                          <td className="px-4 py-3 text-muted-foreground">{row.lots}</td>
+                          <td className="px-4 py-3 text-right">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              title="Voir les travaux de la tranche"
+                              onClick={() =>
+                                setTravauxScope({
+                                  niveau: "tranche",
+                                  label: `Tranche ${row.code}`,
+                                  trancheCode: row.code,
+                                })
+                              }
+                            >
+                              <Wrench className="size-4" />
+                            </Button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            )}
+
+            {/* Niveau Adresse */}
+            {ville && tranche && !rue && !q && (
+              <section className="overflow-hidden rounded-lg border bg-background shadow-sm">
+                <header className="flex flex-wrap items-center justify-between gap-2 border-b bg-muted/50 px-4 py-2.5">
+                  <h2 className="flex items-center gap-2 text-sm font-semibold">
+                    <MapPin className="size-4 text-primary" /> Adresses · {ville}
+                  </h2>
+                  <span className="text-xs text-muted-foreground">
+                    {rueRows.length} adresse{rueRows.length > 1 ? "s" : ""} ·{" "}
+                    {rueRows.reduce((s, r) => s + r.lots, 0)} lots
+                  </span>
+                </header>
+                <div className="overflow-x-auto">
+                  <table className="w-full border-collapse text-left text-sm">
+                    <thead className="border-b bg-muted/50 font-medium text-muted-foreground">
+                      <tr>
+                        <th className="px-4 py-3">Adresse</th>
+                        <th className="px-4 py-3">Lots</th>
+                        <th className="px-4 py-3 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {rueRows.map((row) => (
+                        <tr key={row.adresse} className="hover:bg-muted/50 transition-colors">
+                          <td className="px-4 py-3 font-medium">
+                            <button
+                              onClick={() =>
+                                navigate({ search: { ville, tranche, rue: row.adresse } })
+                              }
+                              className="flex items-center gap-2 text-primary hover:underline"
+                            >
+                              <MapPin className="size-4 shrink-0" /> {row.adresse}
+                            </button>
+                          </td>
+                          <td className="px-4 py-3 text-muted-foreground">{row.lots}</td>
+                          <td className="px-4 py-3 text-right">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              title="Voir les travaux de cette adresse"
+                              onClick={() =>
+                                setTravauxScope({
+                                  niveau: "adresse",
+                                  label: `${row.adresse} · ${ville}`,
+                                  adresse: row.adresse,
+                                })
+                              }
+                            >
+                              <Wrench className="size-4" />
+                            </Button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            )}
+
+            {/* Niveau Lots */}
+            {(rue || q || adresse) && (
+              <section className="overflow-hidden rounded-lg border bg-background shadow-sm">
+                <header className="flex flex-wrap items-center justify-between gap-2 border-b bg-muted/50 px-4 py-2.5">
+                  <h2 className="flex items-center gap-2 text-sm font-semibold">
+                    <Building2 className="size-4 text-primary" /> Lots
+                    {rue ? ` · ${rue}` : q ? ` · recherche « ${q} »` : ""}
+                  </h2>
+                  <span className="text-xs text-muted-foreground">
+                    {(data as LotItem[]).length} lot{(data as LotItem[]).length > 1 ? "s" : ""}
+                  </span>
+                </header>
+                <div className="overflow-x-auto">
+                  <table className="w-full border-collapse text-left text-sm">
+                    <thead className="border-b bg-muted/50 font-medium text-muted-foreground">
+                      <tr>
+                        <th className="px-4 py-3">Lot</th>
+                        <th className="px-4 py-3">Bâtiment / Porte</th>
+                        <th className="px-4 py-3">Locataire</th>
+                        <th className="px-4 py-3 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {(data as LotItem[]).map((lot) => (
+                        <tr key={lot.code_patrimoine} className="hover:bg-muted/50 transition-colors">
+                          <td className="px-4 py-3 font-medium">
+                            <button
+                              onClick={() => setSelectedLot(lot)}
+                              className="text-primary hover:underline"
+                            >
+                              {lot.code_patrimoine}
+                            </button>
+                          </td>
+                          <td className="px-4 py-3 text-muted-foreground">
+                            {lot.batiment || "—"} {lot.porte ? ` / ${lot.porte}` : ""}
+                          </td>
+                          <td className="px-4 py-3">
+                            {lot.locataire_nom ? (
+                              <button
+                                onClick={() => setSelectedLocataire(lot)}
+                                className="text-muted-foreground hover:text-primary hover:underline"
+                              >
+                                {lot.locataire_nom}
+                              </button>
+                            ) : (
+                              "—"
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              title="Voir les travaux du lot"
+                              onClick={() =>
+                                setTravauxScope({
+                                  niveau: "lot",
+                                  label: `Lot ${lot.code_patrimoine}`,
+                                  lotCode: lot.code_patrimoine,
+                                  trancheCode: lot.tranche_code,
+                                })
+                              }
+                            >
+                              <Wrench className="size-4" />
+                            </Button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
             )}
           </div>
         )}
@@ -344,27 +539,30 @@ function FicheLogement({ lot, onClose }: { lot: LotItem | null; onClose: () => v
                     </TabsTrigger>
                   </TabsList>
                 </div>
-                <div className="flex-1 overflow-y-auto p-6">
-                  <TabsContent value="lot" className="m-0">
-                    <TravauxList
-                      scope={{
-                        niveau: "lot",
-                        label: `Lot ${lot.code_patrimoine}`,
-                        lotCode: lot.code_patrimoine,
-                        trancheCode: lot.tranche_code,
-                      }}
-                    />
-                  </TabsContent>
-                  <TabsContent value="tranche" className="m-0">
-                    <TravauxList
-                      scope={{
-                        niveau: "tranche",
-                        label: `Tranche ${lot.tranche_code}`,
-                        trancheCode: lot.tranche_code,
-                      }}
-                    />
-                  </TabsContent>
-                </div>
+                <ScrollArea className="h-[400px]">
+                  <div className="p-6">
+                    <TabsContent value="lot" className="m-0">
+                      <TravauxList
+                        scope={{
+                          niveau: "lot",
+                          label: `Lot ${lot.code_patrimoine}`,
+                          lotCode: lot.code_patrimoine,
+                          trancheCode: lot.tranche_code,
+                        }}
+                      />
+                    </TabsContent>
+                    <TabsContent value="tranche" className="m-0">
+                      <TravauxList
+                        scope={{
+                          niveau: "tranche",
+                          label: `Tranche ${lot.tranche_code}`,
+                          trancheCode: lot.tranche_code,
+                        }}
+                      />
+                    </TabsContent>
+                  </div>
+                  <ScrollBar />
+                </ScrollArea>
               </Tabs>
             </div>
           </>
@@ -495,11 +693,13 @@ function TravauxList({ scope }: { scope: TravauxScope }) {
             ? { niveau: "ville", ville: scope.ville }
             : scope.niveau === "tranche"
               ? { niveau: "tranche", trancheCode: scope.trancheCode }
-              : {
-                  niveau: "lot",
-                  lotCode: scope.lotCode,
-                  trancheCode: scope.trancheCode,
-                },
+              : scope.niveau === "adresse"
+                ? { niveau: "adresse", adresse: scope.adresse }
+                : {
+                    niveau: "lot",
+                    lotCode: scope.lotCode,
+                    trancheCode: scope.trancheCode,
+                  },
       }),
   });
 
@@ -528,12 +728,24 @@ function TravauxList({ scope }: { scope: TravauxScope }) {
 
   return (
     <div className="space-y-6">
-      {groupedTravaux?.map(([year, travaux]) => (
-        <div key={year} className="space-y-3">
-          <h4 className="flex items-center gap-2 text-sm font-bold text-primary">
-            <Calendar className="size-4" /> {year}
-          </h4>
-          <ul className="divide-y rounded-lg border bg-card">
+      {groupedTravaux?.map(([year, travaux]) => {
+        const total = travaux.reduce((sum, t) => sum + (t.cout || 0), 0);
+        return (
+          <div key={year} className="space-y-3">
+            <h4 className="flex items-center gap-2 text-sm font-bold text-primary">
+              <Calendar className="size-4" /> {year}
+              <span className="text-xs font-medium text-muted-foreground">
+                · {travaux.length} travail{travaux.length > 1 ? "x" : ""}
+              </span>
+              {total > 0 && (
+                <span className="ml-auto text-xs font-semibold text-muted-foreground">
+                  {new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(
+                    total,
+                  )}
+                </span>
+              )}
+            </h4>
+            <ul className="divide-y rounded-lg border bg-card">
             {travaux.map((travail) => (
               <li key={travail.id} className="space-y-2 p-3 text-sm">
                 <div className="flex flex-wrap items-start justify-between gap-2">
@@ -578,8 +790,9 @@ function TravauxList({ scope }: { scope: TravauxScope }) {
               </li>
             ))}
           </ul>
-        </div>
-      ))}
+          </div>
+        );
+      })}
     </div>
   );
 }

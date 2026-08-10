@@ -12,6 +12,37 @@ export const getAdressesGeo = createServerFn({ method: "GET" }).handler(async ()
   return data ?? [];
 });
 
+export type VilleGeo = { ville: string; lat: number; lng: number; n: number };
+
+/** Coordonnées moyennes par ville, agrégées depuis le cache de géocodage adresses_geo. */
+export const getVillesGeo = createServerFn({ method: "GET" }).handler(async () => {
+  const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
+  const { data, error } = await supabaseAdmin
+    .from("adresses_geo")
+    .select("ville, lat, lng")
+    .limit(5000);
+  if (error) throw new Error(error.message);
+
+  const byVille = new Map<string, { key: string; n: number; lat: number; lng: number }>();
+  for (const row of data ?? []) {
+    const ville = (row.ville ?? "").trim();
+    const key = ville.toUpperCase();
+    if (!key || row.lat == null || row.lng == null) continue;
+    const g = byVille.get(key) ?? { key, n: 0, lat: 0, lng: 0 };
+    g.n += 1;
+    g.lat += row.lat;
+    g.lng += row.lng;
+    byVille.set(key, g);
+  }
+
+  return [...byVille.values()].map((g) => ({
+    ville: g.key,
+    lat: g.lat / g.n,
+    lng: g.lng / g.n,
+    n: g.n,
+  }));
+});
+
 const inputSchema = z.object({
   items: z.array(z.object({ cle: z.string(), adresse: z.string(), ville: z.string() })).max(25),
 });

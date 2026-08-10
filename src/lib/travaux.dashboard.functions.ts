@@ -1,6 +1,39 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
+// Colonnes réellement présentes dans travaux_commandes (schéma de production).
+// Les colonnes classification_* n'existent pas encore en base : on les exclut des
+// mises à jour pour que la résolution d'une alerte ne casse pas l'UPDATE.
+const COMMANDE_UPDATABLE_COLUMNS = [
+  "numero_commande",
+  "secteur",
+  "tranche_code",
+  "lot_code",
+  "batiment",
+  "charge_clientele",
+  "adresse",
+  "nature_analytique",
+  "corps_etat",
+  "charge_operation",
+  "ligne_budget",
+  "descriptif",
+  "budget",
+  "numero_fournisseur",
+  "fournisseur",
+  "etat_commande",
+  "engage",
+  "ecart",
+  "paye",
+  "solde",
+  "etat_travaux",
+  "date_demarrage",
+  "date_fin_travaux",
+  "observations",
+  "support_communication",
+  "date_communication",
+  "annee_exercice",
+] as const;
+
 export type CommandeTravaux = {
   id: string;
   numero_commande: string;
@@ -83,11 +116,14 @@ export const getTravauxDashboard = createServerFn({ method: "GET" }).handler(asy
   const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
   const db = supabaseAdmin as any;
 
-  // On tente de récupérer l'historique avec resolu=false, mais on replie si la colonne manque
-  const historiqueQuery = db
-    .from("travaux_commandes_historique")
-    .select("*, travaux_commandes(numero_commande)")
-    .eq("operation", "modification");
+  // On tente de récupérer l'historique avec resolu=false, mais on replie si la colonne manque.
+  // NB : les builders Supabase sont mutables (chaque .eq() s'accumule sur le même objet),
+  // donc chaque tentative doit repartir d'une requête neuve pour que le repli soit réel.
+  const buildHistoriqueQuery = () =>
+    db
+      .from("travaux_commandes_historique")
+      .select("*, travaux_commandes(numero_commande)")
+      .eq("operation", "modification");
 
   // On pourrait faire un check de colonne, mais tenter et catcher est plus simple ici pour TanStack Start
   const [commandesResult, importsResult, tranchesResult] = await Promise.all([
@@ -102,14 +138,14 @@ export const getTravauxDashboard = createServerFn({ method: "GET" }).handler(asy
 
   let historiqueResult;
   try {
-    historiqueResult = await historiqueQuery
+    historiqueResult = await buildHistoriqueQuery()
       .eq("resolu", false)
       .order("created_at", { ascending: false });
     if (historiqueResult.error && historiqueResult.error.message.includes("resolu")) {
-      historiqueResult = await historiqueQuery.order("created_at", { ascending: false });
+      historiqueResult = await buildHistoriqueQuery().order("created_at", { ascending: false });
     }
   } catch (e) {
-    historiqueResult = await historiqueQuery.order("created_at", { ascending: false });
+    historiqueResult = await buildHistoriqueQuery().order("created_at", { ascending: false });
   }
 
   if (commandesResult.error)
@@ -223,11 +259,18 @@ export const resolveHistoriqueTravaux = createServerFn({ method: "POST" })
     const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
     const db = supabaseAdmin as any;
 
-    // 1. Si l'utilisateur a choisi une version spécifique, on met à jour la commande
-    if (data.data && Object.keys(data.data).length > 0) {
+    // 1. Si l'utilisateur a choisi une version spécifique, on met à jour la commande.
+    //    On filtre sur les colonnes réellement existantes pour éviter qu'une colonne
+    //    absente du schéma (classification_*) ne fasse échouer toute la résolution.
+    const filteredData = Object.fromEntries(
+      Object.entries(data.data ?? {}).filter(([key]) =>
+        (COMMANDE_UPDATABLE_COLUMNS as readonly string[]).includes(key),
+      ),
+    );
+    if (Object.keys(filteredData).length > 0) {
       const { error: updateError } = await db
         .from("travaux_commandes")
-        .update(data.data)
+        .update(filteredData)
         .eq("id", data.commandeId);
       if (updateError) throw new Error(`Mise à jour commande : ${updateError.message}`);
     }

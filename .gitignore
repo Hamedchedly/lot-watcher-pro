@@ -19,6 +19,9 @@ dist-ssr
 .env.*
 !.env.example
 
+# Runtime logs
+*.err
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

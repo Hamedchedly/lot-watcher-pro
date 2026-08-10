@@ -191,6 +191,23 @@ const searchAdressesSchema = z.object({
   adresse: z.string().optional(),
 });
 
+/** Récupère toutes les villes distinctes depuis la table tranches. */
+export const getVilles = createServerFn({ method: "GET" }).handler(async () => {
+  const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
+  const { data: rows, error } = await supabaseAdmin
+    .from("tranches")
+    .select("localite")
+    .not("localite", "is", null)
+    .order("localite");
+
+  if (error) throw new Error(error.message);
+
+  const villes = Array.from(
+    new Set((rows ?? []).map((r) => r.localite).filter((v): v is string => !!v)),
+  );
+  return villes;
+});
+
 /** Recherche filtrée dans le patrimoine (lots). */
 export const getAdresses = createServerFn({ method: "POST" })
   .validator((d: unknown) => searchAdressesSchema.parse(d))
@@ -208,16 +225,17 @@ export const getAdresses = createServerFn({ method: "POST" })
     if (data.rue) query = query.ilike("adresse", `%${data.rue}%`);
     if (data.adresse) query = query.eq("adresse", data.adresse);
 
-    const { data: rows, error } = await query.order("code_patrimoine").limit(100);
+    const { data: rows, error } = await query.order("code_patrimoine");
     if (error) throw new Error(error.message);
     return rows ?? [];
   });
 
 export const travauxScopeSchema = z.object({
-  niveau: z.enum(["ville", "tranche", "lot"]),
+  niveau: z.enum(["ville", "tranche", "adresse", "lot"]),
   label: z.string().optional(),
   ville: z.string().max(160).optional(),
   trancheCode: z.string().max(64).optional(),
+  adresse: z.string().max(255).optional(),
   lotCode: z.string().max(64).optional(),
 });
 
@@ -242,6 +260,9 @@ export const getTravaux = createServerFn({ method: "POST" })
     } else if (data.niveau === "tranche") {
       if (!data.trancheCode) return [];
       lotsQuery = lotsQuery.eq("tranche_code", data.trancheCode);
+    } else if (data.niveau === "adresse") {
+      if (!data.adresse) return [];
+      lotsQuery = lotsQuery.ilike("adresse", `%${data.adresse}%`);
     } else {
       if (!data.lotCode) return [];
       lotsQuery = lotsQuery.eq("code_patrimoine", data.lotCode);
@@ -273,7 +294,7 @@ export const getTravaux = createServerFn({ method: "POST" })
       commandesQuery = commandesQuery.eq("tranche_code", data.trancheCode);
     } else if (data.niveau === "lot" && data.lotCode) {
       commandesQuery = commandesQuery.eq("lot_code", data.lotCode);
-    } else if (data.niveau === "ville") {
+    } else if (data.niveau === "ville" || data.niveau === "adresse") {
       commandesQuery = commandesQuery.in("tranche_code", trancheCodes);
     }
 
@@ -334,7 +355,7 @@ export const getTravaux = createServerFn({ method: "POST" })
     const travaux = [...baseTravaux, ...commandesTravaux];
 
     const lotsByCode = new Map(lots.map((lot) => [lot.code_patrimoine, lot]));
-    return travaux
+    const mapped = travaux
       .filter((travail) => {
         if (data.niveau !== "lot") return true;
         return (
@@ -357,4 +378,17 @@ export const getTravaux = createServerFn({ method: "POST" })
           porte: lot?.porte ?? null,
         };
       });
+
+    // Périmètre « adresse » : les travaux « tranche » (sans lot) s'appliquent à toute la
+    // tranche de l'adresse ; les travaux « lot » ne sont conservés que s'ils appartiennent
+    // réellement à l'adresse demandée (les adresses des commandes peuvent être écrites
+    // différemment de celles des lots, d'où le rattachement par lot/bâtiment).
+    if (data.niveau === "adresse" && data.adresse) {
+      const needle = data.adresse.toLocaleLowerCase();
+      return mapped.filter((t) => {
+        if (!t.lot_code) return true;
+        return (t.adresse ?? "").toLocaleLowerCase().includes(needle);
+      });
+    }
+    return mapped;
   });

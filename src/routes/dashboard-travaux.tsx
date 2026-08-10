@@ -45,6 +45,7 @@ import {
   ArrowUp,
   ArrowDown,
   Layers,
+  SlidersHorizontal,
   BarChart3,
   type LucideIcon,
 } from "lucide-react";
@@ -73,6 +74,7 @@ import {
   type TravauxDashboardData,
   type ImportTravaux,
 } from "@/lib/travaux.dashboard.functions";
+import { getVillesGeo, type VilleGeo } from "@/lib/geo.functions";
 
 export const Route = createFileRoute("/dashboard-travaux")({
   head: () => ({
@@ -88,6 +90,12 @@ export const Route = createFileRoute("/dashboard-travaux")({
 });
 
 type Commande = CommandeTravaux;
+type ClassementRow = {
+  label: string;
+  value: number;
+  ville?: string;
+  tranche?: string;
+};
 const SECTEURS = ["GT", "GE", "CP"] as const;
 const SECTOR_COLORS = { GT: "#2563eb", GE: "#0f766e", CP: "#c2410c" };
 const PAGE_SIZE = 20;
@@ -109,6 +117,40 @@ const cityOf = (address: unknown) => {
     .map((part) => part.trim())
     .filter(Boolean);
   return parts.at(-1) || "Ville non renseignée";
+};
+
+/** Normalisation : majuscules, sans accents ni ponctuation, espaces resserrés. */
+const normalizeVille = (value: string) =>
+  value
+    .toUpperCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^A-Z0-9]+/g, " ")
+    .trim();
+
+// Adresses « malformées » qui ne contiennent pas leur ville en clair.
+const VILLE_ALIASES: Record<string, string> = {
+  "10 CORNILLES": "CHESSY",
+  "2 IMPASSE CALVILLE": "VILLENEUVE SAINT DENIS",
+  "3H PL THOMAS LE PILLEUR": "SERRIS",
+  "PARKING AERIEN 1 FILOIRS DAMMARTIN": "DAMMARTIN EN GOELE",
+};
+
+/**
+ * Associe une ville extraite d'une adresse à la ville géocodée la plus proche
+ * (correspondance par sous-chaîne sur la forme normalisée, plus longue d'abord).
+ */
+const matchVille = (raw: string, villes: VilleGeo[]) => {
+  const normalized = normalizeVille(raw);
+  if (!normalized) return null;
+  const alias = VILLE_ALIASES[normalized];
+  const target = alias ? normalizeVille(alias) : normalized;
+  const keys = villes
+    .map((v) => ({ v, key: normalizeVille(v.ville) }))
+    .filter((x) => x.key)
+    .sort((a, b) => b.key.length - a.key.length);
+  const hit = keys.find((x) => target.includes(x.key) || x.key.includes(target));
+  return hit?.v ?? null;
 };
 
 const sectorOf = (row: Commande) => {
@@ -239,11 +281,13 @@ function MultiSelect({
 const DashboardMap = lazy(() => import("@/components/DashboardMap"));
 
 function ClientOnlyMap({
-  dataHeatmap,
+  dataVilles,
   money,
+  missing,
 }: {
-  dataHeatmap: [string, number][];
+  dataVilles: { ville: string; lat: number; lng: number; value: number }[];
   money: (v: number) => string;
+  missing: number;
 }) {
   const [isClient, setIsClient] = useState(false);
   useEffect(() => {
@@ -264,7 +308,7 @@ function ClientOnlyMap({
         </div>
       }
     >
-      <DashboardMap dataHeatmap={dataHeatmap} money={money} />
+      <DashboardMap dataVilles={dataVilles} money={money} missing={missing} />
     </Suspense>
   );
 }
@@ -275,9 +319,16 @@ function DashboardTravauxPage() {
   const updateCommande = useServerFn(updateCommandeTravaux);
   const resolveHistory = useServerFn(resolveHistoriqueTravaux);
 
-  const { data, isLoading } = useQuery<TravauxDashboardData>({
+  const { data, isLoading, isError, error } = useQuery<TravauxDashboardData>({
     queryKey: ["travaux-dashboard"],
     queryFn: () => fetchDashboard(),
+  });
+
+  const fetchVillesGeo = useServerFn(getVillesGeo);
+  const { data: villesGeo } = useQuery<VilleGeo[]>({
+    queryKey: ["villes-geo"],
+    queryFn: () => fetchVillesGeo(),
+    staleTime: 1000 * 60 * 30,
   });
 
   const allCommandes = data?.commandes ?? [];
@@ -291,14 +342,17 @@ function DashboardTravauxPage() {
   const [selectedSectors, setSelectedSectors] = useState<string[]>([...SECTEURS]);
   const [selectedTranches, setSelectedTranches] = useState<string[]>([]);
   const [selectedVilles, setSelectedVilles] = useState<string[]>([]);
+  const [selectedTypes, setSelectedTypes] = useState<string[]>([]);
+  const [selectedEtats, setSelectedEtats] = useState<string[]>([]);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [showAllTranches, setShowAllTranches] = useState(false);
-  const [mapMode, setMapMode] = useState<"map" | "heatmap">("heatmap");
+  const [mapMode, setMapMode] = useState<"map" | "classement">("map");
+  const [rankingMode, setRankingMode] = useState<"ville" | "tranche" | "adresse">("ville");
 
   // États Filtres En-tête Tableau
   const [tableFilters, setTableFilters] = useState<
-    Record<string, { min?: number; max?: number; selected?: string[] }>
+    Record<string, { min?: number; max?: number; selected?: string[]; search?: string }>
   >({});
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: "asc" | "desc" } | null>({
     key: "engage",
@@ -363,6 +417,27 @@ function DashboardTravauxPage() {
     return { years, tranches, villes };
   }, [allCommandes, tranchesDetails]);
 
+  // Options pour les filtres du Journal des Commandes (Paramètres)
+  const typeOptions = useMemo(() => {
+    const map = new Map<string, { label: string; value: string }>();
+    allCommandes.forEach((c) => {
+      if (!c.corps_etat) return;
+      if (!map.has(c.corps_etat))
+        map.set(c.corps_etat, { label: c.corps_etat, value: c.corps_etat });
+    });
+    return [...map.values()].sort((a, b) => a.label.localeCompare(b.label));
+  }, [allCommandes]);
+
+  const etatOptions = useMemo(() => {
+    const map = new Map<string, { label: string; value: string }>();
+    allCommandes.forEach((c) => {
+      const e = c.etat_travaux || c.etat_commande;
+      if (!e) return;
+      if (!map.has(e)) map.set(e, { label: e, value: e });
+    });
+    return [...map.values()].sort((a, b) => a.label.localeCompare(b.label));
+  }, [allCommandes]);
+
   useEffect(() => {
     if (options.years.length > 0) {
       setYearRange([options.years[0] as number, options.years[options.years.length - 1] as number]);
@@ -382,6 +457,12 @@ function DashboardTravauxPage() {
         selectedTranches.length === 0 ||
         (row.tranche_code && selectedTranches.includes(row.tranche_code));
       const matchesVille = selectedVilles.length === 0 || selectedVilles.includes(ville);
+      const matchesType =
+        selectedTypes.length === 0 ||
+        (row.corps_etat && selectedTypes.includes(row.corps_etat));
+      const matchesEtat =
+        selectedEtats.length === 0 ||
+        selectedEtats.includes(text(row.etat_travaux || row.etat_commande));
       const matchesSearch =
         !search ||
         [
@@ -392,7 +473,14 @@ function DashboardTravauxPage() {
           row.numero_fournisseur,
         ].some((v) => text(v).toLowerCase().includes(search.toLowerCase()));
       return (
-        matchesYear && matchesProg && matchesSect && matchesTranche && matchesVille && matchesSearch
+        matchesYear &&
+        matchesProg &&
+        matchesSect &&
+        matchesTranche &&
+        matchesVille &&
+        matchesType &&
+        matchesEtat &&
+        matchesSearch
       );
     });
 
@@ -409,10 +497,21 @@ function DashboardTravauxPage() {
         result = result.filter((r) =>
           filter.selected!.includes(String((r as unknown as Record<string, unknown>)[key])),
         );
+      if (filter?.search !== undefined && filter.search !== "")
+        result = result.filter((r) =>
+          text((r as unknown as Record<string, unknown>)[key])
+            .toLowerCase()
+            .includes(filter.search!.toLowerCase()),
+        );
     });
 
     if (sortConfig) {
       result.sort((a, b) => {
+        if (sortConfig.key === "city") {
+          const va = cityOf(a.adresse);
+          const vb = cityOf(b.adresse);
+          return sortConfig.direction === "asc" ? va.localeCompare(vb) : vb.localeCompare(va);
+        }
         const va = (a as unknown as Record<string, unknown>)[sortConfig.key];
         const vb = (b as unknown as Record<string, unknown>)[sortConfig.key];
         if (typeof va === "number" && typeof vb === "number")
@@ -430,6 +529,8 @@ function DashboardTravauxPage() {
     selectedSectors,
     selectedTranches,
     selectedVilles,
+    selectedTypes,
+    selectedEtats,
     search,
     tableFilters,
     sortConfig,
@@ -464,19 +565,106 @@ function DashboardTravauxPage() {
     [filtered],
   );
 
-  const dataHeatmap = useMemo(() => {
+  /** Ville « propre » dérivée de l'adresse (via le cache de géocodage si disponible). */
+  const villeDe = (adresse: string) =>
+    matchVille(cityOf(adresse), villesGeo ?? [])?.ville ?? cityOf(adresse);
+
+  const dataClassement = useMemo<ClassementRow[]>(() => {
+    if (rankingMode === "ville") {
+      const map = filtered.reduce(
+        (acc, r) => {
+          const city = villeDe(r.adresse || "");
+          acc[city] = (acc[city] || 0) + (r.engage || 0);
+          return acc;
+        },
+        {} as Record<string, number>,
+      );
+      return Object.entries(map)
+        .filter(([_, v]) => v > 0)
+        .sort((a, b) => b[1] - a[1])
+        .map(([label, value]) => ({ label, value }));
+    }
+
+    if (rankingMode === "tranche") {
+      // Classement par tranche : la ville affichée est celle avec le plus gros montant engagé.
+      const map = filtered.reduce(
+        (acc, r) => {
+          const tranche = r.tranche_code || "Sans tranche";
+          const ville = villeDe(r.adresse || "");
+          const engage = r.engage || 0;
+          const g = acc.get(tranche) ?? { tranche, ville, value: 0, villeValue: -1 };
+          g.value += engage;
+          if (engage > g.villeValue) {
+            g.villeValue = engage;
+            g.ville = ville;
+          }
+          acc.set(tranche, g);
+          return acc;
+        },
+        new Map<string, { tranche: string; ville: string; value: number; villeValue: number }>(),
+      );
+      return [...map.values()]
+        .filter((g) => g.value > 0)
+        .sort((a, b) => b.value - a.value)
+        .map((g) => ({ label: g.tranche, ville: g.ville, value: g.value }));
+    }
+
+    // Classement par adresse : la ville et la/les tranche(s) sont affichées à côté.
     const map = filtered.reduce(
       (acc, r) => {
-        const city = cityOf(r.adresse);
-        acc[city] = (acc[city] || 0) + (r.engage || 0);
+        const adresse = r.adresse || "Adresse inconnue";
+        const g = acc.get(adresse) ?? {
+          adresse,
+          ville: villeDe(adresse),
+          tranches: new Set<string>(),
+          value: 0,
+        };
+        g.value += r.engage || 0;
+        if (r.tranche_code) g.tranches.add(r.tranche_code);
+        acc.set(adresse, g);
         return acc;
       },
-      {} as Record<string, number>,
+      new Map<string, { adresse: string; ville: string; tranches: Set<string>; value: number }>(),
     );
-    return Object.entries(map)
-      .filter(([_, v]) => v > 0)
-      .sort((a, b) => b[1] - a[1]);
-  }, [filtered]);
+    return [...map.values()]
+      .filter((g) => g.value > 0)
+      .sort((a, b) => b.value - a.value)
+      .map((g) => ({
+        label: g.adresse,
+        ville: g.ville,
+        tranche: [...g.tranches].sort().join(" / "),
+        value: g.value,
+      }));
+  }, [filtered, rankingMode, villesGeo]);
+
+  // Villes géocodées avec le montant investi agrégé (pour la cartographie couleur).
+  const { dataVilles, villesNonLocalisees } = useMemo(() => {
+    const villes = villesGeo ?? [];
+    const map = new Map<
+      string,
+      { ville: string; lat: number; lng: number; value: number }
+    >();
+    const unmatched = new Set<string>();
+    for (const r of filtered) {
+      const ville = matchVille(cityOf(r.adresse), villes);
+      if (!ville) {
+        unmatched.add(cityOf(r.adresse));
+        continue;
+      }
+      const g = map.get(ville.ville) ?? {
+        ville: ville.ville,
+        lat: ville.lat,
+        lng: ville.lng,
+        value: 0,
+      };
+      g.value += r.engage || 0;
+      map.set(ville.ville, g);
+    }
+    return {
+      dataVilles: [...map.values()].filter((d) => d.value > 0),
+      villesNonLocalisees: villesGeo ? unmatched.size : 0,
+    };
+  }, [filtered, villesGeo]);
 
   const dataTranche = useMemo(() => {
     const map = filtered.reduce(
@@ -532,6 +720,8 @@ function DashboardTravauxPage() {
     setSelectedSectors([...SECTEURS]);
     setSelectedTranches([]);
     setSelectedVilles([]);
+    setSelectedTypes([]);
+    setSelectedEtats([]);
     setSearch("");
     setTableFilters({});
     setPage(1);
@@ -577,6 +767,31 @@ function DashboardTravauxPage() {
         Initialisation du Dashboard Pro...
       </div>
     );
+
+  if (isError) {
+    const message = error instanceof Error ? error.message : "Erreur inconnue";
+    return (
+      <div className="flex h-screen flex-col items-center justify-center gap-4 bg-slate-50 px-6 text-center">
+        <AlertTriangle className="size-10 text-red-500" />
+        <div className="max-w-lg">
+          <h2 className="text-lg font-black text-slate-900 uppercase tracking-wide">
+            Impossible de charger le dashboard
+          </h2>
+          <p className="mt-2 text-sm font-medium text-slate-500">
+            La connexion à la base de données a échoué. Vérifiez que les variables{" "}
+            <code>EXT_SUPABASE_URL</code> et <code>EXT_SUPABASE_SERVICE_ROLE_KEY</code>{" "}
+            sont configurées, puis rechargez la page.
+          </p>
+          <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 font-mono text-xs text-red-600">
+            {message}
+          </p>
+          <Button className="mt-5" size="sm" onClick={() => window.location.reload()}>
+            Recharger la page
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <main className="min-h-screen bg-slate-50/50 pb-12 text-slate-900 font-sans">
@@ -781,7 +996,7 @@ function DashboardTravauxPage() {
           <article className="lg:col-span-2 bg-white rounded-3xl border border-slate-200 p-6 shadow-sm overflow-hidden relative min-h-[450px]">
             <div className="flex items-center justify-between mb-6 relative z-10">
               <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-2">
-                <MapIcon className="size-4 text-blue-600" /> Cartographie vs Heatmap
+                <MapIcon className="size-4 text-blue-600" /> Cartographie vs Classement
               </h3>
               <div className="flex bg-slate-100 p-1 rounded-xl">
                 <button
@@ -791,41 +1006,67 @@ function DashboardTravauxPage() {
                   <MapIcon className="size-3 mr-1.5 inline" /> Carte
                 </button>
                 <button
-                  onClick={() => setMapMode("heatmap")}
-                  className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase transition-all ${mapMode === "heatmap" ? "bg-white text-blue-600 shadow-sm" : "text-slate-400 hover:text-slate-600"}`}
+                  onClick={() => setMapMode("classement")}
+                  className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase transition-all ${mapMode === "classement" ? "bg-white text-blue-600 shadow-sm" : "text-slate-400 hover:text-slate-600"}`}
                 >
-                  <BarChart3 className="size-3 mr-1.5 inline" /> Heatmap
+                  <BarChart3 className="size-3 mr-1.5 inline" /> Classement
                 </button>
               </div>
             </div>
             {mapMode === "map" ? (
               <div className="absolute inset-0 z-0">
-                <ClientOnlyMap dataHeatmap={dataHeatmap} money={money} />
+                <ClientOnlyMap
+                  dataVilles={dataVilles}
+                  money={money}
+                  missing={villesNonLocalisees}
+                />
               </div>
             ) : (
-              <div className="space-y-4 h-[350px] overflow-y-auto pr-2 custom-scrollbar mt-4">
-                {dataHeatmap.map(([city, val], idx) => {
-                  const max = dataHeatmap[0]?.[1] || 1;
-                  const pct = (val / max) * 100;
-                  const color = pct > 70 ? "bg-red-500" : pct > 30 ? "bg-blue-500" : "bg-blue-200";
-                  return (
-                    <div key={city} className="group relative">
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-[10px] font-black text-slate-700 uppercase truncate max-w-[200px]">
-                          {city}
-                        </span>
-                        <span className="text-[10px] font-black text-slate-900">{money(val)}</span>
+              <>
+                <div className="flex bg-slate-100 p-1 rounded-xl w-max mb-4">
+                  {(["ville", "tranche", "adresse"] as const).map((mode) => (
+                    <button
+                      key={mode}
+                      onClick={() => setRankingMode(mode)}
+                      className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase transition-all ${rankingMode === mode ? "bg-white text-blue-600 shadow-sm" : "text-slate-400 hover:text-slate-600"}`}
+                    >
+                      {mode === "ville" ? "Ville" : mode === "tranche" ? "Tranche" : "Adresse"}
+                    </button>
+                  ))}
+                </div>
+                <div className="space-y-4 h-[350px] overflow-y-auto pr-2 custom-scrollbar">
+                  {dataClassement.map((row, idx) => {
+                    const max = dataClassement[0]?.value || 1;
+                    const pct = (row.value / max) * 100;
+                    const color = pct > 70 ? "bg-red-500" : pct > 40 ? "bg-orange-400" : "bg-yellow-400";
+                    return (
+                      <div key={`${rankingMode}-${idx}-${row.label}`} className="group relative">
+                        <div className="flex items-center justify-between mb-1 gap-2">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span className="text-[10px] font-black text-slate-700 uppercase truncate">
+                              {row.label}
+                            </span>
+                            {row.ville && (
+                              <span className="text-[9px] font-bold text-slate-400 truncate">
+                                {row.tranche ? `· ${row.ville} · Tr. ${row.tranche}` : `· ${row.ville}`}
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-[10px] font-black text-slate-900 shrink-0">
+                            {money(row.value)}
+                          </span>
+                        </div>
+                        <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
+                          <div
+                            className={`h-full rounded-full transition-all duration-1000 ${color}`}
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
                       </div>
-                      <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
-                        <div
-                          className={`h-full rounded-full transition-all duration-1000 ${color}`}
-                          style={{ width: `${pct}%` }}
-                        />
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+                    );
+                  })}
+                </div>
+              </>
             )}
           </article>
           <article className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm">
@@ -960,7 +1201,126 @@ function DashboardTravauxPage() {
                 {filtered.length} LIGNES
               </Badge>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex items-center gap-2">
+                <Label className="text-[9px] font-black uppercase text-slate-400 tracking-wider">
+                  Années
+                </Label>
+                <span className="text-[10px] font-black text-blue-600 bg-blue-50 px-2 py-0.5 rounded">
+                  {yearRange[0]}
+                </span>
+                <div className="relative w-36 h-6 flex items-center">
+                  <input
+                    type="range"
+                    min={options.years[0] || 2020}
+                    max={options.years[options.years.length - 1] || new Date().getFullYear()}
+                    value={yearRange[0]}
+                    onChange={(e) =>
+                      setYearRange([Math.min(Number(e.target.value), yearRange[1]), yearRange[1]])
+                    }
+                    className="absolute w-full h-1.5 bg-slate-100 rounded-full appearance-none cursor-pointer accent-blue-600 z-10"
+                  />
+                  <input
+                    type="range"
+                    min={options.years[0] || 2020}
+                    max={options.years[options.years.length - 1] || new Date().getFullYear()}
+                    value={yearRange[1]}
+                    onChange={(e) =>
+                      setYearRange([yearRange[0], Math.max(Number(e.target.value), yearRange[0])])
+                    }
+                    className="absolute w-full h-1.5 bg-transparent appearance-none cursor-pointer accent-blue-600 z-20"
+                  />
+                </div>
+                <span className="text-[10px] font-black text-blue-600 bg-blue-50 px-2 py-0.5 rounded">
+                  {yearRange[1]}
+                </span>
+              </div>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-[9px] font-black uppercase tracking-widest border-slate-200 rounded-lg h-8"
+                  >
+                    <SlidersHorizontal className="size-3 mr-1.5" /> PARAMÈTRES
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-96 p-4 rounded-2xl space-y-5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-black uppercase text-slate-900 tracking-widest">
+                      Filtres du Journal
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setSelectedTranches([]);
+                        setSelectedTypes([]);
+                        setSelectedEtats([]);
+                        setProgFilter({ prog: true, hors: true });
+                      }}
+                      className="text-[9px] font-black text-red-500 h-6 px-2"
+                    >
+                      EFFACER
+                    </Button>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-[9px] font-black uppercase text-slate-400 tracking-wider">
+                      Tranche
+                    </Label>
+                    <MultiSelect
+                      label="Tranches"
+                      options={options.tranches}
+                      selected={selectedTranches}
+                      onChange={setSelectedTranches}
+                      icon={Layers}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-[9px] font-black uppercase text-slate-400 tracking-wider">
+                      Type
+                    </Label>
+                    <MultiSelect
+                      label="Types"
+                      options={typeOptions}
+                      selected={selectedTypes}
+                      onChange={setSelectedTypes}
+                      icon={Wrench}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-[9px] font-black uppercase text-slate-400 tracking-wider">
+                      État
+                    </Label>
+                    <MultiSelect
+                      label="États"
+                      options={etatOptions}
+                      selected={selectedEtats}
+                      onChange={setSelectedEtats}
+                      icon={CheckCircle2}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-[9px] font-black uppercase text-slate-400 tracking-wider">
+                      Programmation
+                    </Label>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => setProgFilter((p) => ({ ...p, prog: !p.prog }))}
+                        className={`px-3 py-1.5 rounded-lg text-[9px] font-black transition-all border ${progFilter.prog ? "bg-green-600 text-white border-green-600 shadow-md" : "bg-slate-50 text-slate-500 border-slate-200"}`}
+                      >
+                        PROG.
+                      </button>
+                      <button
+                        onClick={() => setProgFilter((p) => ({ ...p, hors: !p.hors }))}
+                        className={`px-3 py-1.5 rounded-lg text-[9px] font-black transition-all border ${progFilter.hors ? "bg-orange-600 text-white border-orange-600 shadow-md" : "bg-slate-50 text-slate-500 border-slate-200"}`}
+                      >
+                        HORS
+                      </button>
+                    </div>
+                  </div>
+                </PopoverContent>
+              </Popover>
               <Button
                 variant="outline"
                 size="sm"
@@ -990,9 +1350,84 @@ function DashboardTravauxPage() {
                         ))}
                     </button>
                   </th>
-                  <th className="p-4 w-24">Tranche</th>
+                  <th className="p-4 w-24">
+                    <button
+                      onClick={() => toggleSort("tranche_code")}
+                      className="flex items-center gap-1 hover:text-blue-600 transition-colors"
+                    >
+                      Tranche{" "}
+                      {sortConfig?.key === "tranche_code" &&
+                        (sortConfig.direction === "asc" ? (
+                          <ArrowUp className="size-3" />
+                        ) : (
+                          <ArrowDown className="size-3" />
+                        ))}
+                    </button>
+                  </th>
                   <th className="p-4 w-48">Adresse</th>
-                  <th className="p-4 w-56">Descriptif</th>
+                  <th className="p-4 w-28">
+                    <button
+                      onClick={() => toggleSort("city")}
+                      className="flex items-center gap-1 hover:text-blue-600 transition-colors"
+                    >
+                      Ville{" "}
+                      {sortConfig?.key === "city" &&
+                        (sortConfig.direction === "asc" ? (
+                          <ArrowUp className="size-3" />
+                        ) : (
+                          <ArrowDown className="size-3" />
+                        ))}
+                    </button>
+                  </th>
+                  <th className="p-4 w-56">
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <button className="flex items-center gap-1 hover:text-blue-600">
+                          Descriptif <Search className="size-3" />
+                        </button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-80 p-4 rounded-2xl">
+                        <Label className="text-[9px] font-black uppercase mb-4 block">
+                          Recherche Descriptif
+                        </Label>
+                        <div className="relative">
+                          <Search className="absolute left-3 top-2.5 size-3.5 text-slate-400" />
+                          <Input
+                            type="text"
+                            value={tableFilters["descriptif"]?.search ?? ""}
+                            onChange={(e) =>
+                              setTableFilters((p) => ({
+                                ...p,
+                                descriptif: {
+                                  ...(p["descriptif"] ?? {}),
+                                  search: e.target.value,
+                                },
+                              }))
+                            }
+                            placeholder="Rechercher dans le descriptif..."
+                            autoFocus
+                            className="h-9 w-full rounded-xl border border-slate-200 bg-slate-50 pl-9 pr-4 text-[10px] font-black uppercase focus:ring-2 focus:ring-blue-500 outline-none"
+                          />
+                        </div>
+                        {tableFilters["descriptif"]?.search ? (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() =>
+                              setTableFilters((p) => {
+                                const next = { ...(p["descriptif"] ?? {}) };
+                                delete next.search;
+                                return { ...p, descriptif: next };
+                              })
+                            }
+                            className="mt-2 text-[9px] font-black text-red-500 h-6 px-2"
+                          >
+                            EFFACER LA RECHERCHE
+                          </Button>
+                        ) : null}
+                      </PopoverContent>
+                    </Popover>
+                  </th>
                   <th className="p-4 w-24">Type</th>
                   <th className="p-4 w-28">Entreprise</th>
                   <th className="p-4 w-32 text-right">
@@ -1081,6 +1516,9 @@ function DashboardTravauxPage() {
                       </td>
                       <td className="p-4 font-bold text-slate-600 truncate uppercase">
                         {row.adresse || "—"}
+                      </td>
+                      <td className="p-4 font-bold text-slate-500 truncate uppercase">
+                        {cityOf(row.adresse) || "—"}
                       </td>
                       <td className="p-4 text-slate-500 truncate">{row.descriptif || "—"}</td>
                       <td className="p-4">
