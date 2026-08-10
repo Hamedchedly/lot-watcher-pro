@@ -12,6 +12,8 @@ const commandeSchema = z.object({
   ecart: nullableNumber, paye: nullableNumber, solde: nullableNumber, etat_travaux: nullableText,
   date_demarrage: nullableText, date_fin_travaux: nullableText, observations: nullableText,
   support_communication: nullableText, date_communication: nullableText,
+  classification_programmation: nullableText,
+  classification_secteur: nullableText,
 });
 const importIdSchema = z.object({ importId: z.string().uuid() });
 const batchSchema = z.object({ importId: z.string().uuid(), commandes: z.array(commandeSchema) });
@@ -54,7 +56,22 @@ export const importTravauxBatch = createServerFn({ method: "POST" })
     const annee_exercice = importData?.annee_exercice;
 
     for (const source of data.commandes) {
-      const row = { ...source, tranche_code: source.tranche_code && validTranches.has(source.tranche_code) ? source.tranche_code : null, vu_dans_import_id: data.importId, annee_exercice, actif: true };
+      const programmation = source.ligne_budget ? "Programmée" : "Hors Budget";
+      let secteur_groupe = null;
+      const corps_etat = source.corps_etat?.toLowerCase() || "";
+      if (["maconnerie", "isolation", "divers", "espaces ext"].some(k => corps_etat.includes(k))) secteur_groupe = "GT";
+      else if (["electricite", "couvertures", "halls", "cages"].some(k => corps_etat.includes(k))) secteur_groupe = "GE";
+      else if (["plomberie", "menuiseries", "toitures", "fermetures", "etancheite"].some(k => corps_etat.includes(k))) secteur_groupe = "CP";
+
+      const row = { 
+        ...source, 
+        tranche_code: source.tranche_code && validTranches.has(source.tranche_code) ? source.tranche_code : null, 
+        vu_dans_import_id: data.importId, 
+        annee_exercice, 
+        actif: true,
+        classification_programmation: programmation,
+        classification_secteur: secteur_groupe
+      };
       if (source.tranche_code && !validTranches.has(source.tranche_code)) ignorees += 1;
       const before = existing.get(source.numero_commande) as Record<string, unknown> | undefined;
       const changed = !before || JSON.stringify(comparable(before)) !== JSON.stringify(comparable(row));

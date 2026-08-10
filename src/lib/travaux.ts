@@ -66,11 +66,13 @@ const normalizeHeader = (value: unknown) => text(value)?.toLowerCase().normalize
 const headerAliases: Record<string, keyof CommandeTravaux> = {
   secteur: "secteur", tranche: "tranche_code", "charge de clientele": "charge_clientele", adresse: "adresse",
   "nature analytique": "nature_analytique", "corps d etat": "corps_etat", "charge d op": "charge_operation",
-  "ligne budget": "ligne_budget", "descriptif des travaux": "descriptif", budget: "budget", "no commande": "numero_commande",
-  "no fournisseur": "numero_fournisseur", fournisseur: "fournisseur", "etat de la commande": "etat_commande", engage: "engage",
-  ecart: "ecart", paye: "paye", solde: "solde", "etat des travaux": "etat_travaux", "date demarrage": "date_demarrage",
-  "date fin des travaux": "date_fin_travaux", observations: "observations", "support communication": "support_communication",
-  "date communication": "date_communication",
+  "charge d operation": "charge_operation", "ligne budget": "ligne_budget", "descriptif des travaux": "descriptif",
+  budget: "budget", "no commande": "numero_commande", "numero commande": "numero_commande",
+  "no fournisseur": "numero_fournisseur", "numero fournisseur": "numero_fournisseur", fournisseur: "fournisseur",
+  "etat de la commande": "etat_commande", "etat commande": "etat_commande", engage: "engage",
+  ecart: "ecart", paye: "paye", solde: "solde", "etat des travaux": "etat_travaux", "etat travaux": "etat_travaux",
+  "date demarrage": "date_demarrage", "date fin des travaux": "date_fin_travaux", "date fin travaux": "date_fin_travaux",
+  observations: "observations", "support communication": "support_communication", "date communication": "date_communication",
 };
 const moneyFields = new Set(["budget", "engage", "ecart", "paye", "solde"]);
 const dateFields = new Set(["date_demarrage", "date_fin_travaux", "date_communication"]);
@@ -131,4 +133,5 @@ export const TRAVAUX_FIELDS = [
   "secteur", "tranche_code", "charge_clientele", "adresse", "nature_analytique", "corps_etat", "charge_operation", "ligne_budget",
   "descriptif", "budget", "numero_fournisseur", "fournisseur", "etat_commande", "engage", "ecart", "paye", "solde", "etat_travaux",
   "date_demarrage", "date_fin_travaux", "observations", "support_communication", "date_communication", "lot_code", "batiment",
+  "annee_exercice", "classification_programmation", "classification_secteur",
 ] as const;

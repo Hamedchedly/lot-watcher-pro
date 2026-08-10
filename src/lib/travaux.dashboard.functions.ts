@@ -28,6 +28,9 @@ export type CommandeTravaux = {
   observations: string | null;
   support_communication: string | null;
   date_communication: string | null;
+  annee_exercice: number | null;
+  classification_programmation: string | null;
+  classification_secteur: string | null;
   actif: boolean;
   created_at: string;
   updated_at: string;
