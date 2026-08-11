@@ -5,6 +5,11 @@ import {
   etatMetier,
   ETATS_METIER,
   exerciceCourant,
+  repartitionCommandesParSecteur,
+  buildDataVilles,
+  secteurDe,
+  matchVille,
+  villeDepuisAdresse,
 } from "../src/lib/travaux.ts";
 
 let passed = 0;
@@ -89,6 +94,79 @@ const opts = buildEtatOptions(sample, EX);
 assert("options contient Terminés", opts.includes("Terminés"));
 assert("options contient Pas réalisé", opts.includes("Pas réalisé"));
 assert("options : aucun montant/date parasite", !opts.some((o) => /[0-9]/.test(o)));
+
+// =====================================================================
+// Répartition par secteur = NOMBRE de commandes (jamais une somme engage)
+// =====================================================================
+const cpRows = Array.from({ length: 15 }, (_, i) => ({
+  numero_commande: `CP-${i}`,
+  corps_etat: "(o) Plomberie",
+  engage: -500,
+  annee_exercice: 2026,
+}));
+const gtRows = [{ numero_commande: "GT-1", corps_etat: "(e) Divers", engage: 1000 }];
+const repartition = repartitionCommandesParSecteur([...cpRows, ...gtRows]);
+assert(
+  "T1 CP = 15 commandes malgré engage négatif",
+  repartition.find((d) => d.name === "CP")?.value === 15,
+);
+assert(
+  "T1b CP conserve un montant engage négatif mais compte les commandes",
+  repartition.find((d) => d.name === "CP")?.value === 15,
+);
+assert(
+  "T2 secteur sans commande absent",
+  !repartition.some((d) => d.name === "GE"),
+);
+
+// =====================================================================
+// Carte des investissements — buildDataVilles
+// =====================================================================
+const villesGeo = [
+  { ville: "MEAUX", lat: 48.95, lng: 2.88, n: 2 },
+  { ville: "SERRIS", lat: 48.85, lng: 2.79, n: 1 },
+];
+const cPos = [{ numero_commande: "1", adresse: "2 RUE BERTRAND FLORNOY, MEAUX", engage: 5000 }];
+const cNeg = [{ numero_commande: "2", adresse: "3 RUE X, MEAUX", engage: -2000 }];
+const cNonGeo = [{ numero_commande: "3", adresse: "4 RUE Y, VILLEINCONNUE", engage: 9000 }];
+const r1 = buildDataVilles([...cPos, ...cNeg, ...cNonGeo], villesGeo);
+assert(
+  "T3 ville engage positif apparaît",
+  r1.dataVilles.some((d) => d.ville === "MEAUX" && d.value === 3000 && d.count === 2),
+);
+const r2 = buildDataVilles(
+  [{ numero_commande: "4", adresse: "5 RUE Z, SERRIS", engage: -100 }],
+  villesGeo,
+);
+assert(
+  "T4 ville somme engage négative conservée (count>0)",
+  r2.dataVilles.some((d) => d.ville === "SERRIS" && d.count === 1 && d.value === -100),
+);
+assert(
+  "T5 commande sans coordonnées → nonLocalisees",
+  r1.nonLocalisees === 1,
+);
+assert(
+  "T6 autres villes restent visibles malgré une ville non localisée",
+  r1.dataVilles.length >= 1 && r1.dataVilles[0].ville === "MEAUX",
+);
+assert("T6b villes géo vide → dataVilles vide, nonLocalisees 0", (() => {
+  const r = buildDataVilles(cPos, []);
+  return r.dataVilles.length === 0 && r.nonLocalisees === 0;
+})());
+assert(
+  "T6c secteurDe classifie CP via corps_etat",
+  secteurDe({ corps_etat: "(o) Plomberie" }) === "CP",
+);
+assert(
+  "T6d villeDepuisAdresse extrait la ville",
+  villeDepuisAdresse("2 RUE BERTRAND FLORNOY, MEAUX") === "MEAUX",
+);
+assert(
+  "T6e matchVille correspond par sous-chaîne",
+  matchVille("CHESSY PLACE DES CORNILLES", [{ ville: "CHESSY", lat: 1, lng: 2 }])?.ville ===
+    "CHESSY",
+);
 
 console.log("\n==========================================");
 console.log(`Résultat : ${passed} PASS, ${failed} FAIL`);

@@ -3,7 +3,16 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import * as SliderPrimitive from "@radix-ui/react-slider";
-import { ETATS_METIER, etatMetier, exerciceCourant, sliderYearDomain } from "@/lib/travaux";
+import {
+  ETATS_METIER,
+  buildDataVilles,
+  etatMetier,
+  exerciceCourant,
+  matchVille,
+  repartitionCommandesParSecteur,
+  secteurDe,
+  sliderYearDomain,
+} from "@/lib/travaux";
 import {
   Bar,
   BarChart,
@@ -152,54 +161,8 @@ function YearRangeSlider({
   );
 }
 
-/** Normalisation : majuscules, sans accents ni ponctuation, espaces resserrés. */
-const normalizeVille = (value: string) =>
-  value
-    .toUpperCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^A-Z0-9]+/g, " ")
-    .trim();
-
-// Adresses « malformées » qui ne contiennent pas leur ville en clair.
-const VILLE_ALIASES: Record<string, string> = {
-  "10 CORNILLES": "CHESSY",
-  "2 IMPASSE CALVILLE": "VILLENEUVE SAINT DENIS",
-  "3H PL THOMAS LE PILLEUR": "SERRIS",
-  "PARKING AERIEN 1 FILOIRS DAMMARTIN": "DAMMARTIN EN GOELE",
-};
-
-/**
- * Associe une ville extraite d'une adresse à la ville géocodée la plus proche
- * (correspondance par sous-chaîne sur la forme normalisée, plus longue d'abord).
- */
-const matchVille = (raw: string, villes: VilleGeo[]) => {
-  const normalized = normalizeVille(raw);
-  if (!normalized) return null;
-  const alias = VILLE_ALIASES[normalized];
-  const target = alias ? normalizeVille(alias) : normalized;
-  const keys = villes
-    .map((v) => ({ v, key: normalizeVille(v.ville) }))
-    .filter((x) => x.key)
-    .sort((a, b) => b.key.length - a.key.length);
-  const hit = keys.find((x) => target.includes(x.key) || x.key.includes(target));
-  return hit?.v ?? null;
-};
-
-const sectorOf = (row: Commande) => {
-  const corps_etat = row.corps_etat?.toLowerCase() || "";
-  if (["maconnerie", "isolation", "divers", "espaces ext"].some((k) => corps_etat.includes(k)))
-    return "GT";
-  if (["electricite", "couvertures", "halls", "cages"].some((k) => corps_etat.includes(k)))
-    return "GE";
-  if (
-    ["plomberie", "menuiseries", "toitures", "fermetures", "etancheite"].some((k) =>
-      corps_etat.includes(k),
-    )
-  )
-    return "CP";
-  return "GT"; // Par défaut
-};
+/** Normalisation et matching de villes + secteur dérivé : helpers importés de "@/lib/travaux"
+ * (secteurDe, matchVille, repartitionCommandesParSecteur, buildDataVilles). */
 
 const yearOf = (row: Commande) => {
   if (row.annee_exercice) return String(row.annee_exercice);
@@ -499,7 +462,7 @@ function DashboardTravauxPage() {
     let result = visibleCommandes.filter((row) => {
       const year = Number(yearOf(row));
       const isProg = !!row.ligne_budget;
-      const sect = sectorOf(row);
+      const sect = secteurDe(row);
       const ville = cityOf(row.adresse);
       const matchesYear = isNaN(year) || (year >= yearRange[0] && year <= yearRange[1]);
       const matchesProg = (isProg && progFilter.prog) || (!isProg && progFilter.hors);
@@ -605,16 +568,7 @@ function DashboardTravauxPage() {
     };
   }, [filtered]);
 
-  const dataSecteur = useMemo(
-    () =>
-      SECTEURS.map((s) => ({
-        name: s,
-        value: filtered
-          .filter((r) => sectorOf(r) === s)
-          .reduce((sum, r) => sum + (r.engage || 0), 0),
-      })).filter((d) => d.value > 0),
-    [filtered],
-  );
+  const dataSecteur = useMemo(() => repartitionCommandesParSecteur(filtered), [filtered]);
 
   /** Ville « propre » dérivée de l'adresse (via le cache de géocodage si disponible). */
   const villeDe = (adresse: string) =>
@@ -689,33 +643,10 @@ function DashboardTravauxPage() {
   }, [filtered, rankingMode, villesGeo]);
 
   // Villes géocodées avec le montant investi agrégé (pour la cartographie couleur).
-  const { dataVilles, villesNonLocalisees } = useMemo(() => {
-    const villes = villesGeo ?? [];
-    const map = new Map<
-      string,
-      { ville: string; lat: number; lng: number; value: number }
-    >();
-    const unmatched = new Set<string>();
-    for (const r of filtered) {
-      const ville = matchVille(cityOf(r.adresse), villes);
-      if (!ville) {
-        unmatched.add(cityOf(r.adresse));
-        continue;
-      }
-      const g = map.get(ville.ville) ?? {
-        ville: ville.ville,
-        lat: ville.lat,
-        lng: ville.lng,
-        value: 0,
-      };
-      g.value += r.engage || 0;
-      map.set(ville.ville, g);
-    }
-    return {
-      dataVilles: [...map.values()].filter((d) => d.value > 0),
-      villesNonLocalisees: villesGeo ? unmatched.size : 0,
-    };
-  }, [filtered, villesGeo]);
+  const { dataVilles, nonLocalisees: villesNonLocalisees } = useMemo(
+    () => buildDataVilles(filtered, villesGeo ?? []),
+    [filtered, villesGeo],
+  );
 
   const dataTranche = useMemo(() => {
     const map = filtered.reduce(
@@ -742,7 +673,7 @@ function DashboardTravauxPage() {
   const dataDrilldown = useMemo(() => {
     if (!drilldownSector) return [];
     const map = filtered
-      .filter((r) => sectorOf(r) === drilldownSector)
+      .filter((r) => secteurDe(r) === drilldownSector)
       .reduce(
         (acc, r) => {
           const c = r.corps_etat || "Non renseigné";
@@ -1516,7 +1447,7 @@ function DashboardTravauxPage() {
               <tbody className="divide-y divide-slate-100">
                 {filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).map((row) => {
                   const modif = historyMap.get(row.id);
-                  const sect = sectorOf(row);
+                  const sect = secteurDe(row);
                   const isProg = !!row.ligne_budget;
                   return (
                     <tr key={row.id} className="hover:bg-blue-50/30 transition-colors group">
@@ -1677,7 +1608,7 @@ function DashboardTravauxPage() {
                     </select>
                   ) : (
                     <p className="text-sm font-black">
-                      {selectedDetail ? sectorOf(selectedDetail) : "—"}
+                      {selectedDetail ? secteurDe(selectedDetail) : "—"}
                     </p>
                   )}
                 </div>

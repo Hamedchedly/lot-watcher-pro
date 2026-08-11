@@ -538,3 +538,113 @@ export const etatMetier = (
   if (!brut) return "Sans état";
   return (ETATS_METIER as readonly string[]).includes(brut) ? brut : "Autre";
 };
+
+export const SECTEURS = ["GT", "GE", "CP"] as const;
+export type Secteur = (typeof SECTEURS)[number];
+
+/** Secteur patrimonial (GT/GE/CP) dérivé du corps d'état. */
+export const secteurDe = (row: Record<string, unknown>): Secteur => {
+  const corps_etat = String(row["corps_etat"] ?? "").toLowerCase();
+  if (["maconnerie", "isolation", "divers", "espaces ext"].some((k) => corps_etat.includes(k)))
+    return "GT";
+  if (["electricite", "couvertures", "halls", "cages"].some((k) => corps_etat.includes(k)))
+    return "GE";
+  if (
+    ["plomberie", "menuiseries", "toitures", "fermetures", "etancheite"].some((k) =>
+      corps_etat.includes(k),
+    )
+  )
+    return "CP";
+  return "GT"; // Par défaut
+};
+
+/**
+ * Répartition des commandes par secteur = NOMBRE de commandes (jamais une somme d'engage).
+ * Un secteur est présent dès qu'il possède au moins une commande, même si la somme engage
+ * est négative ou nulle. Un secteur sans commande n'apparaît pas.
+ */
+export const repartitionCommandesParSecteur = (
+  commandes: Record<string, unknown>[],
+): { name: string; value: number }[] =>
+  SECTEURS.map((s) => ({
+    name: s,
+    value: commandes.filter((r) => secteurDe(r) === s).length,
+  })).filter((d) => d.value > 0);
+
+/** Normalisation : majuscules, sans accents ni ponctuation, espaces resserrés. */
+const normalizeVillePure = (value: string) =>
+  value
+    .toUpperCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^A-Z0-9]+/g, " ")
+    .trim();
+
+// Adresses « malformées » qui ne contiennent pas leur ville en clair.
+const VILLE_ALIASES: Record<string, string> = {
+  "10 CORNILLES": "CHESSY",
+  "2 IMPASSE CALVILLE": "VILLENEUVE SAINT DENIS",
+  "3H PL THOMAS LE PILLEUR": "SERRIS",
+  "PARKING AERIEN 1 FILOIRS DAMMARTIN": "DAMMARTIN EN GOELE",
+};
+
+export type VilleGeoPure = { ville: string; lat: number; lng: number; n?: number };
+export type DataVille = { ville: string; lat: number; lng: number; value: number; count: number };
+
+/** Ville extraite d'une adresse (dernier segment après « , »). */
+export const villeDepuisAdresse = (adresse: string): string => {
+  const parts = adresse
+    .split(",")
+    .map((p) => p.trim())
+    .filter(Boolean);
+  return parts.at(-1) ?? "";
+};
+
+/**
+ * Associe une ville extraite d'une adresse à la ville géocodée la plus proche
+ * (correspondance par sous-chaîne sur la forme normalisée, plus longue d'abord).
+ */
+export const matchVille = (raw: string, villes: VilleGeoPure[]): VilleGeoPure | null => {
+  const normalized = normalizeVillePure(raw);
+  if (!normalized) return null;
+  const alias = VILLE_ALIASES[normalized];
+  const target = alias ? normalizeVillePure(alias) : normalized;
+  const keys = villes
+    .map((v) => ({ v, key: normalizeVillePure(v.ville) }))
+    .filter((x) => x.key)
+    .sort((a, b) => b.key.length - a.key.length);
+  const hit = keys.find((x) => target.includes(x.key) || x.key.includes(target));
+  return hit?.v ?? null;
+};
+
+/**
+ * Villes géocodées avec le montant investi agrégé (engage) pour la cartographie couleur.
+ * Une ville reste présente dès qu'elle possède au moins une commande géocodée (count > 0),
+ * même si la somme engage est négative ou nulle. Les villes sans coordonnées sont comptées
+ * dans `nonLocalisees` et ne font pas disparaître les autres.
+ */
+export const buildDataVilles = (
+  commandes: Record<string, unknown>[],
+  villes: VilleGeoPure[],
+): { dataVilles: DataVille[]; nonLocalisees: number } => {
+  const map = new Map<string, DataVille>();
+  const unmatched = new Set<string>();
+  for (const r of commandes) {
+    const rawVille = villeDepuisAdresse(String(r["adresse"] ?? ""));
+    const ville = matchVille(rawVille, villes);
+    if (!ville) {
+      if (rawVille) unmatched.add(rawVille);
+      continue;
+    }
+    const g =
+      map.get(ville.ville) ??
+      ({ ville: ville.ville, lat: ville.lat, lng: ville.lng, value: 0, count: 0 } as DataVille);
+    g.value += Number(r["engage"] ?? 0);
+    g.count += 1;
+    map.set(ville.ville, g);
+  }
+  return {
+    dataVilles: [...map.values()].filter((d) => d.count > 0),
+    nonLocalisees: villes.length ? unmatched.size : 0,
+  };
+};
