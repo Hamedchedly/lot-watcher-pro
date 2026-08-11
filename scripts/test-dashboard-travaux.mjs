@@ -27,11 +27,12 @@ function assert(name, cond, detail = "") {
 }
 
 const EX = 2026;
-const cmd = (annee, paye, etatTravaux = null, etatCommande = null) => ({
+const cmd = (annee, paye, etatTravaux = null, etatCommande = null, engage = undefined) => ({
   annee_exercice: annee,
   paye,
   etat_travaux: etatTravaux,
   etat_commande: etatCommande,
+  engage,
 });
 
 // ---- 1-6 : règle « Pas réalisé » ----
@@ -63,54 +64,59 @@ assert("10b annee undefined    → false", isPasRealise(cmd(undefined, 0), EX) =
 assert("11 2030 + paye=0       → false", isPasRealise(cmd(2030, 0), EX) === false);
 
 // ---- 12 : valeurs parasites (dates/montants) exclues ----
-assert("12 etatMetier montant  → En cours (2026)", etatMetier(cmd(2026, 100, null, "2235.32"), EX) === "En cours");
-assert("12b etatMetier date    → En cours (2026)", etatMetier(cmd(2026, 100, "19.05.2025", null), EX) === "En cours");
 assert("12c '2235.32' hors whitelist", !ETATS_METIER.includes("2235.32"));
 assert("12d '19.05.2025' hors whitelist", !ETATS_METIER.includes("19.05.2025"));
 
-// ---- etatMetier : états réels conservés ----
-assert("etatMetier Terminés        → Terminés", etatMetier(cmd(2026, 100, "Terminés", null), EX) === "Terminés");
-assert("etatMetier Planifiés       → Planifiés", etatMetier(cmd(2026, 100, "Planifiés", null), EX) === "Planifiés");
-assert("etatMetier Close           → Close", etatMetier(cmd(2026, 100, null, "Close"), EX) === "Close");
-assert("etatMetier Attente validation → Attente validation", etatMetier(cmd(2026, 100, null, "Attente validation"), EX) === "Attente validation");
-assert("etatMetier Annulée         → Annulée", etatMetier(cmd(2026, 100, null, "Annulée"), EX) === "Annulée");
-// Priorité : l'état explicite « Terminés » prime sur le dérivé « Pas réalisé ».
-assert(
-  "etatMetier Terminés prioritaire (2025 Terminés paye 0)",
-  etatMetier(cmd(2025, 0, "Terminés", null), EX) === "Terminés",
-);
+// =====================================================================
+// etatMetier — spécification métier définitive (T1 à T15)
+// =====================================================================
+// T1 : « Terminés » explicite prioritaire sur les montants (engage=5000, paye=0)
+assert("T1 2026 engage=5000 paye=0 Terminés → Terminés", etatMetier(cmd(2026, 0, "Terminés", null, 5000), EX) === "Terminés");
+// T2 : « Terminés » explicite + paye NULL
+assert("T2 2026 engage=5000 paye=NULL Terminés → Terminés", etatMetier(cmd(2026, null, "Terminés", null, 5000), EX) === "Terminés");
+// T3 : engagement sans état → En cours
+assert("T3 2026 engage=5000 paye=0 état vide → En cours", etatMetier(cmd(2026, 0, null, null, 5000), EX) === "En cours");
+// T4 : engagement + paiement partiel → En cours (règle paye != engage abandonnée)
+assert("T4 2026 engage=5000 paye=2000 état vide → En cours", etatMetier(cmd(2026, 2000, null, null, 5000), EX) === "En cours");
+// T5 : engagement soldé → En cours (engage != 0, non explicitement terminé)
+assert("T5 2026 engage=5000 paye=5000 état vide → En cours", etatMetier(cmd(2026, 5000, null, null, 5000), EX) === "En cours");
+// T6 : exercice courant sans engagement ni état → Sans état (plus auto « En cours »)
+assert("T6 2026 engage=0 paye=0 état vide → Sans état", etatMetier(cmd(2026, 0, null, null, 0), EX) === "Sans état");
+// T7 : exercice courant sans engagement ni état → Sans état
+assert("T7 2026 engage=NULL paye=NULL état vide → Sans état", etatMetier(cmd(2026, null, null, null, null), EX) === "Sans état");
+// T8 : exercice clôturé + aucun engagement/paiement → Pas réalisé
+assert("T8 2025 engage=0 paye=0 état vide → Pas réalisé", etatMetier(cmd(2025, 0, null, null, 0), EX) === "Pas réalisé");
+// T9 : exercice clôturé + engagement/paiement NULL → Pas réalisé
+assert("T9 2025 engage=NULL paye=NULL état vide → Pas réalisé", etatMetier(cmd(2025, null, null, null, null), EX) === "Pas réalisé");
+// T10 : engagement sur exercice clôturé → En cours (et non Pas réalisé)
+assert("T10 2025 engage=5000 paye=0 état vide → En cours", etatMetier(cmd(2025, 0, null, null, 5000), EX) === "En cours");
+// T11 : « Planifiés » normalisé vers « En cours »
+assert("T11 2026 engage=5000 paye=0 Planifiés → En cours", etatMetier(cmd(2026, 0, "Planifiés", null, 5000), EX) === "En cours");
+// T12 : état explicite « En cours » conservé
+assert("T12 2026 engage=5000 paye=0 En cours → En cours", etatMetier(cmd(2026, 0, "En cours", null, 5000), EX) === "En cours");
+// T13 : « Planifiés » sans engagement → En cours (état explicite prime sur les montants)
+assert("T13 2026 engage=0 paye=0 Planifiés → En cours", etatMetier(cmd(2026, 0, "Planifiés", null, 0), EX) === "En cours");
+// T14 : « Terminés » sur exercice clôturé → Terminés
+assert("T14 2025 engage=5000 paye=0 Terminés → Terminés", etatMetier(cmd(2025, 0, "Terminés", null, 5000), EX) === "Terminés");
+// T15 : « Attente validation » sans engagement → Attente validation
+assert("T15 2025 engage=0 paye=0 Attente validation → Attente validation", etatMetier(cmd(2025, 0, "Attente validation", null, 0), EX) === "Attente validation");
 
-// ---- En cours : exercice courant sans état explicite ----
-assert(
-  "En cours 2026 état vide paye 0",
-  etatMetier(cmd(2026, 0, null, null), EX) === "En cours",
-);
-assert(
-  "En cours 2026 état vide paye NULL",
-  etatMetier(cmd(2026, null, null, null), EX) === "En cours",
-);
-assert(
-  "En cours 2026 parasite",
-  etatMetier(cmd(2026, 100, null, "1552.1"), EX) === "En cours",
-);
+// ---- États explicites restants / normalisations ----
+assert("Annulée → Annulée", etatMetier(cmd(2026, 100, null, "Annulée", 5000), EX) === "Annulée");
+assert("Close = clôturée → Terminés", etatMetier(cmd(2026, 100, null, "Close", 5000), EX) === "Terminés");
+assert("Close + Terminés → Terminés", etatMetier(cmd(2025, 0, "Terminés", "Close", 0), EX) === "Terminés");
 
-// ---- Pas réalisé : exercice clôturé + paye 0/NULL + aucun état explicite ----
-assert(
-  "Pas réalisé 2025 paye 0 sans état",
-  etatMetier(cmd(2025, 0, null, null), EX) === "Pas réalisé",
-);
-assert(
-  "Pas réalisé 2025 paye NULL sans état",
-  etatMetier(cmd(2025, null, null, null), EX) === "Pas réalisé",
-);
+// ---- « Planifiés » / « Close » ne sont plus des états distincts ----
+assert("Planifiés hors ETATS_METIER", !ETATS_METIER.includes("Planifiés"));
+assert("Close hors ETATS_METIER", !ETATS_METIER.includes("Close"));
 
-// ---- KPI « terminées » : Terminés ou Close (même source que le filtre) ----
+// ---- KPI « terminées » : source unique = etatMetier (Close normalisé vers Terminés) ----
 const terminées = (rows) =>
   rows.filter((r) => ["Terminés", "Close"].includes(etatMetier(r, EX))).length;
-const jeu22 = Array.from({ length: 20 }, () => cmd(2026, 100, "Terminés", null))
-  .concat(Array.from({ length: 2 }, () => cmd(2026, 100, null, "Close")))
-  .concat([cmd(2025, 0, null, null)]);
-assert("22 terminées (Terminés + Close)", terminées(jeu22) === 22);
+const jeu22 = Array.from({ length: 20 }, () => cmd(2026, 100, "Terminés", null, 5000))
+  .concat(Array.from({ length: 2 }, () => cmd(2026, 100, null, "Close", 5000)))
+  .concat([cmd(2025, 0, null, null, 0)]);
+assert("22 terminées (Terminés + Close normalisés)", terminées(jeu22) === 22);
 
 // ---- Options du filtre État (équivalent dashboard etatOptions) ----
 const buildEtatOptions = (commandes, exercice) => {
@@ -118,16 +124,26 @@ const buildEtatOptions = (commandes, exercice) => {
   return ETATS_METIER.filter((s) => found.has(s));
 };
 const sample = [
-  cmd(2026, 100, "Terminés", null),
-  cmd(2026, 0, "Terminés", null),
-  cmd(2025, 0, null, null),
-  cmd(2026, 100, null, "2235.32"),
-  cmd(2026, 100, "19.05.2025", null),
+  cmd(2026, 0, "Terminés", null, 5000),
+  cmd(2026, 0, null, "Close", 5000), // normalisé Terminés
+  cmd(2026, 0, "Planifiés", null, 0), // normalisé En cours
+  cmd(2025, 0, null, null, 0), // Pas réalisé
+  cmd(2026, 0, null, null, 0), // Sans état
+  cmd(2026, 2000, null, null, 5000), // En cours (engagement)
+  cmd(2026, 0, "Attente validation", null, 0),
+  cmd(2026, 0, null, "Annulée", 0),
+  cmd(2026, 100, null, "2235.32", 0), // parasite
+  cmd(2026, 100, "19.05.2025", null, 0), // parasite
 ];
 const opts = buildEtatOptions(sample, EX);
 assert("options contient Terminés", opts.includes("Terminés"));
-assert("options contient Pas réalisé", opts.includes("Pas réalisé"));
+assert("options contient Attente validation", opts.includes("Attente validation"));
+assert("options contient Annulée", opts.includes("Annulée"));
 assert("options contient En cours", opts.includes("En cours"));
+assert("options contient Pas réalisé", opts.includes("Pas réalisé"));
+assert("options contient Sans état", opts.includes("Sans état"));
+assert("options : Planifiés jamais proposé", !opts.includes("Planifiés"));
+assert("options : Close jamais proposé", !opts.includes("Close"));
 assert("options : aucun montant/date parasite", !opts.some((o) => /[0-9]/.test(o)));
 
 // ---- Inclusion archivage / Pas réalisé (visibleArchivage) ----
@@ -184,6 +200,19 @@ assert(
 assert(
   "T2 secteur sans commande absent",
   !repartition.some((d) => d.name === "GE"),
+);
+assert(
+  "T3 CP engage = -7500 (négatif conservé, sans Math.abs)",
+  repartition.find((d) => d.name === "CP")?.engage === -7500,
+);
+assert(
+  "T3b GT engage = 1000",
+  repartition.find((d) => d.name === "GT")?.engage === 1000,
+);
+assert(
+  "T3c value = nombre de commandes (jamais une somme engage)",
+  repartition.find((d) => d.name === "CP")?.value === 15 &&
+    repartition.find((d) => d.name === "CP")?.engage === -7500,
 );
 
 // =====================================================================

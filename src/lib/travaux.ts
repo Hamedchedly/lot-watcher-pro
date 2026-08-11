@@ -492,24 +492,19 @@ export const decisionImportCommande = (params: {
 /** Année d'exercice courante — jamais codée en dur ; avance automatiquement chaque année. */
 export const exerciceCourant = (now: Date = new Date()): number => now.getFullYear();
 
-/** États métier réels de l'application (les valeurs parasites dates/montants sont exclues). */
+/**
+ * États métier réels de l'application.
+ * « Planifiés » est normalisé vers « En cours » et « Close » vers « Terminés » (clôturée) :
+ * ils ne sont jamais proposés comme états distincts.
+ * Les valeurs parasites dates/montants sont exclues.
+ */
 export const ETATS_METIER = [
   "Terminés",
-  "Planifiés",
-  "Close",
   "Attente validation",
   "Annulée",
-  "Pas réalisé",
   "En cours",
-] as const;
-
-/** États explicites reconnus (source unique de vérité) — « Pas réalisé » et « En cours » sont dérivés. */
-export const ETATS_EXPLICITES = [
-  "Terminés",
-  "Planifiés",
-  "Close",
-  "Attente validation",
-  "Annulée",
+  "Pas réalisé",
+  "Sans état",
 ] as const;
 
 export type EtatMetier = (typeof ETATS_METIER)[number];
@@ -518,9 +513,10 @@ export type EtatMetier = (typeof ETATS_METIER)[number];
  * « Pas réalisé » — règle métier :
  * 1. annee_exercice renseignée ;
  * 2. annee_exercice < exercice courant (exercice clôturé) ;
- * 3. aucun paiement : paye = 0 / NULL / undefined.
+ * 3. aucun engagement : engage = 0 / NULL / undefined ;
+ * 4. aucun paiement : paye = 0 / NULL / undefined.
  *
- * Exercice courant (ex. 2026) : paye 0/NULL → PAS « Pas réalisé ».
+ * Exercice courant (ex. 2026) : engage 0/NULL + paye 0/NULL → PAS « Pas réalisé ».
  * Année future ou annee_exercice NULL → jamais « Pas réalisé ».
  * Une commande reportée (ex. 2025 → 2026) porte annee_exercice = 2026 → jamais « Pas réalisé ».
  */
@@ -531,17 +527,27 @@ export const isPasRealise = (
   const annee = row["annee_exercice"];
   if (annee == null) return false;
   if (typeof annee !== "number" || annee >= exercice) return false;
+  const engage = row["engage"];
+  const engageNul = engage === null || engage === undefined || engage === 0;
+  if (!engageNul) return false;
   const paye = row["paye"];
   return paye === null || paye === undefined || paye === 0;
 };
 
 /**
  * État métier d'une commande — source unique de vérité (filtre État, KPI FLUX, compteurs).
- * Priorité :
- * 1. état explicite reconnu (Terminés, Planifiés, Close, Attente validation, Annulée) ;
- * 2. sinon, exercice clôturé + aucun paiement (paye 0/NULL) → « Pas réalisé » ;
- * 3. sinon, exercice courant sans état explicite → « En cours » ;
- * 4. sinon → « Sans état ».
+ * Priorité (spécification métier) :
+ * 1. « Terminés » explicite (prioritaire sur les montants) ; « Close » = clôturée → « Terminés » ;
+ * 2. « Attente validation » ;
+ * 3. « Annulée » ;
+ * 4. « En cours » : état explicite « En cours »/« Planifiés » (normalisé), ou engagement existant
+ *    (engage != 0) sans état explicite « Terminés » ;
+ * 5. « Pas réalisé » : exercice clôturé + aucun engagement + aucun paiement + aucun état explicite ;
+ * 6. sinon → « Sans état ».
+ *
+ * L'exercice courant n'est PAS une condition d'« En cours » : une commande 2026 sans engagement
+ * et sans état → « Sans état ». La règle « paye != engage » est abandonnée :
+ * seule engage != 0 (avec absence d'état « Terminés ») qualifie « En cours ».
  * Les valeurs parasites (dates, montants…) ne deviennent jamais un état.
  */
 export const etatMetier = (
@@ -549,10 +555,13 @@ export const etatMetier = (
   exercice: number = exerciceCourant(),
 ): string => {
   const brut = (row["etat_travaux"] || row["etat_commande"]) as string | null | undefined;
-  if (brut && (ETATS_EXPLICITES as readonly string[]).includes(brut)) return brut;
+  if (brut === "Terminés" || brut === "Close") return "Terminés";
+  if (brut === "Attente validation") return "Attente validation";
+  if (brut === "Annulée") return "Annulée";
+  if (brut === "En cours" || brut === "Planifiés") return "En cours";
+  const engage = row["engage"];
+  if (typeof engage === "number" && engage !== 0) return "En cours";
   if (isPasRealise(row, exercice)) return "Pas réalisé";
-  const annee = row["annee_exercice"];
-  if (typeof annee === "number" && annee === exercice) return "En cours";
   return "Sans état";
 };
 
@@ -594,16 +603,21 @@ export const secteurDe = (row: Record<string, unknown>): Secteur => {
 
 /**
  * Répartition des commandes par secteur = NOMBRE de commandes (jamais une somme d'engage).
+ * `engage` = somme réelle des montants engagés (conservée telle quelle, y compris négative).
  * Un secteur est présent dès qu'il possède au moins une commande, même si la somme engage
  * est négative ou nulle. Un secteur sans commande n'apparaît pas.
  */
 export const repartitionCommandesParSecteur = (
   commandes: Record<string, unknown>[],
-): { name: string; value: number }[] =>
-  SECTEURS.map((s) => ({
-    name: s,
-    value: commandes.filter((r) => secteurDe(r) === s).length,
-  })).filter((d) => d.value > 0);
+): { name: string; value: number; engage: number }[] =>
+  SECTEURS.map((s) => {
+    const rows = commandes.filter((r) => secteurDe(r) === s);
+    return {
+      name: s,
+      value: rows.length,
+      engage: rows.reduce((sum, r) => sum + (Number(r["engage"]) || 0), 0),
+    };
+  }).filter((d) => d.value > 0);
 
 /** Normalisation : majuscules, sans accents ni ponctuation, espaces resserrés. */
 const normalizeVillePure = (value: string) =>

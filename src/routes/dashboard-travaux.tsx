@@ -1076,13 +1076,26 @@ function DashboardTravauxPage() {
                     ))}
                   </Pie>
                   <Tooltip
-                    formatter={(v) => money(v)}
-                    contentStyle={{
-                      borderRadius: "16px",
-                      border: "none",
-                      boxShadow: "0 20px 25px -5px rgb(0 0 0 / 0.1)",
-                      fontSize: "10px",
-                      fontWeight: "bold",
+                    content={({ active, payload }) => {
+                      if (active && payload && payload.length) {
+                        const d = payload[0]?.payload as {
+                          name: string;
+                          value: number;
+                          engage: number;
+                        };
+                        return (
+                          <div className="bg-slate-900 text-white p-3 rounded-2xl shadow-2xl border-none">
+                            <p className="text-[10px] font-black uppercase mb-1">{d.name}</p>
+                            <p className="text-[9px] font-bold text-slate-400 uppercase mb-2">
+                              {d.value} commandes
+                            </p>
+                            <p className="text-xs font-black text-blue-400">
+                              Engagé : {money(d.engage)}
+                            </p>
+                          </div>
+                        );
+                      }
+                      return null;
                     }}
                   />
                   <Legend
