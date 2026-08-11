@@ -5,10 +5,10 @@
 --                   numero_commande, lot_code, annee_exercice, ligne, message, details jsonb,
 --                   created_at
 -- Index           : (import_id, type) pour l'interrogation par catégorie
--- RLS             : alignée sur la convention la plus récente de la famille travaux
---                   (migration 20260810101810) : lecture publique via anon/authenticated,
---                   accès complet via service_role. Les lectures applicatives passent par le
---                   service role (bypass RLS) ; la policy publique sert aux accès REST.
+-- RLS             : accès UNIQUEMENT via les server functions (service_role, BYPASS RLS).
+--                   Aucune policy, aucun privilège anon/authenticated : les détails d'import
+--                   (montants, fournisseurs, adresses, versions) ne sont pas lisibles via l'API
+--                   REST. service_role conserve `grant all`.
 --
 -- NB : les détails sont écrits AU MOMENT de l'import (snapshot immuable), jamais reconstruits.
 
@@ -44,13 +44,12 @@ create table if not exists public.travaux_import_details (
 create index if not exists travaux_import_details_import_type_idx
   on public.travaux_import_details(import_id, type);
 
-grant select on public.travaux_import_details to anon, authenticated;
+-- Accès exclusivement via les server functions (service_role, BYPASS RLS).
+-- Les détails d'import (montants, fournisseurs, adresses, versions) ne doivent pas être
+-- lisibles via l'API REST par anon/authenticated : aucune policy n'est créée et les
+-- privilèges éventuels par défaut de Supabase sont révoqués explicitement.
 grant all on public.travaux_import_details to service_role;
 
-alter table public.travaux_import_details enable row level security;
+revoke all on public.travaux_import_details from anon, authenticated;
 
-drop policy if exists "lecture publique details imports travaux" on public.travaux_import_details;
-create policy "lecture publique details imports travaux"
-  on public.travaux_import_details
-  for select
-  using (true);
+alter table public.travaux_import_details enable row level security;
