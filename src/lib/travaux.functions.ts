@@ -3,12 +3,14 @@ import { z } from "zod";
 import {
   TRAVAUX_FIELDS,
   commandesAAArchiver,
+  decisionImportCommande,
   detailArchivee,
   detailConflit,
   detailCreee,
   detailIgnoree,
   detailInchangee,
   detailIssue,
+  detailReport,
   travauxComparable,
   travauxIdentiques,
 } from "./travaux";
@@ -59,6 +61,7 @@ const finalizeSchema = z.object({
   inchangees: z.number().optional(),
   ignorees: z.number().optional(),
   conflits: z.number().optional(),
+  reports: z.number().optional(),
 });
 const batchSchema = z.object({
   importId: z.string().uuid(),
@@ -129,7 +132,7 @@ export const importTravauxBatch = createServerFn({ method: "POST" })
       .select("*")
       .in("numero_commande", numbers);
     if (existingError) throw new Error(`Lecture des commandes : ${existingError.message}`);
-    const existing = new Map(
+    const existingParNumero = new Map(
       (existingRows ?? []).map((row: Record<string, unknown>) => [row["numero_commande"], row]),
     );
     const trancheCodes = [
@@ -142,6 +145,7 @@ export const importTravauxBatch = createServerFn({ method: "POST" })
     const validTranches = new Set((tranches ?? []).map((row: { code: string }) => row.code));
     let creees = 0;
     let conflits = 0;
+    let reports = 0;
     let inchangees = 0;
     let ignorees = 0;
     // Colonnes réellement présentes dans travaux_commandes (schéma de production).
@@ -169,14 +173,23 @@ export const importTravauxBatch = createServerFn({ method: "POST" })
       // Rattachement patrimoine impossible : on l'enregistre sans bloquer la commande.
       if (source.tranche_code && !validTranches.has(source.tranche_code)) {
         ignorees += 1;
-        await db
+        const ignoredDetail = await db
           .from("travaux_import_details")
           .insert(detailIgnoree(data.importId, source as Record<string, unknown>, ligne));
+        if (ignoredDetail.error)
+          throw new Error(`Détail ignoree ${source.numero_commande} : ${ignoredDetail.error.message}`);
       }
-      const before = existing.get(source.numero_commande) as Record<string, unknown> | undefined;
+      const before = existingParNumero.get(source.numero_commande) as Record<string, unknown> | undefined;
 
-      // Aucune commande existante : création pure.
-      if (!before) {
+      // Décision métier (règle validée) : numero_commande = identité unique et immuable ;
+      // annee_exercice = propriété mutable (report d'exercice).
+      const decision = decisionImportCommande({ source: row, before });
+      // La décision « creee » n'existe que si before est absent ; pour les autres cas
+      // (inchangee / report / conflit), la commande existante est garantie.
+      const existingCmd = before as Record<string, unknown>;
+
+      if (decision === "creee") {
+        // Aucune commande existante : création pure.
         // Garde défensive : une commande sans numero_commande ne doit jamais atteindre
         // l'INSERT (colonne NOT NULL). Erreur métier explicite, pas d'erreur PostgreSQL.
         if (!row["numero_commande"]) {
@@ -186,64 +199,122 @@ export const importTravauxBatch = createServerFn({ method: "POST" })
         if (result.error)
           throw new Error(`Écriture ${source.numero_commande} : ${result.error.message}`);
         const commande = result.data as Record<string, unknown>;
-        await db.from("travaux_commandes_historique").insert({
+        const creationHistory = await db.from("travaux_commandes_historique").insert({
           import_id: data.importId,
           commande_id: commande["id"],
           operation: "creation",
           avant: null,
           apres: travauxComparable(commande),
         });
-        await db
+        if (creationHistory.error)
+          throw new Error(
+            `Historique création ${source.numero_commande} : ${creationHistory.error.message}`,
+          );
+        const creeeDetail = await db
           .from("travaux_import_details")
           .insert({ ...detailCreee(data.importId, commande, ligne), commande_id: commande["id"] });
+        if (creeeDetail.error)
+          throw new Error(`Détail creee ${source.numero_commande} : ${creeeDetail.error.message}`);
         creees += 1;
         continue;
       }
 
-      // La commande existe déjà en base.
-      // On la marque comme « vue dans cet import » (elle ne sera pas archivée), mais on ne
-      // modifie JAMAIS ses données : la version actuelle reste active tant que l'utilisateur
-      // n'a pas tranché le conflit.
-      if (travauxIdentiques(before, row)) {
-        await db
+      if (decision === "inchangee") {
+        // Commande identique : on la marque vue/active, aucune donnée modifiée.
+        const seen = await db
           .from("travaux_commandes")
           .update({ vu_dans_import_id: data.importId, actif: true })
-          .eq("id", before["id"]);
-        await db
+          .eq("id", existingCmd["id"]);
+        if (seen.error)
+          throw new Error(`Inchangée ${source.numero_commande} : ${seen.error.message}`);
+        const inchangeeDetail = await db
           .from("travaux_import_details")
-          .insert(detailInchangee(data.importId, before, ligne));
+          .insert(detailInchangee(data.importId, existingCmd, ligne));
+        if (inchangeeDetail.error)
+          throw new Error(
+            `Détail inchangee ${source.numero_commande} : ${inchangeeDetail.error.message}`,
+          );
         inchangees += 1;
         continue;
       }
 
-      // Version différente → CONFLIT : la nouvelle version est conservée comme proposition
-      // dans l'historique (operation = 'conflit', resolu = false) et l'alerte apparaîtra
-      // dans le journal tant que l'utilisateur n'aura pas choisi la version à conserver.
+      if (decision === "report") {
+        // REPORT D'EXERCICE : seule l'année change → UPDATE de la MÊME ligne
+        // (numero_commande reste l'identité unique ; aucune seconde ligne créée).
+        reports += 1;
+        const reported = await db
+          .from("travaux_commandes")
+          .update({
+            annee_exercice: row["annee_exercice"],
+            vu_dans_import_id: data.importId,
+            actif: true,
+          })
+          .eq("id", existingCmd["id"])
+          .select("*")
+          .single();
+        if (reported.error)
+          throw new Error(`Report ${source.numero_commande} : ${reported.error.message}`);
+        const reportHistory = await db.from("travaux_commandes_historique").insert({
+          import_id: data.importId,
+          commande_id: existingCmd["id"],
+          operation: "report",
+          avant: travauxComparable(existingCmd),
+          apres: travauxComparable(row),
+        });
+        if (reportHistory.error)
+          throw new Error(
+            `Historique report ${source.numero_commande} : ${reportHistory.error.message}`,
+          );
+        const reportDetail = await db
+          .from("travaux_import_details")
+          .insert(
+            detailReport(
+              data.importId,
+              existingCmd,
+              travauxComparable(existingCmd),
+              travauxComparable(row),
+              ligne,
+            ),
+          );
+        if (reportDetail.error)
+          throw new Error(`Détail report ${source.numero_commande} : ${reportDetail.error.message}`);
+        continue;
+      }
+
+      // CONFLIT : version différente (année + au moins un autre champ).
+      // La commande active existante n'est PAS écrasée ; la nouvelle version est conservée
+      // comme proposition (operation = 'conflit', resolu = false) jusqu'à la décision.
       conflits += 1;
       await db
         .from("travaux_commandes")
         .update({ vu_dans_import_id: data.importId })
-        .eq("id", before["id"]);
-      await db.from("travaux_commandes_historique").insert({
+        .eq("id", existingCmd["id"]);
+      const conflitHistory = await db.from("travaux_commandes_historique").insert({
         import_id: data.importId,
-        commande_id: before["id"],
+        commande_id: existingCmd["id"],
         operation: "conflit",
-        avant: travauxComparable(before),
+        avant: travauxComparable(existingCmd),
         apres: travauxComparable(row),
       });
-      await db
+      if (conflitHistory.error)
+        throw new Error(
+          `Historique conflit ${source.numero_commande} : ${conflitHistory.error.message}`,
+        );
+      const conflitDetail = await db
         .from("travaux_import_details")
         .insert(
           detailConflit(
             data.importId,
-            before,
-            travauxComparable(before),
+            existingCmd,
+            travauxComparable(existingCmd),
             travauxComparable(row),
             ligne,
           ),
         );
+      if (conflitDetail.error)
+        throw new Error(`Détail conflit ${source.numero_commande} : ${conflitDetail.error.message}`);
     }
-    return { creees, modifiees: 0, conflits, inchangees, ignorees };
+    return { creees, modifiees: 0, conflits, reports, inchangees, ignorees };
   });
 
 export const failTravauxImport = createServerFn({ method: "POST" })
@@ -338,6 +409,7 @@ export const finalizeTravauxImport = createServerFn({ method: "POST" })
         inchangees: data.inchangees ?? 0,
         ignorees: data.ignorees ?? 0,
         conflits: data.conflits ?? 0,
+        reports: data.reports ?? 0,
         archivees: missing.length,
         termine_at: new Date().toISOString(),
       })

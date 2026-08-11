@@ -59,6 +59,7 @@ export type Database = {
           inchangees: number;
           lignes: number;
           modifiees: number;
+          reports: number;
           statut: string;
           termine_at: string | null;
         };
@@ -76,6 +77,7 @@ export type Database = {
           inchangees?: number;
           lignes?: number;
           modifiees?: number;
+          reports?: number;
           statut?: string;
           termine_at?: string | null;
         };
@@ -93,6 +95,7 @@ export type Database = {
           inchangees?: number;
           lignes?: number;
           modifiees?: number;
+          reports?: number;
           statut?: string;
           termine_at?: string | null;
         };

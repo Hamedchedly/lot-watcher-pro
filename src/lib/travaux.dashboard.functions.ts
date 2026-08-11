@@ -88,6 +88,7 @@ export type ImportTravaux = {
   creees: number;
   modifiees: number;
   conflits?: number;
+  reports?: number;
   doublons: number;
   erreurs: number;
   archivees: number;
@@ -248,7 +249,7 @@ export const getTravauxImportDetails = createServerFn({ method: "POST" })
     z
       .object({
         importId: z.string().uuid(),
-        type: z.enum(["creee", "conflit", "inchangee", "archivee", "doublon", "ignoree", "erreur"]),
+        type: z.enum(["creee", "conflit", "inchangee", "archivee", "doublon", "ignoree", "erreur", "report"]),
         page: z.number().int().min(1).optional(),
         pageSize: z.number().int().min(1).max(200).optional(),
       })

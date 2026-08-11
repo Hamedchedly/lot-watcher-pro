@@ -391,6 +391,29 @@ export const detailConflit = (
   details: { avant, apres, champs_differents: champsDifferents(avant, apres) },
 });
 
+/** Constructeur de ligne de détail : report d'exercice (seule l'année change). */
+export const detailReport = (
+  importId: string,
+  commande: Record<string, unknown>,
+  avant: Record<string, unknown>,
+  apres: Record<string, unknown>,
+  ligne?: number | null,
+): Record<string, unknown> => ({
+  import_id: importId,
+  type: "report",
+  commande_id: commande["id"] ?? null,
+  numero_commande: commande["numero_commande"] ?? null,
+  lot_code: commande["lot_code"] ?? null,
+  annee_exercice: apres["annee_exercice"] ?? null,
+  ligne: ligne ?? null,
+  details: {
+    avant,
+    apres,
+    champs_differents: ["annee_exercice"],
+    report: `${avant["annee_exercice"] ?? "?"} → ${apres["annee_exercice"] ?? "?"}`,
+  },
+});
+
 /** Constructeur de ligne de détail : rattachement patrimoine non résolu. */
 export const detailIgnoree = (
   importId: string,
@@ -434,3 +457,34 @@ export const detailIssue = (
   ligne: issue.line ?? null,
   message: issue.message,
 });
+
+export type ImportDecisionType = "creee" | "inchangee" | "report" | "conflit";
+
+/**
+ * Décision métier pour une ligne d'import face à la commande existante.
+ * Règle validée : `numero_commande` est l'identité UNIQUE et immuable ;
+ * `annee_exercice` est une propriété mutable (report d'exercice).
+ * - aucune commande existante            → création
+ * - toutes les données identiques        → inchangée
+ * - SEULE l'année change                 → report d'exercice (UPDATE de la même ligne)
+ * - au moins un autre champ change       → conflit (version à valider)
+ */
+export const decisionImportCommande = (params: {
+  source: Record<string, unknown>;
+  before?: Record<string, unknown> | null | undefined;
+}): ImportDecisionType => {
+  if (!params.before) return "creee";
+  if (travauxIdentiques(params.before, params.source)) return "inchangee";
+  const diffs = champsDifferents(
+    travauxComparable(params.before),
+    travauxComparable(params.source),
+  );
+  if (
+    diffs.length === 1 &&
+    diffs[0] === "annee_exercice" &&
+    params.before["annee_exercice"] !== params.source["annee_exercice"]
+  ) {
+    return "report";
+  }
+  return "conflit";
+};
