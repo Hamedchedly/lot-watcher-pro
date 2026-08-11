@@ -538,6 +538,63 @@ export type Database = {
           },
         ];
       };
+      travaux_import_details: {
+        Row: {
+          annee_exercice: number | null;
+          commande_id: string | null;
+          created_at: string;
+          details: Json | null;
+          id: string;
+          import_id: string;
+          ligne: number | null;
+          lot_code: string | null;
+          message: string | null;
+          numero_commande: string | null;
+          type: string;
+        };
+        Insert: {
+          annee_exercice?: number | null;
+          commande_id?: string | null;
+          created_at?: string;
+          details?: Json | null;
+          id?: string;
+          import_id: string;
+          ligne?: number | null;
+          lot_code?: string | null;
+          message?: string | null;
+          numero_commande?: string | null;
+          type: string;
+        };
+        Update: {
+          annee_exercice?: number | null;
+          commande_id?: string | null;
+          created_at?: string;
+          details?: Json | null;
+          id?: string;
+          import_id?: string;
+          ligne?: number | null;
+          lot_code?: string | null;
+          message?: string | null;
+          numero_commande?: string | null;
+          type?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "travaux_import_details_commande_id_fkey";
+            columns: ["commande_id"];
+            isOneToOne: false;
+            referencedRelation: "travaux_commandes";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "travaux_import_details_import_id_fkey";
+            columns: ["import_id"];
+            isOneToOne: false;
+            referencedRelation: "import_travaux";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
     };
     Views: {
       [_ in never]: never;

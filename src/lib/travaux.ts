@@ -30,6 +30,8 @@ export type CommandeTravaux = {
   annee_exercice?: number | null;
   classification_programmation?: string | null;
   classification_secteur?: string | null;
+  /** Ligne Excel d'origine (utilisée pour les détails d'import, jamais écrite en base). */
+  ligne?: number;
 };
 
 export type TravauxParseIssue = { line: number; message: string; numero_commande: string | null };
@@ -37,6 +39,7 @@ export type ParsedTravaux = {
   commandes: CommandeTravaux[];
   lignes: number;
   doublons: number;
+  doublonsDetails: TravauxParseIssue[];
   conflits: TravauxParseIssue[];
   erreurs: TravauxParseIssue[];
 };
@@ -142,6 +145,7 @@ export function parseTravauxWorkbook(data: ArrayBuffer): ParsedTravaux {
   const commandes = new Map<string, CommandeTravaux>();
   const conflits: TravauxParseIssue[] = [];
   const erreurs: TravauxParseIssue[] = [];
+  const doublonsDetails: TravauxParseIssue[] = [];
   let doublons = 0;
 
   for (let index = mainHeaderIndex + 1; index < matrix.length; index += 1) {
@@ -154,7 +158,14 @@ export function parseTravauxWorkbook(data: ArrayBuffer): ParsedTravaux {
     });
 
     const numero = text(raw["numero_commande"]);
-    if (!numero) continue;
+    if (!numero) {
+      erreurs.push({
+        line: index + 1,
+        message: "Numéro de commande manquant",
+        numero_commande: null,
+      });
+      continue;
+    }
 
     const commande = {
       numero_commande: numero,
@@ -200,21 +211,35 @@ export function parseTravauxWorkbook(data: ArrayBuffer): ParsedTravaux {
     const previous = commandes.get(numero);
     if (previous) {
       doublons += 1;
-      if (JSON.stringify(previous) !== JSON.stringify(commande)) {
+      // La comparaison ignore la ligne Excel (champ `ligne`), qui diffère toujours entre deux lignes.
+      const a = { ...previous };
+      delete a.ligne;
+      const b = { ...commande };
+      delete b.ligne;
+      const different = JSON.stringify(a) !== JSON.stringify(b);
+      if (different) {
         conflits.push({
           line: index + 1,
           numero_commande: numero,
           message: "Doublon avec des valeurs différentes",
         });
       }
+      doublonsDetails.push({
+        line: index + 1,
+        numero_commande: numero,
+        message: different ? "Doublon avec des valeurs différentes" : "Doublon identique",
+      });
       continue;
     }
+    // Ligne d'origine conservée pour les détails d'import (rattachements/erreurs).
+    commande.ligne = index + 1;
     commandes.set(numero, commande);
   }
   return {
     commandes: [...commandes.values()],
     lignes: matrix.length - mainHeaderIndex - 1,
     doublons,
+    doublonsDetails,
     conflits,
     erreurs,
   };
@@ -286,3 +311,125 @@ export const commandesAAArchiver = (
   if (annee == null) return [];
   return actives.filter((row) => row.annee_exercice === annee && !vuDansImport.has(row.id));
 };
+
+/** Champs qui diffèrent entre deux snapshots (comparaison stricte JSON). */
+export const champsDifferents = (
+  avant: Record<string, unknown> | null | undefined,
+  apres: Record<string, unknown> | null | undefined,
+): string[] => {
+  const keys = new Set([...Object.keys(avant ?? {}), ...Object.keys(apres ?? {})]);
+  return [...keys].filter(
+    (key) => JSON.stringify(avant?.[key]) !== JSON.stringify(apres?.[key]),
+  );
+};
+
+/**
+ * Snapshot d'affichage d'une commande pour les détails d'import (immuable).
+ * Porte l'essentiel de l'affichage sans dépendre de l'état futur de travaux_commandes.
+ */
+export const snapshotCommande = (row: Record<string, unknown>): Record<string, unknown> => ({
+  numero_commande: row["numero_commande"] ?? null,
+  annee_exercice: row["annee_exercice"] ?? null,
+  lot_code: row["lot_code"] ?? null,
+  tranche_code: row["tranche_code"] ?? null,
+  adresse: row["adresse"] ?? null,
+  fournisseur: row["fournisseur"] ?? null,
+  montant: row["engage"] ?? row["budget"] ?? null,
+  date_demarrage: row["date_demarrage"] ?? null,
+  date_fin_travaux: row["date_fin_travaux"] ?? null,
+  statut: row["etat_travaux"] ?? row["etat_commande"] ?? null,
+  ...travauxComparable(row),
+});
+
+/** Constructeur de ligne de détail : commande créée. */
+export const detailCreee = (
+  importId: string,
+  commande: Record<string, unknown>,
+  ligne?: number | null,
+): Record<string, unknown> => ({
+  import_id: importId,
+  type: "creee",
+  numero_commande: commande["numero_commande"] ?? null,
+  lot_code: commande["lot_code"] ?? null,
+  annee_exercice: commande["annee_exercice"] ?? null,
+  ligne: ligne ?? null,
+  details: snapshotCommande(commande),
+});
+
+/** Constructeur de ligne de détail : commande inchangée. */
+export const detailInchangee = (
+  importId: string,
+  commande: Record<string, unknown>,
+  ligne?: number | null,
+): Record<string, unknown> => ({
+  import_id: importId,
+  type: "inchangee",
+  commande_id: commande["id"] ?? null,
+  numero_commande: commande["numero_commande"] ?? null,
+  lot_code: commande["lot_code"] ?? null,
+  annee_exercice: commande["annee_exercice"] ?? null,
+  ligne: ligne ?? null,
+  details: snapshotCommande(commande),
+});
+
+/** Constructeur de ligne de détail : conflit de version (à valider). */
+export const detailConflit = (
+  importId: string,
+  commande: Record<string, unknown>,
+  avant: Record<string, unknown>,
+  apres: Record<string, unknown>,
+  ligne?: number | null,
+): Record<string, unknown> => ({
+  import_id: importId,
+  type: "conflit",
+  commande_id: commande["id"] ?? null,
+  numero_commande: commande["numero_commande"] ?? null,
+  lot_code: commande["lot_code"] ?? null,
+  annee_exercice: commande["annee_exercice"] ?? null,
+  ligne: ligne ?? null,
+  details: { avant, apres, champs_differents: champsDifferents(avant, apres) },
+});
+
+/** Constructeur de ligne de détail : rattachement patrimoine non résolu. */
+export const detailIgnoree = (
+  importId: string,
+  source: Record<string, unknown>,
+  ligne?: number | null,
+): Record<string, unknown> => ({
+  import_id: importId,
+  type: "ignoree",
+  numero_commande: source["numero_commande"] ?? null,
+  lot_code: source["lot_code"] ?? null,
+  annee_exercice: source["annee_exercice"] ?? null,
+  ligne: ligne ?? null,
+  message: `Tranche "${source["tranche_code"]}" introuvable dans la base`,
+  details: { tranche_fournie: source["tranche_code"] ?? null },
+});
+
+/** Constructeur de ligne de détail : commande archivée (snapshot complet + motif). */
+export const detailArchivee = (
+  importId: string,
+  commande: Record<string, unknown>,
+): Record<string, unknown> => ({
+  import_id: importId,
+  type: "archivee",
+  commande_id: commande["id"] ?? null,
+  numero_commande: commande["numero_commande"] ?? null,
+  lot_code: commande["lot_code"] ?? null,
+  annee_exercice: commande["annee_exercice"] ?? null,
+  message: "Absente du fichier importé",
+  details: { ...snapshotCommande(commande), motif: "Absente du fichier importé" },
+});
+
+/** Constructeur de ligne de détail : doublon / erreur issus du parseur. */
+export const detailIssue = (
+  importId: string,
+  type: "doublon" | "erreur",
+  issue: { line: number; message: string; numero_commande?: string | null | undefined },
+): Record<string, unknown> => ({
+  import_id: importId,
+  type,
+  numero_commande: issue.numero_commande ?? null,
+  ligne: issue.line ?? null,
+  message: issue.message,
+});

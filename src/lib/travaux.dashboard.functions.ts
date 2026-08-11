@@ -243,6 +243,46 @@ export const getCommandeHistorique = createServerFn({ method: "POST" })
     return (rows ?? []) as HistoriqueTravaux[];
   });
 
+export const getTravauxImportDetails = createServerFn({ method: "POST" })
+  .validator((d: unknown) =>
+    z
+      .object({
+        importId: z.string().uuid(),
+        type: z.enum(["creee", "conflit", "inchangee", "archivee", "doublon", "ignoree", "erreur"]),
+        page: z.number().int().min(1).optional(),
+        pageSize: z.number().int().min(1).max(200).optional(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
+    const db = supabaseAdmin as any;
+    const page = data.page ?? 1;
+    const pageSize = data.pageSize ?? 50;
+    const from = (page - 1) * pageSize;
+    const to = from + pageSize - 1;
+
+    // Import inexistant ou type sans détail → total 0 et liste vide.
+    const { count, error: countError } = await db
+      .from("travaux_import_details")
+      .select("id", { count: "exact", head: true })
+      .eq("import_id", data.importId)
+      .eq("type", data.type);
+    if (countError) return { rows: [], total: 0 };
+
+    const { data: rows, error } = await db
+      .from("travaux_import_details")
+      .select("*")
+      .eq("import_id", data.importId)
+      .eq("type", data.type)
+      .order("ligne", { ascending: true, nullsFirst: false })
+      .order("created_at", { ascending: true })
+      .order("numero_commande", { ascending: true })
+      .range(from, to);
+    if (error) throw new Error(`Lecture des détails : ${error.message}`);
+    return { rows: (rows ?? []) as any[], total: count ?? 0 };
+  });
+
 export const getTravauxStats = createServerFn({ method: "GET" }).handler(async () => {
   const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
   const db = supabaseAdmin as any;

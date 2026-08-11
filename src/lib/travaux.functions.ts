@@ -3,12 +3,23 @@ import { z } from "zod";
 import {
   TRAVAUX_FIELDS,
   commandesAAArchiver,
+  detailArchivee,
+  detailConflit,
+  detailCreee,
+  detailIgnoree,
+  detailInchangee,
+  detailIssue,
   travauxComparable,
   travauxIdentiques,
 } from "./travaux";
 
 const nullableText = z.string().nullable().optional();
 const nullableNumber = z.number().nullable().optional();
+const issueSchema = z.object({
+  line: z.number(),
+  message: z.string(),
+  numero_commande: z.string().nullable().optional(),
+});
 const commandeSchema = z.object({
   numero_commande: z.string().min(1),
   secteur: nullableText,
@@ -38,6 +49,7 @@ const commandeSchema = z.object({
   date_communication: nullableText,
   classification_programmation: nullableText,
   classification_secteur: nullableText,
+  ligne: z.number().optional(),
 });
 const importIdSchema = z.object({ importId: z.string().uuid() });
 const finalizeSchema = z.object({
@@ -63,6 +75,8 @@ export const createTravauxImport = createServerFn({ method: "POST" })
         doublons: z.number(),
         erreurs: z.number(),
         annee_exercice: z.number(),
+        doublonsDetails: z.array(issueSchema).default([]),
+        erreursDetails: z.array(issueSchema).default([]),
       })
       .parse(d),
   )
@@ -85,6 +99,18 @@ export const createTravauxImport = createServerFn({ method: "POST" })
       .select("id")
       .single();
     if (error) throw new Error(`Création de l'import : ${error.message}`);
+
+    // Persistance immédiate des détails connus dès l'analyse du fichier (doublons, erreurs).
+    const detailsRows: Record<string, unknown>[] = [
+      ...data.doublonsDetails.map((issue) => detailIssue(execution.id, "doublon", issue)),
+      ...data.erreursDetails.map((issue) => detailIssue(execution.id, "erreur", issue)),
+    ];
+    if (detailsRows.length) {
+      const { error: detailsError } = await db
+        .from("travaux_import_details")
+        .insert(detailsRows);
+      if (detailsError) throw new Error(`Détails de l'import : ${detailsError.message}`);
+    }
 
     return { id: execution.id, annee_exercice: data.annee_exercice } as {
       id: string;
@@ -123,6 +149,7 @@ export const importTravauxBatch = createServerFn({ method: "POST" })
     const VALID_COLUMNS: string[] = [...TRAVAUX_FIELDS, "vu_dans_import_id", "actif"];
 
     for (const source of data.commandes) {
+      const ligne = typeof source["ligne"] === "number" ? source["ligne"] : null;
       const fullRow: Record<string, unknown> = {
         ...source,
         tranche_code:
@@ -139,7 +166,13 @@ export const importTravauxBatch = createServerFn({ method: "POST" })
         Object.entries(fullRow).filter(([key]) => VALID_COLUMNS.includes(key)),
       );
 
-      if (source.tranche_code && !validTranches.has(source.tranche_code)) ignorees += 1;
+      // Rattachement patrimoine impossible : on l'enregistre sans bloquer la commande.
+      if (source.tranche_code && !validTranches.has(source.tranche_code)) {
+        ignorees += 1;
+        await db
+          .from("travaux_import_details")
+          .insert(detailIgnoree(data.importId, source as Record<string, unknown>, ligne));
+      }
       const before = existing.get(source.numero_commande) as Record<string, unknown> | undefined;
 
       // Aucune commande existante : création pure.
@@ -155,6 +188,9 @@ export const importTravauxBatch = createServerFn({ method: "POST" })
           avant: null,
           apres: travauxComparable(commande),
         });
+        await db
+          .from("travaux_import_details")
+          .insert({ ...detailCreee(data.importId, commande, ligne), commande_id: commande["id"] });
         creees += 1;
         continue;
       }
@@ -168,6 +204,9 @@ export const importTravauxBatch = createServerFn({ method: "POST" })
           .from("travaux_commandes")
           .update({ vu_dans_import_id: data.importId, actif: true })
           .eq("id", before["id"]);
+        await db
+          .from("travaux_import_details")
+          .insert(detailInchangee(data.importId, before, ligne));
         inchangees += 1;
         continue;
       }
@@ -187,6 +226,17 @@ export const importTravauxBatch = createServerFn({ method: "POST" })
         avant: travauxComparable(before),
         apres: travauxComparable(row),
       });
+      await db
+        .from("travaux_import_details")
+        .insert(
+          detailConflit(
+            data.importId,
+            before,
+            travauxComparable(before),
+            travauxComparable(row),
+            ligne,
+          ),
+        );
     }
     return { creees, modifiees: 0, conflits, inchangees, ignorees };
   });
@@ -223,15 +273,15 @@ export const finalizeTravauxImport = createServerFn({ method: "POST" })
     const annee = (execution?.annee_exercice as number | null) ?? null;
 
     // Commandes actives de la même année que l'import.
-    let active: { id: string; numero_commande: string; annee_exercice: number | null }[] = [];
+    let active: Record<string, unknown>[] = [];
     if (annee != null) {
       const result = await db
         .from("travaux_commandes")
-        .select("id, numero_commande, annee_exercice")
+        .select("*")
         .eq("actif", true)
         .eq("annee_exercice", annee);
       if (result.error) throw new Error(`Recherche des commandes absentes : ${result.error.message}`);
-      active = (result.data ?? []) as typeof active;
+      active = (result.data ?? []) as Record<string, unknown>[];
     }
 
     const { data: seen, error: seenError } = await db
@@ -240,7 +290,11 @@ export const finalizeTravauxImport = createServerFn({ method: "POST" })
       .eq("vu_dans_import_id", data.importId);
     if (seenError) throw new Error(seenError.message);
     const seenIds = new Set<string>((seen ?? []).map((row: { id: string }) => row.id));
-    const missing = commandesAAArchiver(active, annee, seenIds);
+    const missing = commandesAAArchiver(
+      active as { id: string; annee_exercice?: number | null }[],
+      annee,
+      seenIds,
+    );
 
     for (const row of missing) {
       const archived = await db
@@ -263,6 +317,10 @@ export const finalizeTravauxImport = createServerFn({ method: "POST" })
         apres,
       });
       if (history.error) throw new Error(history.error.message);
+      // Détail d'import : snapshot immuable + motif d'archivage.
+      await db
+        .from("travaux_import_details")
+        .insert(detailArchivee(data.importId, archived.data as Record<string, unknown>));
     }
 
     // Persistance des compteurs du rapport dans le journal d'import.
