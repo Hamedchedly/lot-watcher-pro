@@ -14,32 +14,23 @@ export const getAdressesGeo = createServerFn({ method: "GET" }).handler(async ()
 
 export type VilleGeo = { ville: string; lat: number; lng: number; n: number };
 
-/** Coordonnées moyennes par ville, agrégées depuis le cache de géocodage adresses_geo. */
+/**
+ * Référentiel des villes du Dashboard Travaux (centres communaux).
+ * Lecture de `villes_geo` uniquement — indépendant du cache d'adresses `adresses_geo`,
+ * qui reste réservé au module /adresses (getAdressesGeo / geocodeAdresses).
+ */
 export const getVillesGeo = createServerFn({ method: "GET" }).handler(async () => {
   const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
   const { data, error } = await supabaseAdmin
-    .from("adresses_geo")
+    .from("villes_geo")
     .select("ville, lat, lng")
-    .limit(5000);
+    .limit(500);
   if (error) throw new Error(error.message);
-
-  const byVille = new Map<string, { key: string; n: number; lat: number; lng: number }>();
-  for (const row of data ?? []) {
-    const ville = (row.ville ?? "").trim();
-    const key = ville.toUpperCase();
-    if (!key || row.lat == null || row.lng == null) continue;
-    const g = byVille.get(key) ?? { key, n: 0, lat: 0, lng: 0 };
-    g.n += 1;
-    g.lat += row.lat;
-    g.lng += row.lng;
-    byVille.set(key, g);
-  }
-
-  return [...byVille.values()].map((g) => ({
-    ville: g.key,
-    lat: g.lat / g.n,
-    lng: g.lng / g.n,
-    n: g.n,
+  return (data ?? []).map((row) => ({
+    ville: row.ville,
+    lat: row.lat,
+    lng: row.lng,
+    n: 1,
   }));
 });
 

@@ -44,6 +44,36 @@ export type Database = {
         };
         Relationships: [];
       };
+      villes_geo: {
+        Row: {
+          id: string;
+          ville: string;
+          ville_normalisee: string;
+          lat: number;
+          lng: number;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          ville: string;
+          ville_normalisee: string;
+          lat: number;
+          lng: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          ville?: string;
+          ville_normalisee?: string;
+          lat?: number;
+          lng?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       import_travaux: {
         Row: {
           annee_exercice: number | null;

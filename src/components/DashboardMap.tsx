@@ -3,7 +3,23 @@ import { MapContainer, TileLayer, CircleMarker, Popup, useMap } from "react-leaf
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
-export type VilleAmount = { ville: string; lat: number; lng: number; value: number };
+export type VilleAmount = {
+  ville: string;
+  lat: number;
+  lng: number;
+  value: number;
+  count: number;
+  paye: number;
+};
+
+/** Montants avec centimes (format fr-FR, négatifs conservés — jamais de Math.abs). */
+const moneyCents = (v: number) =>
+  new Intl.NumberFormat("fr-FR", {
+    style: "currency",
+    currency: "EUR",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(v);
 
 /** Teinte HSL : 60 = jaune (faible investissement), 0 = rouge (fort investissement). */
 function colorFor(t: number) {
@@ -73,8 +89,14 @@ export default function DashboardMap({
                   <p className="text-[10px] font-black uppercase text-slate-400 mb-1">
                     {d.ville}
                   </p>
-                  <p className="text-sm font-black" style={{ color }}>
-                    {money(d.value)}
+                  <p className="text-xs font-black text-slate-700">
+                    {d.count} commande{d.count > 1 ? "s" : ""}
+                  </p>
+                  <p className="text-xs font-black text-slate-700">
+                    Engagé : {moneyCents(d.value)}
+                  </p>
+                  <p className="text-xs font-black text-slate-700">
+                    Payé : {moneyCents(d.paye)}
                   </p>
                 </div>
               </Popup>

@@ -8,10 +8,10 @@ import {
   buildDataVilles,
   etatMetier,
   exerciceCourant,
-  matchVille,
   repartitionCommandesParSecteur,
   secteurDe,
   sliderYearDomain,
+  villeDeCommande,
   visibleArchivage,
 } from "@/lib/travaux";
 import {
@@ -123,15 +123,6 @@ const money = (value: unknown) =>
     : "—";
 const text = (value: unknown) => (value == null ? "" : String(value));
 
-const cityOf = (address: unknown) => {
-  const value = text(address).trim();
-  const parts = value
-    .split(",")
-    .map((part) => part.trim())
-    .filter(Boolean);
-  return parts.at(-1) || "Ville non renseignée";
-};
-
 /** Slider d'années (double curseur Radix) : remplace les <input type="range"> natifs. */
 function YearRangeSlider({
   min,
@@ -163,7 +154,7 @@ function YearRangeSlider({
 }
 
 /** Normalisation et matching de villes + secteur dérivé : helpers importés de "@/lib/travaux"
- * (secteurDe, matchVille, repartitionCommandesParSecteur, buildDataVilles). */
+ * (secteurDe, villeDeCommande, repartitionCommandesParSecteur, buildDataVilles). */
 
 const yearOf = (row: Commande) => {
   if (row.annee_exercice) return String(row.annee_exercice);
@@ -282,7 +273,7 @@ function ClientOnlyMap({
   money,
   missing,
 }: {
-  dataVilles: { ville: string; lat: number; lng: number; value: number }[];
+  dataVilles: { ville: string; lat: number; lng: number; value: number; count: number; paye: number }[];
   money: (v: number) => string;
   missing: number;
 }) {
@@ -400,7 +391,13 @@ function DashboardTravauxPage() {
       .filter((y) => y !== "Sans année")
       .map(Number)
       .sort((a, b) => a - b);
-    const villes = [...new Set(allCommandes.map((c) => cityOf(c.adresse)))]
+    const villes = [
+      ...new Set(
+        allCommandes
+          .map((c) => villeDeCommande(c, tranchesDetails, villesGeo ?? []))
+          .filter((v): v is string => !!v),
+      ),
+    ]
       .sort()
       .map((v) => ({ label: v, value: v }));
     const tranchesMap = new Map<string, { label: string; value: string; sub: string }>();
@@ -411,13 +408,13 @@ function DashboardTravauxPage() {
         tranchesMap.set(c.tranche_code, {
           label: c.tranche_code,
           value: c.tranche_code,
-          sub: `${detail?.localite || cityOf(c.adresse)}`,
+          sub: `${detail?.localite || villeDeCommande(c, tranchesDetails, villesGeo ?? []) || ""}`,
         });
       }
     });
     const tranches = [...tranchesMap.values()].sort((a, b) => a.value.localeCompare(b.value));
     return { years, tranches, villes };
-  }, [allCommandes, tranchesDetails]);
+  }, [allCommandes, tranchesDetails, villesGeo]);
 
   // Options pour les filtres du Journal des Commandes (Paramètres)
   const typeOptions = useMemo(() => {
@@ -468,7 +465,7 @@ function DashboardTravauxPage() {
       const year = Number(yearOf(row));
       const isProg = !!row.ligne_budget;
       const sect = secteurDe(row);
-      const ville = cityOf(row.adresse);
+      const ville = villeDeCommande(row, tranchesDetails, villesGeo ?? []) ?? "";
       const matchesYear = isNaN(year) || (year >= yearRange[0] && year <= yearRange[1]);
       const matchesProg = (isProg && progFilter.prog) || (!isProg && progFilter.hors);
       const matchesSect = selectedSectors.includes(sect);
@@ -526,8 +523,8 @@ function DashboardTravauxPage() {
     if (sortConfig) {
       result.sort((a, b) => {
         if (sortConfig.key === "city") {
-          const va = cityOf(a.adresse);
-          const vb = cityOf(b.adresse);
+          const va = villeDeCommande(a, tranchesDetails, villesGeo ?? []) ?? "";
+          const vb = villeDeCommande(b, tranchesDetails, villesGeo ?? []) ?? "";
           return sortConfig.direction === "asc" ? va.localeCompare(vb) : vb.localeCompare(va);
         }
         const va = (a as unknown as Record<string, unknown>)[sortConfig.key];
@@ -553,6 +550,8 @@ function DashboardTravauxPage() {
     search,
     tableFilters,
     sortConfig,
+    tranchesDetails,
+    villesGeo,
   ]);
 
   const stats = useMemo(() => {
@@ -581,15 +580,14 @@ function DashboardTravauxPage() {
 
   const dataSecteur = useMemo(() => repartitionCommandesParSecteur(filtered), [filtered]);
 
-  /** Ville « propre » dérivée de l'adresse (via le cache de géocodage si disponible). */
-  const villeDe = (adresse: string) =>
-    matchVille(cityOf(adresse), villesGeo ?? [])?.ville ?? cityOf(adresse);
+  /** Ville canonique d'une commande (source de vérité : villeDeCommande). */
+  const villeDe = (r: Commande) => villeDeCommande(r, tranchesDetails, villesGeo ?? []) ?? "Inconnue";
 
   const dataClassement = useMemo<ClassementRow[]>(() => {
     if (rankingMode === "ville") {
       const map = filtered.reduce(
         (acc, r) => {
-          const city = villeDe(r.adresse || "");
+          const city = villeDe(r);
           acc[city] = (acc[city] || 0) + (r.engage || 0);
           return acc;
         },
@@ -606,7 +604,7 @@ function DashboardTravauxPage() {
       const map = filtered.reduce(
         (acc, r) => {
           const tranche = r.tranche_code || "Sans tranche";
-          const ville = villeDe(r.adresse || "");
+          const ville = villeDe(r);
           const engage = r.engage || 0;
           const g = acc.get(tranche) ?? { tranche, ville, value: 0, villeValue: -1 };
           g.value += engage;
@@ -631,7 +629,7 @@ function DashboardTravauxPage() {
         const adresse = r.adresse || "Adresse inconnue";
         const g = acc.get(adresse) ?? {
           adresse,
-          ville: villeDe(adresse),
+          ville: villeDe(r),
           tranches: new Set<string>(),
           value: 0,
         };
@@ -655,8 +653,8 @@ function DashboardTravauxPage() {
 
   // Villes géocodées avec le montant investi agrégé (pour la cartographie couleur).
   const { dataVilles, nonLocalisees: villesNonLocalisees } = useMemo(
-    () => buildDataVilles(filtered, villesGeo ?? []),
-    [filtered, villesGeo],
+    () => buildDataVilles(filtered, tranchesDetails, villesGeo ?? []),
+    [filtered, tranchesDetails, villesGeo],
   );
 
   const dataTranche = useMemo(() => {
@@ -1504,7 +1502,7 @@ function DashboardTravauxPage() {
                         {row.adresse || "—"}
                       </td>
                       <td className="p-4 font-bold text-slate-500 truncate uppercase">
-                        {cityOf(row.adresse) || "—"}
+                        {villeDeCommande(row, tranchesDetails, villesGeo ?? []) || "—"}
                       </td>
                       <td className="p-4 text-slate-500 truncate">{row.descriptif || "—"}</td>
                       <td className="p-4">

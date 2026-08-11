@@ -637,7 +637,15 @@ const VILLE_ALIASES: Record<string, string> = {
 };
 
 export type VilleGeoPure = { ville: string; lat: number; lng: number; n?: number };
-export type DataVille = { ville: string; lat: number; lng: number; value: number; count: number };
+export type TrancheGeo = { code: string; localite: string | null };
+export type DataVille = {
+  ville: string;
+  lat: number;
+  lng: number;
+  value: number;
+  count: number;
+  paye: number;
+};
 
 /** Ville extraite d'une adresse (dernier segment après « , »). */
 export const villeDepuisAdresse = (adresse: string): string => {
@@ -666,33 +674,112 @@ export const matchVille = (raw: string, villes: VilleGeoPure[]): VilleGeoPure | 
 };
 
 /**
+ * Villes connues du patrimoine (villes_geo + tranches.localite), normalisées et triées par
+ * longueur décroissante : le matching d'une adresse privilégie les noms de villes les plus
+ * longs et spécifiques (jamais « PARIS » seul face à « PARIS 20 »).
+ */
+const villesConnues = (
+  villesGeo: VilleGeoPure[],
+  tranches: TrancheGeo[],
+): { key: string; ville: string }[] => {
+  const map = new Map<string, string>();
+  for (const v of villesGeo) {
+    const key = normalizeVillePure(v.ville);
+    if (key) map.set(key, v.ville);
+  }
+  for (const t of tranches) {
+    const key = normalizeVillePure(t.localite ?? "");
+    if (key) map.set(key, t.localite ?? "");
+  }
+  return [...map.entries()]
+    .sort((a, b) => b[0].length - a[0].length)
+    .map(([key, ville]) => ({ key, ville }));
+};
+
+/**
+ * Ville détectée dans une adresse d'import (source prioritaire) : recherche d'un nom de
+ * ville connu dans l'adresse complète. L'analyse ne dépend pas du « dernier segment après
+ * virgule » (formats réels : « 109 ALLEE DE LA PYRAMIDE - NANDY », « 61 PLACE DES CHÊNES,
+ * NANDY - ER.37062 », « RESIDENCE DE LA TREILLE, SOUPPES-SUR-LOING »). Retourne null si
+ * aucune ville fiable n'est trouvée.
+ */
+const villeDansAdresse = (
+  adresse: string,
+  villesGeo: VilleGeoPure[],
+  tranches: TrancheGeo[],
+): string | null => {
+  const normalized = normalizeVillePure(adresse);
+  if (!normalized) return null;
+  const alias = VILLE_ALIASES[normalized];
+  if (alias) return alias;
+  for (const { key, ville } of villesConnues(villesGeo, tranches)) {
+    if (normalized.includes(key)) return ville;
+  }
+  return null;
+};
+
+/**
+ * Source de vérité de la ville d'une commande du Dashboard Travaux.
+ * Priorité :
+ *  1. adresse d'import (recherche d'une ville connue dans l'adresse complète) ;
+ *  2. tranche : command.tranche_code → tranches.code → tranches.localite ;
+ *  3. sinon null (commande non localisée).
+ * Si l'adresse indique une ville différente de tranches.localite, l'adresse prime
+ * (conflit à signaler dans les tests/diagnostics, jamais écrasé au runtime).
+ */
+export const villeDeCommande = (
+  command: Record<string, unknown>,
+  tranches: TrancheGeo[],
+  villesGeo: VilleGeoPure[],
+): string | null => {
+  const adresse = String(command["adresse"] ?? "").trim();
+  if (adresse) {
+    const fromAdresse = villeDansAdresse(adresse, villesGeo, tranches);
+    if (fromAdresse) return fromAdresse;
+  }
+  const tranche = tranches.find((t) => t.code === command["tranche_code"]);
+  if (tranche?.localite) return tranche.localite.trim();
+  return null;
+};
+
+/**
  * Villes géocodées avec le montant investi agrégé (engage) pour la cartographie couleur.
- * Une ville reste présente dès qu'elle possède au moins une commande géocodée (count > 0),
- * même si la somme engage est négative ou nulle. Les villes sans coordonnées sont comptées
- * dans `nonLocalisees` et ne font pas disparaître les autres.
+ * La ville de chaque commande est déterminée par `villeDeCommande` (adresse d'import puis
+ * tranche). Une ville reste présente dès qu'elle possède au moins une commande (count > 0),
+ * même si la somme engage est négative ou nulle.
+ * `nonLocalisees` = nombre de villes distinctes présentes dans les commandes filtrées mais
+ * absentes de `villes_geo` (+1 si au moins une commande n'a aucune ville déterminée).
+ * Si `villes_geo` est vide, toutes les villes résolues sont comptées comme non localisées.
  */
 export const buildDataVilles = (
   commandes: Record<string, unknown>[],
-  villes: VilleGeoPure[],
+  tranches: TrancheGeo[],
+  villesGeo: VilleGeoPure[],
 ): { dataVilles: DataVille[]; nonLocalisees: number } => {
   const map = new Map<string, DataVille>();
-  const unmatched = new Set<string>();
+  const nonLocalisees = new Set<string>();
+  let inconnues = 0;
   for (const r of commandes) {
-    const rawVille = villeDepuisAdresse(String(r["adresse"] ?? ""));
-    const ville = matchVille(rawVille, villes);
+    const ville = villeDeCommande(r, tranches, villesGeo);
     if (!ville) {
-      if (rawVille) unmatched.add(rawVille);
+      inconnues += 1;
+      continue;
+    }
+    const geo = matchVille(ville, villesGeo);
+    if (!geo) {
+      nonLocalisees.add(ville);
       continue;
     }
     const g =
-      map.get(ville.ville) ??
-      ({ ville: ville.ville, lat: ville.lat, lng: ville.lng, value: 0, count: 0 } as DataVille);
+      map.get(geo.ville) ??
+      ({ ville: geo.ville, lat: geo.lat, lng: geo.lng, value: 0, count: 0, paye: 0 } as DataVille);
     g.value += Number(r["engage"] ?? 0);
+    g.paye += Number(r["paye"] ?? 0);
     g.count += 1;
-    map.set(ville.ville, g);
+    map.set(geo.ville, g);
   }
   return {
     dataVilles: [...map.values()].filter((d) => d.count > 0),
-    nonLocalisees: villes.length ? unmatched.size : 0,
+    nonLocalisees: nonLocalisees.size + (inconnues > 0 ? 1 : 0),
   };
 };
