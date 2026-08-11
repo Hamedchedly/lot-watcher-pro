@@ -8,11 +8,13 @@ import {
   buildDataVilles,
   etatMetier,
   exerciceCourant,
+  matchesAnnee,
   repartitionCommandesParSecteur,
   secteurDe,
   sliderYearDomain,
   villeDeCommande,
   visibleArchivage,
+  yearRangeInitial,
 } from "@/lib/travaux";
 import {
   Bar,
@@ -328,7 +330,9 @@ function DashboardTravauxPage() {
   const exercice = exerciceCourant();
 
   // États Filtres
-  const [yearRange, setYearRange] = useState<[number, number]>([2020, exerciceCourant()]);
+  // Sélection initiale : exercice courant uniquement ([exercice, exercice]). Le domaine
+  // accessible (sliderYearDomain) reste toutes les années — les deux sont distincts.
+  const [yearRange, setYearRange] = useState<[number, number]>(yearRangeInitial(exercice));
   const [includeArchived, setIncludeArchived] = useState(false);
   const [progFilter, setProgFilter] = useState({ prog: true, hors: true });
   const [selectedSectors, setSelectedSectors] = useState<string[]>([...SECTEURS]);
@@ -462,11 +466,10 @@ function DashboardTravauxPage() {
 
   const filtered = useMemo(() => {
     let result = visibleCommandes.filter((row) => {
-      const year = Number(yearOf(row));
       const isProg = !!row.ligne_budget;
       const sect = secteurDe(row);
       const ville = villeDeCommande(row, tranchesDetails, villesGeo ?? []) ?? "";
-      const matchesYear = isNaN(year) || (year >= yearRange[0] && year <= yearRange[1]);
+      const matchesYear = matchesAnnee(row, yearRange);
       const matchesProg = (isProg && progFilter.prog) || (!isProg && progFilter.hors);
       const matchesSect = selectedSectors.includes(sect);
       const matchesTranche =
@@ -705,8 +708,8 @@ function DashboardTravauxPage() {
   }, [historique]);
 
   const reset = () => {
-    if (options.years.length > 0)
-      setYearRange([options.years[0] as number, options.years[options.years.length - 1] as number]);
+    // Réinitialisation = retour à la sélection initiale (exercice courant uniquement).
+    setYearRange(yearRangeInitial(exercice));
     setProgFilter({ prog: true, hors: true });
     setSelectedSectors([...SECTEURS]);
     setSelectedTranches([]);

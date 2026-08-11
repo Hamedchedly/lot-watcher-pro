@@ -5,13 +5,16 @@ import {
   etatMetier,
   ETATS_METIER,
   exerciceCourant,
+  matchesAnnee,
   repartitionCommandesParSecteur,
   buildDataVilles,
   secteurDe,
+  sliderYearDomain,
   matchVille,
   villeDepuisAdresse,
   villeDeCommande,
   visibleArchivage,
+  yearRangeInitial,
 } from "../src/lib/travaux.ts";
 
 let passed = 0;
@@ -469,6 +472,128 @@ assert(
   "T6e matchVille correspond par sous-chaîne",
   matchVille("CHESSY PLACE DES CORNILLES", [{ ville: "CHESSY", lat: 1, lng: 2 }])?.ville ===
     "CHESSY",
+);
+
+// =====================================================================
+// Slider années + filtre secteur — domaine vs sélection (T1 → T12)
+// =====================================================================
+const ANNEES = [2023, 2024, 2025, 2026, 2030];
+
+// T1 : le domaine du slider couvre toutes les années réelles (jamais réduit)
+const dom = sliderYearDomain(ANNEES);
+assert("T1 domaine couvre 2023 → 2030", dom[0] <= 2023 && dom[1] >= 2030);
+assert("T1b domaine élargi [2022, 2031]", JSON.stringify(dom) === JSON.stringify([2022, 2031]));
+
+// T2 : sélection initiale = exercice courant uniquement (jamais tout le domaine)
+assert("T2 exercice courant = 2026", exerciceCourant() === 2026);
+assert("T2b sélection initiale [2026, 2026]", JSON.stringify(yearRangeInitial(2026)) === JSON.stringify([2026, 2026]));
+
+const rowAnnee = (a) => ({ numero_commande: `A${a}`, annee_exercice: a });
+// T3 : [2024, 2026] → 2024 + 2025 + 2026
+assert(
+  "T3 [2024,2026] → 2024/2025/2026 (et ni 2023 ni 2030)",
+  [2024, 2025, 2026].every((a) => matchesAnnee(rowAnnee(a), [2024, 2026])) &&
+    !matchesAnnee(rowAnnee(2023), [2024, 2026]) &&
+    !matchesAnnee(rowAnnee(2030), [2024, 2026]),
+);
+// T4 : [2024, 2025] → 2024 + 2025
+assert(
+  "T4 [2024,2025] → 2024/2025 (et pas 2026)",
+  matchesAnnee(rowAnnee(2024), [2024, 2025]) &&
+    matchesAnnee(rowAnnee(2025), [2024, 2025]) &&
+    !matchesAnnee(rowAnnee(2026), [2024, 2025]),
+);
+// T5 : [2023, 2030] → toutes les années disponibles
+assert("T5 [2023,2030] → toutes les années", ANNEES.every((a) => matchesAnnee(rowAnnee(a), [2023, 2030])));
+// T6 : [2030, 2030] → uniquement 2030
+assert(
+  "T6 [2030,2030] → 2030 seul",
+  matchesAnnee(rowAnnee(2030), [2030, 2030]) && !matchesAnnee(rowAnnee(2026), [2030, 2030]),
+);
+// T7 : aucune année ne disparaît du domaine parce que le défaut est 2026
+assert("T7 domaine complet malgré défaut 2026", (() => {
+  const init = yearRangeInitial(2026);
+  return init[0] === 2026 && init[1] === 2026 && dom[0] <= 2023 && dom[1] >= 2030;
+})());
+
+// T8-T10 : SERRIS 2025 GE + SERRIS 2026 CP selon l'intervalle d'années
+const serrisGE2025 = {
+  numero_commande: "S-GE-2025",
+  tranche_code: "1401",
+  adresse: "RUE DU PRESSOIR SERRIS",
+  annee_exercice: 2025,
+  corps_etat: "(g) Halls",
+  actif: true,
+  engage: 100,
+};
+const serrisCP2026 = {
+  numero_commande: "S-CP-2026",
+  tranche_code: "1401",
+  adresse: "RUE DU PRESSOIR SERRIS",
+  annee_exercice: 2026,
+  corps_etat: "(o) Plomberie",
+  actif: true,
+  engage: 200,
+};
+assert(
+  "T8 [2026,2026] → seule la commande 2026",
+  !matchesAnnee(serrisGE2025, [2026, 2026]) && matchesAnnee(serrisCP2026, [2026, 2026]),
+);
+assert(
+  "T9 [2025,2026] → les deux apparaissent",
+  matchesAnnee(serrisGE2025, [2025, 2026]) && matchesAnnee(serrisCP2026, [2025, 2026]),
+);
+assert(
+  "T10 [2023,2030] → les deux apparaissent",
+  matchesAnnee(serrisGE2025, [2023, 2030]) && matchesAnnee(serrisCP2026, [2023, 2030]),
+);
+
+// Test critique : (g) Halls → GE, (o) Plomberie → CP
+assert("CRITIQUE (g) Halls → GE", secteurDe({ corps_etat: "(g) Halls" }) === "GE");
+assert("CRITIQUE (o) Plomberie → CP", secteurDe({ corps_etat: "(o) Plomberie" }) === "CP");
+
+// T11 : Ville = SERRIS + Secteur = GE → uniquement les GE de SERRIS
+const isSerris = (r) => villeDeCommande(r, tranches, villesGeo) === "SERRIS";
+const jeuSerris = [
+  { ...serrisGE2025, numero_commande: "S-GE-1" },
+  { ...serrisCP2026, numero_commande: "S-CP-1" },
+  {
+    numero_commande: "S-GT-1",
+    tranche_code: "1401",
+    adresse: "RUE DU PRESSOIR SERRIS",
+    annee_exercice: 2026,
+    corps_etat: "(e) Divers",
+    actif: true,
+  },
+  {
+    numero_commande: "CH-GT-1",
+    tranche_code: "1396",
+    adresse: "RUE CHESSY",
+    annee_exercice: 2026,
+    corps_etat: "(e) Divers",
+    actif: true,
+  },
+];
+const geSerris = jeuSerris.filter((r) => isSerris(r) && secteurDe(r) === "GE");
+assert("T11 Ville=SERRIS + Secteur=GE → 1 commande (S-GE-1)", geSerris.length === 1 && geSerris[0].numero_commande === "S-GE-1");
+assert(
+  "T11b le CP de SERRIS est exclu du filtre GE",
+  !jeuSerris.some((r) => r.numero_commande === "S-CP-1" && isSerris(r) && secteurDe(r) === "GE"),
+);
+
+// T12 : Ville = SERRIS → GT + GE + CP conservés
+const serrisTous = jeuSerris.filter((r) => isSerris(r));
+const distSerris = {};
+serrisTous.forEach((r) => {
+  distSerris[secteurDe(r)] = (distSerris[secteurDe(r)] || 0) + 1;
+});
+assert(
+  "T12 Ville=SERRIS → GT/GE/CP présents",
+  distSerris["GT"] === 1 && distSerris["GE"] === 1 && distSerris["CP"] === 1,
+);
+assert(
+  "T12b la commande CHESSY n'est pas dans la vue SERRIS",
+  !jeuSerris.some((r) => r.numero_commande === "CH-GT-1" && isSerris(r)),
 );
 
 console.log("\n==========================================");

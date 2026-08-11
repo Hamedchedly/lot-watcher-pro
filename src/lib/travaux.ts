@@ -299,6 +299,30 @@ export const sliderYearDomain = (years: number[], fallbackStart = 2020): [number
   return [Math.max(fallbackStart, min - 1), Math.max(max + 1, min + 1)];
 };
 
+/** Année d'exercice d'une commande (annee_exercice, sinon date la plus récente, sinon NaN). */
+const anneeDe = (row: Record<string, unknown>): number => {
+  if (row["annee_exercice"]) return Number(String(row["annee_exercice"]));
+  const date = row["date_demarrage"] || row["date_fin_travaux"] || row["date_communication"];
+  return date ? Number(String(date).slice(0, 4)) : NaN;
+};
+
+/**
+ * Filtre année unique du Dashboard Travaux (carte, KPI, donut, journal) :
+ * une commande est retenue si son année d'exercice est dans [lo, hi], ou si aucune
+ * année n'est déterminable. Jamais de logique d'année parallèle pour la carte.
+ */
+export const matchesAnnee = (row: Record<string, unknown>, range: [number, number]): boolean => {
+  const year = anneeDe(row);
+  return isNaN(year) || (year >= range[0] && year <= range[1]);
+};
+
+/**
+ * Sélection initiale du slider d'années : l'exercice courant uniquement.
+ * Le domaine (sliderYearDomain) reste l'ensemble des années accessibles ; les deux
+ * ne doivent jamais être confondus.
+ */
+export const yearRangeInitial = (exercice: number): [number, number] => [exercice, exercice];
+
 /**
  * Commandes actives à archiver à la fin d'un import :
  * uniquement celles de la MÊME année d'exercice que l'import et absentes du fichier.
