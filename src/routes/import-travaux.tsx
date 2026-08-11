@@ -43,11 +43,11 @@ import { getTravauxImportDetails } from "@/lib/travaux.dashboard.functions";
 export const Route = createFileRoute("/import-travaux")({
   head: () => ({
     meta: [
-      { title: "Import des commandes de travaux" },
+      { title: "Import Suivi budgétaire annuel" },
       {
         name: "description",
         content:
-          "Import séparé des exportations de commandes de travaux avec détection des doublons et suivi des modifications.",
+          "Importation du suivi budgétaire et financier de l'exercice : rapprochement des commandes par numéro, suivi des modifications, archivage des absentes.",
       },
     ],
   }),
@@ -168,10 +168,10 @@ function ImportTravauxPage() {
     <main className="mx-auto max-w-3xl space-y-6 p-4 sm:p-8">
       <header className="flex items-start justify-between gap-4">
         <div className="space-y-1">
-          <h1 className="text-2xl font-semibold tracking-tight">Import commandes travaux</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Import Suivi budgétaire annuel</h1>
           <p className="text-sm text-muted-foreground">
-            Flux indépendant d’ISIS : les commandes sont rapprochées par numéro, les changements
-            sont historisés et les absentes archivées.
+            Importation du suivi budgétaire et financier de l'exercice. Les commandes sont
+            rapprochées par numéro, les changements sont historisés et les absentes archivées.
           </p>
         </div>
         <Button asChild variant="outline">

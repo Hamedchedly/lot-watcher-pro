@@ -956,7 +956,7 @@ function DashboardTravauxPage() {
                 className="bg-slate-900 hover:bg-slate-800 text-[10px] font-black tracking-widest px-4"
               >
                 <Link to="/import-travaux">
-                  <Upload className="size-3.5 mr-2" /> NOUVEL IMPORT
+                  <Upload className="size-3.5 mr-2" /> IMPORT SUIVI BUDGÉTAIRE
                 </Link>
               </Button>
             </div>

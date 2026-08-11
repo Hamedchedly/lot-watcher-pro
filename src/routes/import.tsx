@@ -11,13 +11,13 @@ import { finalizeIsisImport, importIsisBatch } from "@/lib/isis.functions";
 export const Route = createFileRoute("/import")({
   head: () => ({
     meta: [
-      { title: "Import de l'export ISIS — patrimoine et locataires" },
+      { title: "Import Patrimoine — ISIS" },
       {
         name: "description",
         content:
-          "Importez l'export complet ISIS : les tranches et lots existants sont mis à jour, les nouveaux créés, les disparus marqués sortis de patrimoine.",
+          "Importation de la base patrimoine ISIS : les tranches et lots existants sont mis à jour, les nouveaux créés, les disparus marqués sortis de patrimoine.",
       },
-      { property: "og:title", content: "Import de l'export ISIS" },
+      { property: "og:title", content: "Import Patrimoine — ISIS" },
       {
         property: "og:description",
         content: "Rapprochement automatique de l'export complet ISIS avec le patrimoine géré.",
@@ -95,11 +95,11 @@ function ImportPage() {
     <main className="mx-auto max-w-2xl space-y-6 p-4 sm:p-8">
       <header className="flex items-start justify-between gap-4">
         <div className="space-y-1">
-          <h1 className="text-2xl font-semibold tracking-tight">Import ISIS</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Import Patrimoine — ISIS</h1>
           <p className="text-sm text-muted-foreground">
-            Déposez l'export complet. Les lignes connues sont mises à jour, les nouvelles créées, et
-            celles absentes de l'export sont marquées sorties de patrimoine sans perdre
-            l'historique.
+            Importation de la base patrimoine ISIS. Déposez l'export complet. Les lignes connues
+            sont mises à jour, les nouvelles créées, et celles absentes de l'export sont marquées
+            sorties de patrimoine sans perdre l'historique.
           </p>
         </div>
         <Button asChild variant="outline">
