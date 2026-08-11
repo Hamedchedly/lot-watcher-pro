@@ -295,7 +295,7 @@ export const getTravaux = createServerFn({ method: "POST" })
 
     // Récupération des commandes de travaux (issues des imports Excel)
     const commandesSelect =
-      "id, tranche_code, lot_code, batiment, adresse, descriptif, engage, date_demarrage, etat_travaux, corps_etat";
+      "id, tranche_code, lot_code, batiment, adresse, descriptif, engage, date_demarrage, etat_travaux, corps_etat, annee_exercice";
     let commandesQuery = supabaseAdmin
       .from("travaux_commandes")
       .select(commandesSelect)
@@ -362,6 +362,7 @@ export const getTravaux = createServerFn({ method: "POST" })
         libelle: `[${type}] ${c.descriptif || c.corps_etat || "Commande"}`,
         statut: c.etat_travaux || "En cours",
         date_travaux: c.date_demarrage,
+        annee_exercice: c.annee_exercice,
         cout: c.engage,
         adresse: c.adresse ?? null,
         note: `${type}${c.corps_etat ? ` - ${c.corps_etat}` : ""}`,

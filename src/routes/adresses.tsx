@@ -667,6 +667,7 @@ type TravailRow = {
   libelle: string;
   statut: string;
   date_travaux: string | null;
+  annee_exercice?: number | null;
   cout: number;
   note: string | null;
   adresse: string | null;
@@ -724,9 +725,13 @@ function TravauxList({ scope }: { scope: TravauxScope }) {
     if (!data) return null;
     const groups: Record<string, TravailRow[]> = {};
     (data as TravailRow[]).forEach((t) => {
-      const year = t.date_travaux
-        ? new Date(t.date_travaux).getFullYear().toString()
-        : "Année non précisée";
+      // L'année d'exercice (annee_exercice) est la référence métier : prioritaire sur la date
+      // de chantier (date_travaux). Une commande 2024 sans date reste groupée en 2024.
+      const year = t.annee_exercice
+        ? String(t.annee_exercice)
+        : t.date_travaux
+          ? new Date(t.date_travaux).getFullYear().toString()
+          : "Année non précisée";
       if (!groups[year]) groups[year] = [];
       groups[year].push(t);
     });
