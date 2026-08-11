@@ -13,6 +13,7 @@ import {
   getDernierImportExercice,
   matchesAnnee,
   repartitionCommandesParSecteur,
+  resyncImportErrors,
   secteurDe,
   sliderYearDomain,
   villeDeCommande,
@@ -64,8 +65,11 @@ import {
   Layers,
   SlidersHorizontal,
   BarChart3,
+  Loader2,
+  RefreshCw,
   type LucideIcon,
 } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -87,6 +91,7 @@ import {
   getCommandeHistorique,
   updateCommandeTravaux,
   resolveHistoriqueTravaux,
+  checkTravauxLatestImport,
   type CommandeTravaux,
   type HistoriqueTravaux,
   type TravauxDashboardData,
@@ -311,6 +316,7 @@ function DashboardTravauxPage() {
   const fetchDashboard = useServerFn(getTravauxDashboard);
   const updateCommande = useServerFn(updateCommandeTravaux);
   const resolveHistory = useServerFn(resolveHistoriqueTravaux);
+  const fetchCheckImport = useServerFn(checkTravauxLatestImport);
 
   const { data, isLoading, isError, error } = useQuery<TravauxDashboardData>({
     queryKey: ["travaux-dashboard"],
@@ -349,6 +355,10 @@ function DashboardTravauxPage() {
     [recentImports, exercice],
   );
 
+  // Vérification manuelle d'un éventuel nouvel import (bouton « ACTUALISER ») : voir la
+  // définition de `handleCheckImport` plus bas, après les états de modales (il réévalue
+  // aussi l'alerte « Analyse des Erreurs d'Import » à partir des données réellement rechargées).
+
   // États Filtres
   // Sélection initiale : exercice courant uniquement ([exercice, exercice]). Le domaine
   // accessible (sliderYearDomain) reste toutes les années — les deux sont distincts.
@@ -383,6 +393,63 @@ function DashboardTravauxPage() {
   const [historyFor, setHistoryFor] = useState<Commande | null>(null);
   const [selectedImportErrors, setSelectedImportErrors] = useState<ImportTravaux | null>(null);
   const [versionChoice, setVersionChoice] = useState<"A" | "B">("B");
+
+  // Bouton « ACTUALISER » : rechargement réel depuis Supabase PUIS réévaluation de l'alerte.
+  // L'identité d'un import repose sur son `id` ; la détection d'un nouvel import se fait par
+  // comparaison d'id ET d'horodatage (jamais par comparaison de fichiers Excel).
+  const [checkingImport, setCheckingImport] = useState(false);
+  const handleCheckImport = async () => {
+    if (checkingImport) return;
+    setCheckingImport(true);
+    try {
+      // 1. Lecture serveur directe : import le plus récent réellement présent dans Supabase.
+      const res = await fetchCheckImport();
+      const latest = res.latestImport ?? null;
+      const prevLast = recentImports[0] ?? null;
+
+      // 2. Recharger les données du dashboard et ATTENDRE la fin du refetch.
+      await queryClient.invalidateQueries({ queryKey: ["travaux-dashboard"] });
+
+      // 3. Réévaluer l'alerte « Analyse des Erreurs d'Import » avec les données réellement
+      //    rechargées, pour l'EXERCICE consulté : import de l'exercice supprimé / erreurs
+      //    corrigées → l'alerte disparaît ; erreurs > 0 → elle reste avec le nombre réel ;
+      //    nouvel import de l'exercice → elle reflète uniquement le nouvel import. Un import
+      //    d'un autre exercice ne peut jamais déclencher l'alerte. Aucun `setState(false)`
+      //    artificiel : seul `resyncImportErrors` décide.
+      const fresh = queryClient.getQueryData<TravauxDashboardData>(["travaux-dashboard"]);
+      setSelectedImportErrors((prev) => resyncImportErrors(prev, fresh?.imports ?? [], exercice));
+
+      // 4. Message de retour.
+      if (prevLast && latest && latest.id === prevLast.id) {
+        toast("Aucune nouvelle importation détectée.");
+      } else if (!prevLast && !latest) {
+        toast("Aucune importation disponible.");
+      } else if (
+        latest &&
+        (!prevLast ||
+          new Date(latest.demarre_at).getTime() > new Date(prevLast.demarre_at).getTime())
+      ) {
+        toast.success("Nouvelle importation détectée.", {
+          description: "Le dashboard a été actualisé.",
+        });
+      } else {
+        // L'import affiché n'existe plus dans Supabase (supprimé) — l'alerte a été réévaluée.
+        toast("L'import affiché a été supprimé de Supabase.");
+      }
+    } catch {
+      toast.error("Échec de la vérification de l'import.");
+    } finally {
+      setCheckingImport(false);
+    }
+  };
+
+  // Réévaluation de l'alerte d'erreurs à CHAQUE changement des imports (données réelles),
+  // pour l'exercice consulté. Garantit que le composant ne conserve jamais en mémoire un
+  // import supprimé ou corrigé : l'alerte ne dépend que de l'import le plus récent de
+  // l'exercice présent dans Supabase.
+  useEffect(() => {
+    setSelectedImportErrors((prev) => resyncImportErrors(prev, recentImports, exercice));
+  }, [recentImports, exercice]);
 
   // État Édition
   const [isEditing, setIsEditing] = useState(false);
@@ -838,15 +905,15 @@ function DashboardTravauxPage() {
                   Dernier Import :
                 </span>
                 <button
-                  onClick={() => setSelectedImportErrors(recentImports[0] || null)}
-                  className={`flex items-center gap-1.5 px-2 py-1 rounded-full text-[9px] font-black uppercase transition-all ${(recentImports[0]?.erreurs || 0) > 0 ? "bg-red-50 text-red-600 hover:bg-red-100" : "bg-green-50 text-green-600"}`}
+                  onClick={() => setSelectedImportErrors(dernierImportExercice ?? null)}
+                  className={`flex items-center gap-1.5 px-2 py-1 rounded-full text-[9px] font-black uppercase transition-all ${(dernierImportExercice?.erreurs || 0) > 0 ? "bg-red-50 text-red-600 hover:bg-red-100" : "bg-green-50 text-green-600"}`}
                 >
-                  {(recentImports[0]?.erreurs || 0) > 0 ? (
+                  {(dernierImportExercice?.erreurs || 0) > 0 ? (
                     <AlertCircle className="size-3" />
                   ) : (
                     <CheckCircle2 className="size-3" />
                   )}
-                  {recentImports[0]?.erreurs || 0} ERREURS
+                  {dernierImportExercice?.erreurs || 0} ERREURS
                 </button>
                 {dernierImportExercice ? (
                   <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">
@@ -860,6 +927,21 @@ function DashboardTravauxPage() {
               </div>
             )}
             <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleCheckImport}
+                disabled={checkingImport}
+                title="Vérifier manuellement si une nouvelle importation est arrivée dans Supabase"
+                className="font-black text-[10px] tracking-widest"
+              >
+                {checkingImport ? (
+                  <Loader2 className="size-3.5 mr-2 animate-spin" />
+                ) : (
+                  <RefreshCw className="size-3.5 mr-2" />
+                )}
+                {checkingImport ? "VÉRIFICATION..." : "ACTUALISER"}
+              </Button>
               <Button
                 asChild
                 variant="ghost"

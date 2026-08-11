@@ -10,6 +10,7 @@ import {
   getDernierImportExercice,
   matchesAnnee,
   repartitionCommandesParSecteur,
+  resyncImportErrors,
   buildDataVilles,
   secteurDe,
   sliderYearDomain,
@@ -787,6 +788,98 @@ assert("T7 erreurs inchangées par le helper", JSON.stringify(importeErreurs) ==
 assert(
   "T8 format fr-FR Europe/Paris « DD/MM/YYYY à HH:mm »",
   formatDateImportFr("2026-08-10T23:25:00.000+00:00") === "11/08/2026 à 01:25",
+);
+
+// =====================================================================
+// Réévaluation de l'alerte « Analyse des Erreurs d'Import » — resyncImportErrors
+// (cas de test fonctionnels A → E du bouton « ACTUALISER »)
+// =====================================================================
+const ipt = (
+  id,
+  erreurs,
+  fichier = `fichier-${id}.xlsx`,
+  demarre_at = "2026-08-11T09:42:00Z",
+  annee_exercice = 2026,
+) => ({
+  id,
+  erreurs,
+  fichier,
+  demarre_at,
+  lignes: 10,
+  creees: 10,
+  modifiees: 0,
+  doublons: 0,
+  archivees: 0,
+  statut: "termine",
+  termine_at: null,
+  annee_exercice,
+});
+const EX2026 = 2026;
+// R0 : pas d'alerte ouverte → rien à réévaluer (aucun état à fermer)
+assert("R0 alerte fermée → reste fermée", resyncImportErrors(null, [ipt("X", 8)], EX2026) === null);
+// R1 (cas A) : l'import affiché a été SUPPRIMÉ de Supabase et le suivant n'a pas d'erreurs
+// → l'alerte disparaît (le fichier supprimé ne peut plus être affiché)
+assert(
+  "R1 import supprimé + suivant sans erreurs → alerte fermée",
+  resyncImportErrors(ipt("TEST", 3), [ipt("NEXT", 0)], EX2026) === null,
+);
+// R2 (cas A) : l'import affiché a été supprimé mais le suivant a des erreurs → l'alerte
+// reflète l'import le plus récent de l'exercice (jamais l'ancien supprimé)
+const rA2 = resyncImportErrors(ipt("TEST", 3), [ipt("NEXT", 5)], EX2026);
+assert("R2 import supprimé + suivant avec erreurs → alerte sur le suivant", rA2?.id === "NEXT" && rA2?.erreurs === 5);
+// R3 (cas B) : même import toujours présent, erreurs > 0 → l'alerte reste avec le nombre réel
+const rB3 = resyncImportErrors(ipt("X", 8), [ipt("X", 9)], EX2026);
+assert("R3 erreurs > 0 → alerte conservée avec le nombre réel", rB3?.id === "X" && rB3?.erreurs === 9);
+// R4 (cas C) : même import, erreurs corrigées à 0 → l'alerte disparaît
+assert("R4 erreurs corrigées (0) → alerte fermée", resyncImportErrors(ipt("X", 8), [ipt("X", 0)], EX2026) === null);
+// R5 (cas D) : nouvel import avec erreurs → l'alerte reflète UNIQUEMENT le nouvel import
+const rD5 = resyncImportErrors(ipt("ANCIEN", 8), [ipt("NOUVEAU", 2)], EX2026);
+assert("R5 nouvel import avec erreurs → alerte sur le nouvel import", rD5?.id === "NOUVEAU" && rD5?.erreurs === 2);
+// R6 (cas D) : nouvel import SANS erreurs → pas d'alerte
+assert(
+  "R6 nouvel import sans erreurs → alerte fermée",
+  resyncImportErrors(ipt("ANCIEN", 8), [ipt("NOUVEAU", 0)], EX2026) === null,
+);
+// R7 (cas E) : rien n'a changé → l'alerte reste (aucune fermeture artificielle)
+const rE7 = resyncImportErrors(ipt("X", 8), [ipt("X", 8)], EX2026);
+assert("R7 rien n'a changé → alerte conservée", rE7?.id === "X" && rE7?.erreurs === 8);
+// R8 : plus aucun import dans Supabase → l'alerte disparaît
+assert("R8 plus aucun import → alerte fermée", resyncImportErrors(ipt("X", 8), [], EX2026) === null);
+// R9 : le helper est pur — il ne modifie jamais l'objet passé ni la liste
+const prevPur = ipt("X", 8);
+const listPur = [ipt("X", 8)];
+const snapPur = JSON.stringify([prevPur, listPur]);
+resyncImportErrors(prevPur, listPur, EX2026);
+assert("R9 helper pur (aucune mutation)", JSON.stringify([prevPur, listPur]) === snapPur);
+
+// =====================================================================
+// Respect de l'EXERCICE consulté — resyncImportErrors (param `exercice`)
+// =====================================================================
+// S1 : import 2026 (erreurs) + import 2030 (erreurs) ; l'import 2030 est même LE PLUS
+// RÉCENT (imports[0]) → exercice consulté 2026 → seule l'erreur 2026 est prise en compte
+const s1 = resyncImportErrors(
+  ipt("A26", 3, "f-2026.xlsx", "2026-08-10T09:00:00Z", 2026),
+  [ipt("A30", 5, "f-2030.xlsx", "2030-01-15T09:00:00Z", 2030), ipt("A26", 3, "f-2026.xlsx", "2026-08-10T09:00:00Z", 2026)],
+  2026,
+);
+assert("S1 exercice 2026 → seule l'erreur 2026 prise en compte (jamais l'import 2030)", s1?.id === "A26" && s1?.erreurs === 3);
+// S2 : exercice consulté 2030 → seule l'erreur 2030 est prise en compte
+const s2 = resyncImportErrors(
+  ipt("A26", 3, "f-2026.xlsx", "2026-08-10T09:00:00Z", 2026),
+  [ipt("A30", 5, "f-2030.xlsx", "2030-01-15T09:00:00Z", 2030), ipt("A26", 3, "f-2026.xlsx", "2026-08-10T09:00:00Z", 2026)],
+  2030,
+);
+assert("S2 exercice 2030 → seule l'erreur 2030 prise en compte", s2?.id === "A30" && s2?.erreurs === 5);
+// S3 : l'import de l'exercice sélectionné a été SUPPRIMÉ → alerte supprimée, même si un
+// import d'un autre exercice (2030) a des erreurs
+assert(
+  "S3 suppression import de l'exercice sélectionné → alerte fermée",
+  resyncImportErrors(ipt("A26", 3, "f-2026.xlsx", "2026-08-10T09:00:00Z", 2026), [ipt("A30", 5, "f-2030.xlsx", "2030-01-15T09:00:00Z", 2030)], 2026) === null,
+);
+// S4 : aucun import pour l'exercice sélectionné → alerte supprimée
+assert(
+  "S4 aucun import pour l'exercice sélectionné → alerte fermée",
+  resyncImportErrors(ipt("A26", 3, "f-2026.xlsx", "2026-08-10T09:00:00Z", 2026), [ipt("A30", 0, "f-2030.xlsx", "2030-01-15T09:00:00Z", 2030)], 2026) === null,
 );
 
 // =====================================================================

@@ -1,5 +1,7 @@
 import * as XLSX from "xlsx";
 
+import type { ImportTravaux } from "@/lib/travaux.dashboard.functions";
+
 export type CommandeTravaux = {
   numero_commande: string;
   secteur: string | null;
@@ -714,17 +716,41 @@ export type ImportApercu = { annee_exercice: number | null; demarre_at: string }
  * La date provient uniquement de la table d'import : jamais de created_at/updated_at de
  * commande, jamais de déduction depuis `vu_dans_import_id` sans vérifier l'import.
  */
-export const getDernierImportExercice = (
-  imports: ImportApercu[],
+export const getDernierImportExercice = <T extends ImportApercu>(
+  imports: T[],
   exerciceCourant: number,
-): ImportApercu | null => {
-  let dernier: ImportApercu | null = null;
+): T | null => {
+  let dernier: T | null = null;
   for (const imp of imports) {
     if (imp.annee_exercice !== exerciceCourant) continue;
     if (!dernier || new Date(imp.demarre_at).getTime() > new Date(dernier.demarre_at).getTime()) {
       dernier = imp;
     }
   }
+  return dernier;
+};
+
+/**
+ * Réévalue la sélection de l'alerte « Analyse des Erreurs d'Import » à partir des imports
+ * réellement présents dans Supabase, pour l'EXERCICE consulté (`exercice`).
+ * L'alerte ne dépend que de l'import le plus récent de cet exercice et de ses données réelles :
+ * - aucun import pour l'exercice, ou import de l'exercice supprimé → l'alerte disparaît
+ *   (aucun état local ne la maintient) ;
+ * - erreurs corrigées (erreurs = 0) → l'alerte disparaît ;
+ * - erreurs > 0 → l'alerte est conservée avec le nombre réel ;
+ * - nouvel import de l'exercice → l'alerte reflète uniquement le nouvel import.
+ * Un import d'un AUTRE exercice (ex. 2030) ne peut jamais déclencher l'alerte de l'exercice
+ * consulté. L'identité d'un import repose sur son `id` ; un import absent de la liste ne peut
+ * jamais être conservé en mémoire par le composant.
+ */
+export const resyncImportErrors = (
+  prev: ImportTravaux | null,
+  imports: ImportTravaux[],
+  exercice: number,
+): ImportTravaux | null => {
+  if (!prev) return prev;
+  const dernier = getDernierImportExercice(imports, exercice);
+  if (!dernier || (dernier.erreurs ?? 0) <= 0) return null;
   return dernier;
 };
 

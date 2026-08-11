@@ -1,6 +1,8 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
+import { exerciceCourant } from "@/lib/travaux";
+
 // Colonnes réellement présentes dans travaux_commandes (schéma de production).
 // Les colonnes classification_* n'existent pas encore en base : on les exclut des
 // mises à jour pour que la résolution d'une alerte ne casse pas l'UPDATE.
@@ -113,6 +115,35 @@ export type TravauxDashboardData = {
   imports: ImportTravaux[];
   tranchesDetails: TrancheDetail[];
 };
+
+export type CheckTravauxImportResult = {
+  found: boolean;
+  latestImport: ImportTravaux | null;
+  exercice: number;
+};
+
+/**
+ * Vérifie l'état réel des imports dans Supabase (lecture seule, aucune comparaison métier
+ * de fichiers Excel). Retourne le dernier import selon `demarre_at` : l'identité d'un import
+ * repose sur son `id`, que le frontend compare à celui actuellement affiché. L'exercice
+ * courant est calculé dynamiquement (jamais codé en dur).
+ */
+export const checkTravauxLatestImport = createServerFn({ method: "GET" }).handler(async () => {
+  const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
+  const db = supabaseAdmin as any;
+  const { data, error } = await db
+    .from("import_travaux")
+    .select("*")
+    .order("demarre_at", { ascending: false })
+    .limit(1);
+  if (error) throw new Error(error.message);
+  const latestImport = (data?.[0] ?? null) as ImportTravaux | null;
+  return {
+    found: !!latestImport,
+    latestImport,
+    exercice: exerciceCourant(),
+  } satisfies CheckTravauxImportResult;
+});
 
 export const getTravauxDashboard = createServerFn({ method: "GET" }).handler(async () => {
   const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
