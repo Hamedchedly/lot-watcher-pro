@@ -70,6 +70,96 @@ export function adressesParTranche(
     .filter((g) => g.nbAdresses > 0);
 }
 
+/**
+ * Normalisation unique de recherche : majuscules, accents retirés, tirets/ponctuation → espace,
+ * espaces superflus supprimés. Permet de comparer « othis »=« OTHIS », « é »=« e »,
+ * « Plessis-Trévise »=« PLESSIS TREVISE ».
+ */
+export function normaliserRecherche(value: string | null | undefined): string {
+  return (value ?? "")
+    .toUpperCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^A-Z0-9]+/g, " ")
+    .trim();
+}
+
+export type ResultatVille = { ville: string; tranches: number; lots: number };
+export type ResultatAdresse = {
+  adresse: string;
+  ville: string;
+  tranche: string;
+  lots: number;
+};
+export type ResultatLocataire = {
+  nom: string;
+  adresse: string;
+  ville: string;
+  tranche: string;
+};
+export type ResultatsRecherche = {
+  villes: ResultatVille[];
+  adresses: ResultatAdresse[];
+  locataires: ResultatLocataire[];
+};
+
+/**
+ * Recherche hiérarchique du patrimoine, multi-catégories (jamais exclusive) :
+ *  1. VILLES    — dans le référentiel des villes (getVilles, hors lots filtrés) ;
+ *  2. ADRESSES  — lots dont l'adresse contient le terme (regroupées par adresse) ;
+ *  3. LOCATAIRES— lots dont le locataire contient le terme (avec contexte d'adresse).
+ * Matching « contient », insensible casse/accents/tirets/espaces. Terme vide → aucun résultat.
+ * `lots` doivent déjà respecter le filtre `showGarages` (garages masqués exclus).
+ */
+export function rechercherPatrimoine(
+  terme: string,
+  lots: LotItem[],
+  villes: { ville: string; tranches: number; lots: number }[],
+): ResultatsRecherche {
+  const t = normaliserRecherche(terme);
+  if (!t) return { villes: [], adresses: [], locataires: [] };
+
+  const villesTrouvees: ResultatVille[] = villes
+    .filter((v) => normaliserRecherche(v.ville).includes(t))
+    .map((v) => ({ ville: v.ville, tranches: v.tranches, lots: v.lots }));
+
+  const adresses = new Map<string, ResultatAdresse>();
+  const locataires = new Map<string, ResultatLocataire>();
+
+  for (const lot of lots) {
+    const adrNorm = normaliserRecherche(lot.adresse);
+    if (adrNorm && adrNorm.includes(t)) {
+      const cle = `${lot.ville}|${lot.tranche_code}|${adrNorm}`;
+      const g = adresses.get(cle) ?? {
+        adresse: lot.adresse ?? "Adresse inconnue",
+        ville: lot.ville ?? "",
+        tranche: lot.tranche_code ?? "",
+        lots: 0,
+      };
+      g.lots += 1;
+      adresses.set(cle, g);
+    }
+    const nomNorm = normaliserRecherche(lot.locataire_nom);
+    if (nomNorm && nomNorm.includes(t)) {
+      const cleLoc = `${nomNorm}|${lot.ville}|${lot.tranche_code}|${adrNorm}`;
+      if (!locataires.has(cleLoc)) {
+        locataires.set(cleLoc, {
+          nom: lot.locataire_nom ?? "",
+          adresse: lot.adresse ?? "Adresse inconnue",
+          ville: lot.ville ?? "",
+          tranche: lot.tranche_code ?? "",
+        });
+      }
+    }
+  }
+
+  return {
+    villes: villesTrouvees,
+    adresses: [...adresses.values()],
+    locataires: [...locataires.values()],
+  };
+}
+
 /* ---------- Recherches récentes (local) ---------- */
 
 export type RecentAdresse = { rue: string; ville: string; lots: number; at: number };

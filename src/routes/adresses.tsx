@@ -39,7 +39,12 @@ import {
   type LotItem,
   type TravauxScope,
 } from "@/lib/isis.functions";
-import { adressesParTranche as adressesParTrancheLib, estGarage } from "@/lib/adresses";
+import {
+  adressesParTranche as adressesParTrancheLib,
+  estGarage,
+  normaliserRecherche,
+  rechercherPatrimoine,
+} from "@/lib/adresses";
 
 const searchSchema = z.object({
   q: z.string().optional(),
@@ -65,9 +70,17 @@ function AdressesPage() {
     queryFn: () => fetchVilles({}),
   });
 
+  // Mode recherche : on charge TOUS les lots actifs une seule fois (clé constante), puis on
+  // recherche en client avec normalisation (villes/adresses/locataires) — aucune requête par résultat.
+  const searchMode = !!q?.trim();
   const { data, isLoading: isLoadingLots } = useQuery({
-    queryKey: ["adresses", q, ville, tranche, rue, adresse],
-    queryFn: () => fetchAdresses({ data: { q, ville, tranche, rue, adresse } }),
+    queryKey: searchMode
+      ? ["adresses", "toutes"]
+      : ["adresses", q, ville, tranche, rue, adresse],
+    queryFn: () =>
+      searchMode
+        ? fetchAdresses({ data: {} })
+        : fetchAdresses({ data: { q, ville, tranche, rue, adresse } }),
   });
 
   type AdresseTree = Record<string, Record<string, Record<string, LotItem[]>>>;
@@ -128,6 +141,12 @@ function AdressesPage() {
     [hierarchy, ville],
   );
 
+  // Recherche hiérarchique multi-catégories (VILLES → ADRESSES → LOCATAIRES).
+  const resultatsRecherche = useMemo(
+    () => (searchMode ? rechercherPatrimoine(q ?? "", visibleLots, villeRows) : null),
+    [searchMode, q, visibleLots, villeRows],
+  );
+
   const rueRows = useMemo(() => {
     if (!ville || !tranche) return [] as { adresse: string; lots: number }[];
     return Object.entries(hierarchy?.[ville]?.[tranche] || {}).map(([adresse, lots]) => ({
@@ -137,7 +156,9 @@ function AdressesPage() {
   }, [hierarchy, ville, tranche]);
 
   const handleSearch = (val: string) => {
-    navigate({ search: (prev) => ({ ...prev, q: val || undefined }) });
+    // La recherche est un mode global : on repart d'un état vierge (q seul) et on revient
+    // au comportement normal de /adresses quand le champ est vidé.
+    navigate({ search: { q: val || undefined } });
   };
 
   return (
@@ -211,6 +232,12 @@ function AdressesPage() {
               <span className="font-medium text-foreground">{rue}</span>
             </>
           )}
+          {q && (
+            <>
+              <ChevronRight className="size-3" />{" "}
+              <span className="font-medium text-foreground">Recherche : {q}</span>
+            </>
+          )}
         </div>
 
         {isLoadingLots ? (
@@ -234,6 +261,130 @@ function AdressesPage() {
           </div>
         ) : (
           <div className="space-y-6">
+            {/* Mode Recherche — résultats hiérarchiques groupés */}
+            {searchMode && resultatsRecherche && (
+              <div className="space-y-6">
+                <header className="flex flex-wrap items-center justify-between gap-2">
+                  <h2 className="flex items-center gap-2 text-sm font-semibold">
+                    <Search className="size-4 text-primary" /> Résultats pour « {q} »
+                  </h2>
+                  <span className="text-xs text-muted-foreground">
+                    {resultatsRecherche.villes.length +
+                      resultatsRecherche.adresses.length +
+                      resultatsRecherche.locataires.length}{" "}
+                    résultat(s)
+                  </span>
+                </header>
+
+                {/* VILLES */}
+                {resultatsRecherche.villes.length > 0 && (
+                  <section className="overflow-hidden rounded-lg border bg-background shadow-sm">
+                    <header className="border-b bg-muted/50 px-4 py-2.5">
+                      <h3 className="text-sm font-semibold">Villes</h3>
+                    </header>
+                    <div className="divide-y">
+                      {resultatsRecherche.villes.map((row) => (
+                        <button
+                          key={row.ville}
+                          onClick={() => navigate({ search: { ville: row.ville } })}
+                          className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left hover:bg-muted/50 transition-colors"
+                        >
+                          <span className="flex items-center gap-2 font-medium text-primary">
+                            <MapPin className="size-4 shrink-0" /> {row.ville}
+                          </span>
+                          <span className="text-xs text-muted-foreground">
+                            {row.tranches} tranche{row.tranches > 1 ? "s" : ""} · {row.lots} lots
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </section>
+                )}
+
+                {/* ADRESSES */}
+                {resultatsRecherche.adresses.length > 0 && (
+                  <section className="overflow-hidden rounded-lg border bg-background shadow-sm">
+                    <header className="border-b bg-muted/50 px-4 py-2.5">
+                      <h3 className="text-sm font-semibold">Adresses</h3>
+                    </header>
+                    <div className="divide-y">
+                      {resultatsRecherche.adresses.map((row) => (
+                        <button
+                          key={`${row.ville}|${row.tranche}|${row.adresse}`}
+                          onClick={() =>
+                            navigate({
+                              search: { ville: row.ville, tranche: row.tranche, rue: row.adresse },
+                            })
+                          }
+                          className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left hover:bg-muted/50 transition-colors"
+                        >
+                          <span className="flex min-w-0 flex-col">
+                            <span className="flex items-center gap-2 font-medium text-primary">
+                              <MapPin className="size-4 shrink-0" /> {row.adresse}
+                            </span>
+                            <span className="text-xs text-muted-foreground">
+                              {row.ville} · Tranche {row.tranche} · {row.lots} lots
+                            </span>
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </section>
+                )}
+
+                {/* LOCATAIRES */}
+                {resultatsRecherche.locataires.length > 0 && (
+                  <section className="overflow-hidden rounded-lg border bg-background shadow-sm">
+                    <header className="border-b bg-muted/50 px-4 py-2.5">
+                      <h3 className="text-sm font-semibold">Locataires</h3>
+                    </header>
+                    <div className="divide-y">
+                      {resultatsRecherche.locataires.map((row) => (
+                        <button
+                          key={`${row.nom}|${row.ville}|${row.tranche}|${row.adresse}`}
+                          onClick={() =>
+                            navigate({
+                              search: { ville: row.ville, tranche: row.tranche, rue: row.adresse },
+                            })
+                          }
+                          className="flex w-full items-center gap-2 px-4 py-3 text-left hover:bg-muted/50 transition-colors"
+                        >
+                          <User className="size-4 shrink-0 text-primary" />
+                          <span className="flex min-w-0 flex-col">
+                            <span className="font-medium">{row.nom}</span>
+                            <span className="text-xs text-muted-foreground">
+                              {row.adresse} · {row.ville} · Tranche {row.tranche}
+                            </span>
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </section>
+                )}
+
+                {/* Aucun résultat */}
+                {resultatsRecherche.villes.length +
+                  resultatsRecherche.adresses.length +
+                  resultatsRecherche.locataires.length ===
+                  0 && (
+                  <div className="flex h-40 flex-col items-center justify-center gap-2 text-center">
+                    <InfoIcon className="size-8 text-muted-foreground" />
+                    <h2 className="text-lg font-medium">Aucun résultat</h2>
+                    <p className="text-sm text-muted-foreground">
+                      Aucune ville, adresse ou locataire ne correspond à « {q} ».
+                    </p>
+                    <Button
+                      variant="outline"
+                      className="whitespace-nowrap"
+                      onClick={() => handleSearch("")}
+                    >
+                      Réinitialiser la recherche
+                    </Button>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Niveau Ville */}
             {!ville && !q && (
               <section className="overflow-hidden rounded-lg border bg-background shadow-sm">
@@ -421,7 +572,7 @@ function AdressesPage() {
             )}
 
             {/* Niveau Lots */}
-            {(rue || q || adresse) && (
+            {(rue || adresse) && (
               <section className="overflow-hidden rounded-lg border bg-background shadow-sm">
                 <header className="flex flex-wrap items-center justify-between gap-2 border-b bg-muted/50 px-4 py-2.5">
                   <h2 className="flex items-center gap-2 text-sm font-semibold">
