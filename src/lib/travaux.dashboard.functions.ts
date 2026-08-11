@@ -227,6 +227,22 @@ export const updateCommandeTravaux = createServerFn({ method: "POST" })
     return updated;
   });
 
+export const getCommandeHistorique = createServerFn({ method: "POST" })
+  .validator((d: unknown) => z.object({ commandeId: z.string().uuid() }).parse(d))
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
+    const db = supabaseAdmin as any;
+    // Toutes les opérations (creation, modification, archivage, conflit, resolution),
+    // ordonnées chronologiquement pour reconstruire la timeline de la commande.
+    const { data: rows, error } = await db
+      .from("travaux_commandes_historique")
+      .select("id, import_id, commande_id, operation, avant, apres, created_at, resolu")
+      .eq("commande_id", data.commandeId)
+      .order("created_at", { ascending: true });
+    if (error) throw new Error(`Chargement de l'historique : ${error.message}`);
+    return (rows ?? []) as HistoriqueTravaux[];
+  });
+
 export const getTravauxStats = createServerFn({ method: "GET" }).handler(async () => {
   const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
   const db = supabaseAdmin as any;

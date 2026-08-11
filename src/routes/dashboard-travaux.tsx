@@ -69,6 +69,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Badge } from "@/components/ui/badge";
 import {
   getTravauxDashboard,
+  getCommandeHistorique,
   updateCommandeTravaux,
   resolveHistoriqueTravaux,
   type CommandeTravaux,
@@ -396,6 +397,7 @@ function DashboardTravauxPage() {
   const [drilldownSector, setDrilldownSector] = useState<string | null>(null);
   const [selectedModif, setSelectedModif] = useState<HistoriqueTravaux | null>(null);
   const [selectedDetail, setSelectedDetail] = useState<Commande | null>(null);
+  const [historyFor, setHistoryFor] = useState<Commande | null>(null);
   const [selectedImportErrors, setSelectedImportErrors] = useState<ImportTravaux | null>(null);
   const [versionChoice, setVersionChoice] = useState<"A" | "B">("B");
 
@@ -1754,13 +1756,22 @@ function DashboardTravauxPage() {
               </div>
               <div className="ml-8">
                 {!isEditing ? (
-                  <Button
-                    onClick={handleEditStart}
-                    variant="outline"
-                    className="bg-white/10 border-white/20 hover:bg-white/20 text-white font-black text-[10px] uppercase tracking-widest rounded-xl"
-                  >
-                    <Edit3 className="size-3.5 mr-2" /> MODIFIER
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button
+                      onClick={handleEditStart}
+                      variant="outline"
+                      className="bg-white/10 border-white/20 hover:bg-white/20 text-white font-black text-[10px] uppercase tracking-widest rounded-xl"
+                    >
+                      <Edit3 className="size-3.5 mr-2" /> MODIFIER
+                    </Button>
+                    <Button
+                      onClick={() => setHistoryFor(selectedDetail)}
+                      variant="ghost"
+                      className="text-white/80 hover:text-white font-black text-[10px] uppercase tracking-widest rounded-xl"
+                    >
+                      <History className="size-3.5 mr-2" /> HISTORIQUE
+                    </Button>
+                  </div>
                 ) : (
                   <div className="flex gap-2">
                     <Button
@@ -2116,6 +2127,183 @@ function DashboardTravauxPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {historyFor ? (
+        <CommandeHistoriqueDialog commande={historyFor} onClose={() => setHistoryFor(null)} />
+      ) : null}
     </main>
   );
 }
+function CommandeHistoriqueDialog({
+  commande,
+  onClose,
+}: {
+  commande: Commande;
+  onClose: () => void;
+}) {
+  const fetchHistory = useServerFn(getCommandeHistorique);
+  const { data, isLoading } = useQuery({
+    queryKey: ["commande-historique", commande.id],
+    queryFn: () => fetchHistory({ data: { commandeId: commande.id } }),
+  });
+  const rows = (data ?? []) as HistoriqueTravaux[];
+
+  const operationLabel: Record<string, string> = {
+    creation: "Création",
+    modification: "Modification",
+    archivage: "Archivage",
+    conflit: "Conflit de réimport",
+    resolution: "Résolution",
+  };
+  const keyLabel: Record<string, string> = {
+    numero_commande: "N° commande",
+    annee_exercice: "Année",
+    budget: "Budget",
+    engage: "Engagé",
+    paye: "Payé",
+    ecart: "Écart",
+    solde: "Solde",
+    fournisseur: "Fournisseur",
+    lot_code: "Lot",
+    descriptif: "Description",
+    adresse: "Adresse",
+    etat_travaux: "État",
+  };
+  const displayedKeys = [
+    "numero_commande",
+    "annee_exercice",
+    "budget",
+    "engage",
+    "paye",
+    "ecart",
+    "fournisseur",
+    "lot_code",
+    "descriptif",
+    "adresse",
+    "etat_travaux",
+  ];
+  const moneyKeys = new Set(["budget", "engage", "paye", "ecart", "solde"]);
+  const fmt = (k: string, v: string | number | boolean | null | undefined) =>
+    v === null || v === undefined
+      ? "—"
+      : typeof v === "number" && moneyKeys.has(k)
+        ? money(v)
+        : String(v);
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto rounded-3xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <History className="size-4 text-blue-600" />
+            Historique — Commande N° {commande.numero_commande}
+          </DialogTitle>
+          <DialogDescription>
+            Année d'exercice : {commande.annee_exercice ?? "—"} · {rows.length} événement(s)
+          </DialogDescription>
+        </DialogHeader>
+        {isLoading ? (
+          <p className="text-sm text-muted-foreground">Chargement de l'historique…</p>
+        ) : rows.length === 0 ? (
+          <p className="text-sm text-muted-foreground">Aucun événement enregistré.</p>
+        ) : (
+          <div className="space-y-3">
+            {rows.map((h) => {
+              const avant = h.avant ?? {};
+              const apres = h.apres ?? {};
+              const isConflit = h.operation === "conflit";
+              const isResolution = h.operation === "resolution";
+              return (
+                <div
+                  key={h.id}
+                  className="rounded-2xl border border-slate-100 bg-slate-50/50 p-4 space-y-2"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-blue-600 bg-blue-50 px-2 py-0.5 rounded">
+                      {operationLabel[h.operation] ?? h.operation}
+                    </span>
+                    <span className="text-[10px] text-slate-400 font-bold">
+                      {new Date(h.created_at).toLocaleString("fr-FR")}
+                    </span>
+                  </div>
+
+                  {isResolution ? (
+                    <p className="text-xs font-bold text-slate-700">
+                      Version conservée : {String(apres["version_conservee"] ?? "—")}
+                    </p>
+                  ) : null}
+
+                  {isConflit ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                      <div className="rounded-xl bg-white border border-slate-100 p-3 space-y-1">
+                        <p className="text-[9px] font-black uppercase text-slate-400">
+                          Ancienne version
+                        </p>
+                        {displayedKeys.map((k) => (
+                          <p key={k} className="flex justify-between gap-2">
+                            <span className="text-slate-400">{keyLabel[k] ?? k}</span>
+                            <span
+                              className={
+                                String(avant[k]) !== String(apres[k])
+                                  ? "text-red-500 font-bold"
+                                  : "text-slate-700"
+                              }
+                            >
+                              {fmt(k, avant[k])}
+                            </span>
+                          </p>
+                        ))}
+                      </div>
+                      <div className="rounded-xl bg-white border border-slate-100 p-3 space-y-1">
+                        <p className="text-[9px] font-black uppercase text-slate-400">
+                          Nouvelle version
+                        </p>
+                        {displayedKeys.map((k) => (
+                          <p key={k} className="flex justify-between gap-2">
+                            <span className="text-slate-400">{keyLabel[k] ?? k}</span>
+                            <span
+                              className={
+                                String(avant[k]) !== String(apres[k])
+                                  ? "text-green-600 font-bold"
+                                  : "text-slate-700"
+                              }
+                            >
+                              {fmt(k, apres[k])}
+                            </span>
+                          </p>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="rounded-xl bg-white border border-slate-100 p-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 text-xs">
+                        {displayedKeys
+                          .filter((k) => apres[k] !== null && apres[k] !== undefined)
+                          .map((k) => (
+                            <p key={k} className="flex justify-between gap-2">
+                              <span className="text-slate-400">{keyLabel[k] ?? k}</span>
+                              <span className="text-slate-700 font-bold truncate">
+                                {fmt(k, apres[k])}
+                              </span>
+                            </p>
+                          ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+        <DialogFooter>
+          <Button
+            onClick={onClose}
+            className="w-full bg-slate-900 font-black text-[10px] rounded-2xl uppercase tracking-widest h-12"
+          >
+            FERMER
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
