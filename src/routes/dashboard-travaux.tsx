@@ -329,6 +329,16 @@ function DashboardTravauxPage() {
   const recentImports = data?.imports ?? [];
   const tranchesDetails = data?.tranchesDetails ?? [];
 
+  // Conflits/doublons non résolus par commande (indicateur « ACT. ») — défini avant le
+  // filtre `filteredJournal` afin qu'il puisse les prendre en compte.
+  const historyMap = useMemo(() => {
+    const map = new Map<string, HistoriqueTravaux>();
+    historique.forEach((h) => {
+      if (!h.resolu && !map.has(h.commande_id)) map.set(h.commande_id, h);
+    });
+    return map;
+  }, [historique]);
+
   // Exercice courant (jamais codé en dur) — utilisé pour l'état dérivé « Pas réalisé ».
   const exercice = exerciceCourant();
 
@@ -350,6 +360,7 @@ function DashboardTravauxPage() {
   const [selectedVilles, setSelectedVilles] = useState<string[]>([]);
   const [selectedTypes, setSelectedTypes] = useState<string[]>([]);
   const [selectedEtats, setSelectedEtats] = useState<string[]>([]);
+  const [actFilter, setActFilter] = useState(false);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [showAllTranches, setShowAllTranches] = useState(false);
@@ -569,6 +580,19 @@ function DashboardTravauxPage() {
     villesGeo,
   ]);
 
+  // Journal : filtre « ACT. » (anomalies de données OU conflit/doublon) — en surcouche des
+  // filtres existants (année, état, secteur, ville, archivage…). Les statistiques globales
+  // (KPI, donut, carte) restent sur `filtered`, seules les lignes du journal sont filtrées.
+  const filteredJournal = useMemo(
+    () =>
+      actFilter
+        ? filtered.filter(
+            (row) => getAlertesCommande(row).length > 0 || historyMap.has(row.id),
+          )
+        : filtered,
+    [filtered, actFilter, historyMap],
+  );
+
   const stats = useMemo(() => {
     const budget = filtered.reduce((s, r) => s + (r.budget || 0), 0);
     const engage = filtered.reduce((s, r) => s + (r.engage || 0), 0);
@@ -711,14 +735,6 @@ function DashboardTravauxPage() {
       .sort((a, b) => b.value - a.value);
   }, [filtered, drilldownSector]);
 
-  const historyMap = useMemo(() => {
-    const map = new Map<string, HistoriqueTravaux>();
-    historique.forEach((h) => {
-      if (!h.resolu && !map.has(h.commande_id)) map.set(h.commande_id, h);
-    });
-    return map;
-  }, [historique]);
-
   const reset = () => {
     // Réinitialisation = retour à la sélection initiale (exercice courant uniquement).
     setYearRange(yearRangeInitial(exercice));
@@ -728,6 +744,7 @@ function DashboardTravauxPage() {
     setSelectedVilles([]);
     setSelectedTypes([]);
     setSelectedEtats([]);
+    setActFilter(false);
     setSearch("");
     setTableFilters({});
     setPage(1);
@@ -1210,7 +1227,7 @@ function DashboardTravauxPage() {
                 Journal des Commandes
               </h3>
               <Badge className="bg-slate-200 text-slate-700 text-[9px] font-black uppercase tracking-tighter rounded-lg">
-                {filtered.length} LIGNES
+                {filteredJournal.length} LIGNES
               </Badge>
             </div>
             <div className="flex flex-wrap items-center gap-3">
@@ -1487,11 +1504,37 @@ function DashboardTravauxPage() {
                   <th className="p-4 w-32 text-right">Payé</th>
                   <th className="p-4 w-16 text-center">Prog.</th>
                   <th className="p-4 w-24">État</th>
-                  <th className="p-4 w-12 text-center">ACT.</th>
+                  <th className="p-4 w-12 text-center">
+                    <button
+                      onClick={() => setActFilter((v) => !v)}
+                      title={
+                        actFilter
+                          ? "Désactiver le filtre anomalies"
+                          : "Filtrer les commandes avec anomalie"
+                      }
+                      className={`px-1.5 py-0.5 rounded text-[8px] font-black uppercase transition-all ${
+                        actFilter
+                          ? "bg-blue-600 text-white shadow-sm"
+                          : "text-slate-400 hover:text-blue-600"
+                      }`}
+                    >
+                      ACT.
+                    </button>
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).map((row) => {
+                {filteredJournal.length === 0 && (
+                  <tr>
+                    <td
+                      colSpan={13}
+                      className="p-8 text-center text-[10px] font-bold uppercase tracking-widest text-slate-400"
+                    >
+                      {actFilter ? "Aucune anomalie détectée" : "Aucune commande"}
+                    </td>
+                  </tr>
+                )}
+                {filteredJournal.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).map((row) => {
                   const modif = historyMap.get(row.id);
                   const alertes = getAlertesCommande(row);
                   const sect = secteurDe(row);
@@ -1612,7 +1655,7 @@ function DashboardTravauxPage() {
           </div>
           <div className="p-4 bg-slate-50/50 border-t flex items-center justify-between">
             <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">
-              PAGE {page} SUR {Math.ceil(filtered.length / PAGE_SIZE) || 1}
+              PAGE {page} SUR {Math.ceil(filteredJournal.length / PAGE_SIZE) || 1}
             </span>
             <div className="flex gap-2">
               <Button
@@ -1628,7 +1671,7 @@ function DashboardTravauxPage() {
                 variant="outline"
                 size="sm"
                 className="h-8 font-black text-[9px] rounded-xl uppercase tracking-widest"
-                disabled={page * PAGE_SIZE >= filtered.length}
+                disabled={page * PAGE_SIZE >= filteredJournal.length}
                 onClick={() => setPage((p) => p + 1)}
               >
                 SUIVANT

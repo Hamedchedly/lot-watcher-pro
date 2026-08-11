@@ -789,6 +789,57 @@ assert(
   formatDateImportFr("2026-08-10T23:25:00.000+00:00") === "11/08/2026 à 01:25",
 );
 
+// =====================================================================
+// Filtre « ACT. » du journal — anomalies OU conflit/doublon (même logique que filteredJournal)
+// =====================================================================
+const filtreAct = (rows, actif, conflits) =>
+  actif
+    ? rows.filter((r) => getAlertesCommande(r).length > 0 || conflits.has(r.id))
+    : rows;
+const conflits = new Set(["C-DOUBLON"]);
+const saine = { id: "C-SAINE", engage: 100, etat_commande: "En cours", etat_travaux: "Terminé" };
+const neg = { id: "C-NEG", engage: -2641.38 };
+const num = { id: "C-NUM", etat_commande: "2641.38" };
+const date = { id: "C-DATE", etat_travaux: "09.09.2024" };
+const doublon = { id: "C-DOUBLON", engage: 100, etat_commande: "En cours" };
+const multi = { id: "C-MULTI", engage: -2000, etat_commande: "2000", etat_travaux: "01.01.2025" };
+const rowsAct = [saine, neg, num, date, doublon, multi];
+assert("ACT par défaut → toutes les lignes", filtreAct(rowsAct, false, conflits).length === 6);
+const activesAct = filtreAct(rowsAct, true, conflits);
+assert("ACT commande sans anomalie → exclue", !activesAct.some((r) => r.id === "C-SAINE"));
+assert("ACT engagement négatif → incluse", activesAct.some((r) => r.id === "C-NEG"));
+assert("ACT état numérique incohérent → incluse", activesAct.some((r) => r.id === "C-NUM"));
+assert("ACT date dans etat_travaux → incluse", activesAct.some((r) => r.id === "C-DATE"));
+assert("ACT conflit/doublon → incluse", activesAct.some((r) => r.id === "C-DOUBLON"));
+assert(
+  "ACT plusieurs anomalies → une seule ligne",
+  activesAct.filter((r) => r.id === "C-MULTI").length === 1,
+);
+assert("ACT désactivé → retour à l'ensemble initial", filtreAct(rowsAct, false, conflits).length === 6);
+
+// ACT combiné avec Année / État / Ville (mêmes helpers que le dashboard)
+const actCombo = [
+  { id: "A", annee_exercice: 2026, tranche_code: "1401", adresse: "RUE SERRIS", corps_etat: "(o) Plomberie", actif: true, engage: -500, etat_commande: "500" },
+  { id: "B", annee_exercice: 2026, tranche_code: "1401", adresse: "RUE SERRIS", corps_etat: "(g) Halls", actif: true, engage: 100 },
+  { id: "C", annee_exercice: 2025, tranche_code: "1396", adresse: "RUE CHESSY", corps_etat: "(e) Divers", actif: false, engage: -100 },
+];
+const filtreActCombo = (rows, { annee, etats, villes, actif }) =>
+  rows.filter(
+    (r) =>
+      matchesAnnee(r, annee) &&
+      (etats.length === 0 || etats.includes(etatMetier(r, EX))) &&
+      (villes.length === 0 || villes.includes(villeDeCommande(r, tranches, villesGeo))) &&
+      (actif ? getAlertesCommande(r).length > 0 || conflits.has(r.id) : true),
+  );
+const rAct2026 = filtreActCombo(actCombo, { annee: [2026, 2026], etats: [], villes: [], actif: true });
+assert("ACT + Année [2026,2026] → uniquement la ligne 2026 avec anomalie", rAct2026.length === 1 && rAct2026[0].id === "A");
+const rActSerris = filtreActCombo(actCombo, { annee: [2023, 2030], etats: [], villes: ["SERRIS"], actif: true });
+assert("ACT + Ville SERRIS → uniquement les anomalies de SERRIS", rActSerris.length === 1 && rActSerris[0].id === "A");
+const rActEtat = filtreActCombo(actCombo, { annee: [2023, 2030], etats: ["En cours"], villes: [], actif: true });
+assert("ACT + État En cours → anomalies En cours (A et C)", rActEtat.length === 2);
+const rActOff = filtreActCombo(actCombo, { annee: [2023, 2030], etats: [], villes: ["SERRIS"], actif: false });
+assert("ACT désactivé + Ville SERRIS → A et B (SERRIS)", rActOff.length === 2 && rActOff.some((r) => r.id === "B"));
+
 console.log("\n==========================================");
 console.log(`Résultat : ${passed} PASS, ${failed} FAIL`);
 console.log("==========================================");

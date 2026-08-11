@@ -39,7 +39,7 @@ import {
   type LotItem,
   type TravauxScope,
 } from "@/lib/isis.functions";
-import { estGarage } from "@/lib/adresses";
+import { adressesParTranche as adressesParTrancheLib, estGarage } from "@/lib/adresses";
 
 const searchSchema = z.object({
   q: z.string().optional(),
@@ -122,14 +122,11 @@ function AdressesPage() {
     }));
   }, [villes, hierarchy]);
 
-  const trancheRows = useMemo(() => {
-    if (!ville) return [] as { code: string; adresses: number; lots: number }[];
-    return Object.entries(hierarchy?.[ville] || {}).map(([code, rues]) => ({
-      code,
-      adresses: Object.keys(rues).length,
-      lots: Object.values(rues).reduce((sum, arr) => sum + arr.length, 0),
-    }));
-  }, [hierarchy, ville]);
+  // Adresses de la ville sélectionnée, regroupées par tranche (sections cliquables).
+  const groupesAdresses = useMemo(
+    () => (ville ? adressesParTrancheLib(hierarchy?.[ville] || {}) : []),
+    [hierarchy, ville],
+  );
 
   const rueRows = useMemo(() => {
     if (!ville || !tranche) return [] as { adresse: string; lots: number }[];
@@ -164,7 +161,7 @@ function AdressesPage() {
               />
               Afficher les garages
             </label>
-            <div className="relative w-64">
+            <div className="relative w-full sm:w-64">
               <Search className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
               <Input
                 type="search"
@@ -183,7 +180,7 @@ function AdressesPage() {
 
       <main className="mx-auto max-w-7xl flex-1 px-4 py-6 sm:px-6">
         <div className="mb-4 flex items-center gap-2 text-xs text-muted-foreground">
-          <Link to="/" className="hover:text-primary">
+          <Link to="/adresses" className="hover:text-primary">
             Patrimoine
           </Link>
           {ville && (
@@ -227,7 +224,11 @@ function AdressesPage() {
             <p className="text-sm text-muted-foreground">
               Essayez de modifier vos filtres ou votre recherche.
             </p>
-            <Button variant="outline" onClick={() => handleSearch("")}>
+            <Button
+              variant="outline"
+              className="whitespace-nowrap"
+              onClick={() => handleSearch("")}
+            >
               Réinitialiser la recherche
             </Button>
           </div>
@@ -255,7 +256,7 @@ function AdressesPage() {
                         <th className="w-full px-4 py-3">Ville</th>
                         <th className="whitespace-nowrap px-4 py-3">Tranches</th>
                         <th className="whitespace-nowrap px-4 py-3">Lots</th>
-                        <th className="whitespace-nowrap px-4 py-3 text-right">Actions</th>
+                        <th className="w-16 whitespace-nowrap px-4 py-3 text-right">Actions</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y">
@@ -295,63 +296,69 @@ function AdressesPage() {
               </section>
             )}
 
-            {/* Niveau Tranche */}
+            {/* Niveau Ville → Adresses regroupées par tranche */}
             {ville && !tranche && !q && (
-              <section className="overflow-hidden rounded-lg border bg-background shadow-sm">
-                <header className="flex flex-wrap items-center justify-between gap-2 border-b bg-muted/50 px-4 py-2.5">
+              <div className="space-y-6">
+                <header className="flex flex-wrap items-center justify-between gap-2">
                   <h2 className="flex items-center gap-2 text-sm font-semibold">
-                    <Building2 className="size-4 text-primary" /> Tranches · {ville}
+                    <MapPin className="size-4 text-primary" /> Adresses · {ville}
                   </h2>
                   <span className="text-xs text-muted-foreground">
-                    {trancheRows.length} tranche{trancheRows.length > 1 ? "s" : ""} ·{" "}
-                    {trancheRows.reduce((s, r) => s + r.lots, 0)} lots
+                    {groupesAdresses.length} tranche{groupesAdresses.length > 1 ? "s" : ""} ·{" "}
+                    {groupesAdresses.reduce((s, t) => s + t.nbAdresses, 0)} adresses ·{" "}
+                    {groupesAdresses.reduce((s, t) => s + t.nbLots, 0)} lots
                   </span>
                 </header>
-                <div className="overflow-x-auto">
-                  <table className="w-full border-collapse text-left text-sm">
-                    <thead className="border-b bg-muted/50 font-medium text-muted-foreground">
-                      <tr>
-                        <th className="w-full px-4 py-3">Tranche</th>
-                        <th className="whitespace-nowrap px-4 py-3">Adresses</th>
-                        <th className="whitespace-nowrap px-4 py-3">Lots</th>
-                        <th className="whitespace-nowrap px-4 py-3 text-right">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y">
-                      {trancheRows.map((row) => (
-                        <tr key={row.code} className="hover:bg-muted/50 transition-colors">
-                          <td className="px-4 py-3 font-medium">
-                            <button
-                              onClick={() => navigate({ search: { ville, tranche: row.code } })}
-                              className="flex w-full items-center gap-2 text-left text-primary hover:underline"
-                            >
-                              <Building2 className="size-4 shrink-0" /> {row.code}
-                            </button>
-                          </td>
-                          <td className="px-4 py-3 text-muted-foreground">{row.adresses}</td>
-                          <td className="px-4 py-3 text-muted-foreground">{row.lots}</td>
-                          <td className="px-4 py-3 text-right">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              title="Voir les travaux de la tranche"
-                              onClick={() =>
-                                setTravauxScope({
-                                  niveau: "tranche",
-                                  label: `Tranche ${row.code}`,
-                                  trancheCode: row.code,
-                                })
-                              }
-                            >
-                              <Wrench className="size-4" />
-                            </Button>
-                          </td>
-                        </tr>
+                {groupesAdresses.map((t) => (
+                  <section
+                    key={t.code}
+                    className="overflow-hidden rounded-lg border bg-background shadow-sm"
+                  >
+                    <header className="flex flex-wrap items-center justify-between gap-2 border-b bg-muted/50 px-4 py-2.5">
+                      <h3 className="flex items-center gap-2 text-sm font-semibold">
+                        <Building2 className="size-4 text-primary" /> Tranche {t.code}
+                      </h3>
+                      <div className="flex items-center gap-3">
+                        <span className="text-xs text-muted-foreground">
+                          {t.nbLots} lots · {t.nbAdresses} adresses
+                        </span>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          title="Voir les travaux de la tranche"
+                          onClick={() =>
+                            setTravauxScope({
+                              niveau: "tranche",
+                              label: `Tranche ${t.code}`,
+                              trancheCode: t.code,
+                            })
+                          }
+                        >
+                          <Wrench className="size-4" />
+                        </Button>
+                      </div>
+                    </header>
+                    <div className="divide-y">
+                      {t.adresses.map((a) => (
+                        <button
+                          key={a.adresse}
+                          onClick={() =>
+                            navigate({ search: { ville, tranche: t.code, rue: a.adresse } })
+                          }
+                          className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left hover:bg-muted/50 transition-colors"
+                        >
+                          <span className="flex items-center gap-2 font-medium text-primary">
+                            <MapPin className="size-4 shrink-0" /> {a.adresse}
+                          </span>
+                          <span className="text-xs text-muted-foreground">
+                            {a.lots} lot{a.lots > 1 ? "s" : ""}
+                          </span>
+                        </button>
                       ))}
-                    </tbody>
-                  </table>
-                </div>
-              </section>
+                    </div>
+                  </section>
+                ))}
+              </div>
             )}
 
             {/* Niveau Adresse */}
@@ -372,7 +379,7 @@ function AdressesPage() {
                       <tr>
                         <th className="w-full px-4 py-3">Adresse</th>
                         <th className="whitespace-nowrap px-4 py-3">Lots</th>
-                        <th className="whitespace-nowrap px-4 py-3 text-right">Actions</th>
+                        <th className="w-16 whitespace-nowrap px-4 py-3 text-right">Actions</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y">
@@ -432,7 +439,7 @@ function AdressesPage() {
                         <th className="w-full px-4 py-3">Lot</th>
                         <th className="whitespace-nowrap px-4 py-3">Bâtiment / Porte</th>
                         <th className="whitespace-nowrap px-4 py-3">Locataire</th>
-                        <th className="whitespace-nowrap px-4 py-3 text-right">Actions</th>
+                        <th className="w-16 whitespace-nowrap px-4 py-3 text-right">Actions</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y">

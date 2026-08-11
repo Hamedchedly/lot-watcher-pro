@@ -39,6 +39,37 @@ export function entreeDe(adresse: string | null) {
 export const cleAdresse = (adresse: string, ville: string) =>
   `${adresse.replace(/\s+/g, " ").trim()}|${ville.trim()}`.toUpperCase();
 
+export type AdresseParTranche = {
+  code: string;
+  adresses: { adresse: string; lots: number }[];
+  nbAdresses: number;
+  nbLots: number;
+};
+
+/**
+ * Regroupement des adresses par tranche (page /adresses, niveau ville).
+ * `tranches` = hiérarchie { codeTranche: { adresse: LotItem[] } } déjà filtrée des garages
+ * masqués : une tranche sans adresse visible n'apparaît pas.
+ */
+export function adressesParTranche(
+  tranches: Record<string, Record<string, LotItem[]>>,
+): AdresseParTranche[] {
+  return Object.entries(tranches)
+    .map(([code, rues]) => {
+      const adresses = Object.entries(rues).map(([adresse, lots]) => ({
+        adresse,
+        lots: lots.length,
+      }));
+      return {
+        code,
+        adresses,
+        nbAdresses: adresses.length,
+        nbLots: adresses.reduce((s, a) => s + a.lots, 0),
+      };
+    })
+    .filter((g) => g.nbAdresses > 0);
+}
+
 /* ---------- Recherches récentes (local) ---------- */
 
 export type RecentAdresse = { rue: string; ville: string; lots: number; at: number };
