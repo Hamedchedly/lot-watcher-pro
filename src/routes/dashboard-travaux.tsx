@@ -2,6 +2,8 @@ import { useMemo, useState, useEffect, lazy, Suspense } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Link, createFileRoute } from "@tanstack/react-router";
+import * as SliderPrimitive from "@radix-ui/react-slider";
+import { sliderYearDomain } from "@/lib/travaux";
 import {
   Bar,
   BarChart,
@@ -118,6 +120,36 @@ const cityOf = (address: unknown) => {
     .filter(Boolean);
   return parts.at(-1) || "Ville non renseignée";
 };
+
+/** Slider d'années (double curseur Radix) : remplace les <input type="range"> natifs. */
+function YearRangeSlider({
+  min,
+  max,
+  value,
+  onChange,
+}: {
+  min: number;
+  max: number;
+  value: [number, number];
+  onChange: (value: [number, number]) => void;
+}) {
+  return (
+    <SliderPrimitive.Root
+      min={min}
+      max={max}
+      step={1}
+      value={value}
+      onValueChange={(v) => onChange([v[0] as number, v[1] as number])}
+      className="relative flex w-full touch-none select-none items-center"
+    >
+      <SliderPrimitive.Track className="relative h-1.5 w-full grow overflow-hidden rounded-full bg-slate-200">
+        <SliderPrimitive.Range className="absolute h-full bg-blue-600" />
+      </SliderPrimitive.Track>
+      <SliderPrimitive.Thumb className="block h-4 w-4 rounded-full border-2 border-blue-600 bg-white shadow transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:pointer-events-none disabled:opacity-50" />
+      <SliderPrimitive.Thumb className="block h-4 w-4 rounded-full border-2 border-blue-600 bg-white shadow transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:pointer-events-none disabled:opacity-50" />
+    </SliderPrimitive.Root>
+  );
+}
 
 /** Normalisation : majuscules, sans accents ni ponctuation, espaces resserrés. */
 const normalizeVille = (value: string) =>
@@ -338,6 +370,7 @@ function DashboardTravauxPage() {
 
   // États Filtres
   const [yearRange, setYearRange] = useState<[number, number]>([2020, new Date().getFullYear()]);
+  const [includeArchived, setIncludeArchived] = useState(false);
   const [progFilter, setProgFilter] = useState({ prog: true, hors: true });
   const [selectedSectors, setSelectedSectors] = useState<string[]>([...SECTEURS]);
   const [selectedTranches, setSelectedTranches] = useState<string[]>([]);
@@ -438,14 +471,27 @@ function DashboardTravauxPage() {
     return [...map.values()].sort((a, b) => a.label.localeCompare(b.label));
   }, [allCommandes]);
 
+  // Commandes réellement affichables : actives par défaut, + archivées si demandé.
+  const visibleCommandes = useMemo(
+    () => allCommandes.filter((row) => includeArchived || row.actif),
+    [allCommandes, includeArchived],
+  );
+
+  // Domaine du slider : années d'exercice disponibles (y compris archivées), élargies,
+  // jamais réduites à une seule année — le slider reste utilisable avec une seule année.
+  const yearDomain = useMemo<[number, number]>(() => sliderYearDomain(options.years), [options.years]);
+
   useEffect(() => {
     if (options.years.length > 0) {
-      setYearRange([options.years[0] as number, options.years[options.years.length - 1] as number]);
+      const lo = options.years[0] as number;
+      const hi = options.years[options.years.length - 1] as number;
+      // On conserve la sélection utilisateur tant qu'elle reste dans le domaine.
+      setYearRange(([a, b]) => (a < lo || b > hi || a > b ? [lo, hi] : [a, b]));
     }
   }, [options.years]);
 
   const filtered = useMemo(() => {
-    let result = allCommandes.filter((row) => {
+    let result = visibleCommandes.filter((row) => {
       const year = Number(yearOf(row));
       const isProg = !!row.ligne_budget;
       const sect = sectorOf(row);
@@ -523,7 +569,8 @@ function DashboardTravauxPage() {
     }
     return result;
   }, [
-    allCommandes,
+    visibleCommandes,
+    includeArchived,
     yearRange,
     progFilter,
     selectedSectors,
@@ -880,28 +927,12 @@ function DashboardTravauxPage() {
                     {yearRange[1]}
                   </span>
                 </div>
-                <div className="relative h-6 flex items-center">
-                  <input
-                    type="range"
-                    min={options.years[0] || 2020}
-                    max={options.years[options.years.length - 1] || new Date().getFullYear()}
-                    value={yearRange[0]}
-                    onChange={(e) =>
-                      setYearRange([Math.min(Number(e.target.value), yearRange[1]), yearRange[1]])
-                    }
-                    className="absolute w-full h-1.5 bg-slate-100 rounded-full appearance-none cursor-pointer accent-blue-600 z-10"
-                  />
-                  <input
-                    type="range"
-                    min={options.years[0] || 2020}
-                    max={options.years[options.years.length - 1] || new Date().getFullYear()}
-                    value={yearRange[1]}
-                    onChange={(e) =>
-                      setYearRange([yearRange[0], Math.max(Number(e.target.value), yearRange[0])])
-                    }
-                    className="absolute w-full h-1.5 bg-transparent appearance-none cursor-pointer accent-blue-600 z-20"
-                  />
-                </div>
+                <YearRangeSlider
+                  min={yearDomain[0]}
+                  max={yearDomain[1]}
+                  value={yearRange}
+                  onChange={setYearRange}
+                />
               </div>
             </div>
             <div className="space-y-3">
@@ -1210,31 +1241,27 @@ function DashboardTravauxPage() {
                   {yearRange[0]}
                 </span>
                 <div className="relative w-36 h-6 flex items-center">
-                  <input
-                    type="range"
-                    min={options.years[0] || 2020}
-                    max={options.years[options.years.length - 1] || new Date().getFullYear()}
-                    value={yearRange[0]}
-                    onChange={(e) =>
-                      setYearRange([Math.min(Number(e.target.value), yearRange[1]), yearRange[1]])
-                    }
-                    className="absolute w-full h-1.5 bg-slate-100 rounded-full appearance-none cursor-pointer accent-blue-600 z-10"
-                  />
-                  <input
-                    type="range"
-                    min={options.years[0] || 2020}
-                    max={options.years[options.years.length - 1] || new Date().getFullYear()}
-                    value={yearRange[1]}
-                    onChange={(e) =>
-                      setYearRange([yearRange[0], Math.max(Number(e.target.value), yearRange[0])])
-                    }
-                    className="absolute w-full h-1.5 bg-transparent appearance-none cursor-pointer accent-blue-600 z-20"
+                  <YearRangeSlider
+                    min={yearDomain[0]}
+                    max={yearDomain[1]}
+                    value={yearRange}
+                    onChange={setYearRange}
                   />
                 </div>
                 <span className="text-[10px] font-black text-blue-600 bg-blue-50 px-2 py-0.5 rounded">
                   {yearRange[1]}
                 </span>
               </div>
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <Checkbox
+                  checked={includeArchived}
+                  onCheckedChange={(checked) => setIncludeArchived(checked === true)}
+                  className="size-4"
+                />
+                <span className="text-[9px] font-black uppercase text-slate-500 tracking-wider">
+                  Inclure archivées
+                </span>
+              </label>
               <Popover>
                 <PopoverTrigger asChild>
                   <Button
@@ -1631,7 +1658,7 @@ function DashboardTravauxPage() {
               </p>
             </div>
             <div className="flex items-center justify-between mb-8">
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-8 flex-1">
+              <div className="grid grid-cols-2 md:grid-cols-6 gap-8 flex-1">
                 <div className="space-y-1">
                   <p className="text-[9px] font-black text-slate-500 uppercase">Type</p>
                   {isEditing ? (
@@ -1716,6 +1743,12 @@ function DashboardTravauxPage() {
                   <p className="text-[9px] font-black text-slate-500 uppercase">Prog.</p>
                   <p className="text-sm font-black uppercase">
                     {selectedDetail?.ligne_budget ? "Programmée" : "Hors Budget"}
+                  </p>
+                </div>
+                <div className="space-y-1">
+                  <p className="text-[9px] font-black text-slate-500 uppercase">Année</p>
+                  <p className="text-sm font-black uppercase">
+                    {selectedDetail?.annee_exercice ?? "—"}
                   </p>
                 </div>
               </div>
@@ -1922,7 +1955,7 @@ function DashboardTravauxPage() {
               <AlertTriangle className="size-8" />
               <div>
                 <h2 className="text-xl font-black uppercase tracking-tight">
-                  Alerte Modification Détectée
+                  Conflit de version détecté
                 </h2>
                 <p className="text-[10px] font-black opacity-80 uppercase tracking-widest">
                   Commande N°{" "}
@@ -1940,7 +1973,7 @@ function DashboardTravauxPage() {
               >
                 <div className="flex items-center justify-between mb-4">
                   <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">
-                    VERSION A (ORIGINAL)
+                    VERSION ACTUELLE (A)
                   </span>
                   <RadioGroup
                     value={versionChoice}
@@ -1952,7 +1985,7 @@ function DashboardTravauxPage() {
                         htmlFor="vA"
                         className="text-[10px] font-black cursor-pointer uppercase"
                       >
-                        GARDER A
+                        GARDER L'ANCIENNE
                       </Label>
                     </div>
                   </RadioGroup>
@@ -1977,7 +2010,7 @@ function DashboardTravauxPage() {
               >
                 <div className="flex items-center justify-between mb-4">
                   <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">
-                    VERSION B (MODIFIÉ)
+                    VERSION IMPORTÉE (B)
                   </span>
                   <RadioGroup
                     value={versionChoice}
@@ -1989,7 +2022,7 @@ function DashboardTravauxPage() {
                         htmlFor="vB"
                         className="text-[10px] font-black cursor-pointer uppercase"
                       >
-                        GARDER B
+                        GARDER LA NOUVELLE
                       </Label>
                     </div>
                   </RadioGroup>
@@ -2018,6 +2051,7 @@ function DashboardTravauxPage() {
               <Button
                 className="flex-1 h-12 bg-slate-900 hover:bg-slate-800 text-white font-black text-[11px] uppercase tracking-[0.2em] rounded-2xl shadow-xl"
                 onClick={handleResolve}
+                disabled={resolveMutation.isPending}
               >
                 VALIDER LA DÉCISION
               </Button>
@@ -2029,6 +2063,15 @@ function DashboardTravauxPage() {
                 ANNULER
               </Button>
             </div>
+            {resolveMutation.isError ? (
+              <p className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">
+                La résolution a échoué :{" "}
+                {resolveMutation.error instanceof Error
+                  ? resolveMutation.error.message
+                  : "erreur inconnue"}
+                . L'alerte reste active.
+              </p>
+            ) : null}
           </div>
         </DialogContent>
       </Dialog>
