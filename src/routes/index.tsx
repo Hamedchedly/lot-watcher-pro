@@ -5,7 +5,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { BarChart3, Building2, ChevronRight, Clock, ListTree, MapPin, Upload } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { PatrimoineMap } from "@/components/PatrimoineMap";
+import { PatrimoineHomeMap } from "@/components/PatrimoineHomeMap";
 import { getPatrimoine } from "@/lib/isis.functions";
 import { isLogement } from "@/lib/isis";
 import { loadRecents, rueDe, type LotItem, type RecentAdresse } from "@/lib/adresses";
@@ -97,7 +97,7 @@ function Index() {
               Chargement de la carte…
             </div>
           ) : (
-            <PatrimoineMap lots={lots} />
+            <PatrimoineHomeMap lots={lots} />
           )}
 
           <div className="space-y-3">

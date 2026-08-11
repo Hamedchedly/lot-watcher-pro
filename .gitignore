@@ -35,3 +35,8 @@ backups/
 *.njsproj
 *.sln
 *.sw?
+
+# Générés par les outils (TanStack Start / Supabase CLI)
+.tanstack/
+supabase/.temp/
+

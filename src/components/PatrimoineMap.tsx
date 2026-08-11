@@ -76,7 +76,14 @@ export function PatrimoineMap({ lots }: { lots: LotItem[] }) {
   const adresses = useMemo(() => {
     const map = new Map<
       string,
-      { cle: string; adresse: string; ville: string; lots: number; tranches: Set<string> }
+      {
+        cle: string;
+        adresse: string;
+        ville: string;
+        rue: string;
+        lots: number;
+        tranches: Set<string>;
+      }
     >();
     for (const l of lots) {
       if (!l.adresse || !l.ville) continue;
@@ -86,6 +93,7 @@ export function PatrimoineMap({ lots }: { lots: LotItem[] }) {
         cle,
         adresse,
         ville: l.ville,
+        rue: l.adresse,
         lots: 0,
         tranches: new Set<string>(),
       };
@@ -97,8 +105,14 @@ export function PatrimoineMap({ lots }: { lots: LotItem[] }) {
   }, [lots]);
 
   const connues = useMemo(() => new Map((geo ?? []).map((g) => [g.cle, g])), [geo]);
+  // Une adresse est « manquante » tant qu'elle n'a PAS de coordonnées valides dans le cache
+  // (une ligne REQUEST_DENIED / ZERO_RESULTS à coordonnées nulles doit être re-tentée).
   const manquantes = useMemo(
-    () => adresses.filter((a) => !connues.has(a.cle)),
+    () =>
+      adresses.filter((a) => {
+        const g = connues.get(a.cle);
+        return !g?.lat || !g?.lng;
+      }),
     [adresses, connues],
   );
 
@@ -217,14 +231,13 @@ export function PatrimoineMap({ lots }: { lots: LotItem[] }) {
           label: { text: String(a.lots), color: "#ffffff", fontSize: "11px" },
         });
         marker.addListener("click", () => {
+          const tranche = [...a.tranches].sort()[0] ?? "";
           void navigate({
             to: "/adresses",
             search: {
-              q: "",
               ville: a.ville,
-              tranche: undefined,
-              rue: undefined,
-              adresse: a.adresse,
+              ...(tranche ? { tranche } : {}),
+              rue: a.rue,
             },
           });
         });
