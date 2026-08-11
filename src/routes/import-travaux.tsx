@@ -1,9 +1,28 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { FileSpreadsheet, Upload, Calendar } from "lucide-react";
+import { ChevronRight, FileSpreadsheet, Upload, Calendar } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Badge } from "@/components/ui/badge";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Select,
   SelectContent,
@@ -19,6 +38,7 @@ import {
   finalizeTravauxImport,
   importTravauxBatch,
 } from "@/lib/travaux.functions";
+import { getTravauxImportDetails } from "@/lib/travaux.dashboard.functions";
 
 export const Route = createFileRoute("/import-travaux")({
   head: () => ({
@@ -57,6 +77,8 @@ function ImportTravauxPage() {
   const [preview, setPreview] = useState<ParsedTravaux | null>(null);
   const [report, setReport] = useState<Report | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [lastImportId, setLastImportId] = useState<string | null>(null);
+  const [detailsType, setDetailsType] = useState<ImportDetailsType | null>(null);
   const [anneeExercice, setAnneeExercice] = useState<string>(new Date().getFullYear().toString());
 
   const handleFile = async (file: File) => {
@@ -77,6 +99,8 @@ function ImportTravauxPage() {
           doublons: parsed.doublons,
           erreurs: parsed.erreurs.length,
           annee_exercice: parseInt(anneeExercice),
+          doublonsDetails: parsed.doublonsDetails,
+          erreursDetails: parsed.erreurs,
         },
       });
       execution = { id: importResult.id };
@@ -121,6 +145,7 @@ function ImportTravauxPage() {
         erreurs: parsed.erreurs.length,
         doublons: parsed.doublons,
       });
+      setLastImportId(execution.id);
       setMessage(null);
     } catch (cause) {
       if (typeof execution !== "undefined") {
@@ -226,16 +251,274 @@ function ImportTravauxPage() {
         <section className="space-y-2 rounded-xl border bg-surface p-4 text-sm">
           <h2 className="font-semibold">Rapport d’import</h2>
           <div className="grid gap-2 sm:grid-cols-2">
-            <p>{report.creees} créée(s)</p>
-            <p>{report.inchangees} inchangée(s)</p>
-            <p>{report.conflits} conflit(s) à valider</p>
-            <p>{report.archivees} archivée(s)</p>
-            <p>{report.doublons} doublon(s)</p>
-            <p>{report.ignorees} rattachement(s) non résolu(s)</p>
-            <p>{report.erreurs} erreur(s)</p>
+            <ReportCounter
+              label="créée(s)"
+              count={report.creees}
+              onClick={() => setDetailsType("creee")}
+            />
+            <ReportCounter
+              label="inchangée(s)"
+              count={report.inchangees}
+              onClick={() => setDetailsType("inchangee")}
+            />
+            <ReportCounter
+              label="conflit(s) à valider"
+              count={report.conflits}
+              onClick={() => setDetailsType("conflit")}
+            />
+            <ReportCounter
+              label="archivée(s)"
+              count={report.archivees}
+              onClick={() => setDetailsType("archivee")}
+            />
+            <ReportCounter
+              label="doublon(s)"
+              count={report.doublons}
+              onClick={() => setDetailsType("doublon")}
+            />
+            <ReportCounter
+              label="rattachement(s) non résolu(s)"
+              count={report.ignorees}
+              onClick={() => setDetailsType("ignoree")}
+            />
+            <ReportCounter
+              label="erreur(s)"
+              count={report.erreurs}
+              onClick={() => setDetailsType("erreur")}
+            />
           </div>
         </section>
+      ) : null}
+      {detailsType && lastImportId ? (
+        <ImportDetailsDialog
+          importId={lastImportId}
+          type={detailsType}
+          onClose={() => setDetailsType(null)}
+        />
       ) : null}
     </main>
   );
 }
+type ImportDetailsType =
+  | "creee"
+  | "conflit"
+  | "inchangee"
+  | "archivee"
+  | "doublon"
+  | "ignoree"
+  | "erreur";
+
+const DETAILS_LABELS: Record<ImportDetailsType, string> = {
+  creee: "Créées",
+  conflit: "Conflits à valider",
+  inchangee: "Inchangées",
+  archivee: "Archivées",
+  doublon: "Doublons",
+  ignoree: "Rattachements non résolus",
+  erreur: "Erreurs",
+};
+
+const money = (value: unknown) =>
+  typeof value === "number"
+    ? new Intl.NumberFormat("fr-FR", {
+        style: "currency",
+        currency: "EUR",
+        maximumFractionDigits: 0,
+      }).format(value)
+    : "—";
+
+const txt = (value: unknown) =>
+  value === null || value === undefined || value === "" ? "—" : String(value);
+
+/** Compteur cliquable : interactif uniquement si > 0. */
+function ReportCounter({
+  label,
+  count,
+  onClick,
+}: {
+  label: string;
+  count: number;
+  onClick: () => void;
+}) {
+  if (count <= 0) {
+    return (
+      <p className="text-muted-foreground">
+        {count} {label}
+      </p>
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="inline-flex items-center gap-1 text-left font-medium text-primary underline underline-offset-4 decoration-primary/40 hover:decoration-primary cursor-pointer"
+    >
+      {count} {label} <ChevronRight className="size-3.5" />
+    </button>
+  );
+}
+
+/** Différences d'un conflit (ancienne → nouvelle valeur). */
+function ConflitDiff({ detail }: { detail: Record<string, unknown> }) {
+  const avant = (detail["avant"] ?? {}) as Record<string, unknown>;
+  const apres = (detail["apres"] ?? {}) as Record<string, unknown>;
+  const changed = (detail["champs_differents"] ?? []) as string[];
+  if (!changed.length) return <span className="text-muted-foreground">—</span>;
+  return (
+    <ul className="space-y-0.5 text-xs">
+      {changed.slice(0, 6).map((key) => (
+        <li key={key}>
+          <span className="font-semibold text-slate-600">{key} :</span>{" "}
+          <span className="text-red-500 line-through decoration-red-300">{txt(avant[key])}</span>{" "}
+          → <span className="font-semibold text-green-600">{txt(apres[key])}</span>
+        </li>
+      ))}
+      {changed.length > 6 ? (
+        <li className="text-muted-foreground">… {changed.length - 6} champ(s) de plus</li>
+      ) : null}
+    </ul>
+  );
+}
+
+/**
+ * Modale de détail d'un compteur d'import : charge uniquement à l'ouverture,
+ * liste exacte et immuable des éléments de la catégorie pour cet import.
+ */
+function ImportDetailsDialog({
+  importId,
+  type,
+  onClose,
+}: {
+  importId: string;
+  type: ImportDetailsType;
+  onClose: () => void;
+}) {
+  const fetchDetails = useServerFn(getTravauxImportDetails);
+  const [page, setPage] = useState(1);
+  const pageSize = 50;
+  const { data, isLoading } = useQuery({
+    queryKey: ["travaux-import-details", importId, type, page],
+    queryFn: () => fetchDetails({ data: { importId, type, page, pageSize } }),
+  });
+  const rows = (data?.rows ?? []) as Record<string, unknown>[];
+  const total = data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+
+  const detailOf = (row: Record<string, unknown>) =>
+    (row["details"] ?? {}) as Record<string, unknown>;
+  const cell = (row: Record<string, unknown>, key: string) =>
+    txt(detailOf(row)[key] ?? row[key]);
+
+  const isCommandType = type === "creee" || type === "archivee" || type === "inchangee";
+  const isLineType = type === "doublon" || type === "ignoree" || type === "erreur";
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-w-4xl max-h-[85vh] overflow-hidden rounded-3xl">
+        <DialogHeader>
+          <DialogTitle>{DETAILS_LABELS[type]}</DialogTitle>
+          <DialogDescription>
+            {total} résultat{total > 1 ? "s" : ""} pour cet import
+          </DialogDescription>
+        </DialogHeader>
+        <ScrollArea className="max-h-[55vh] rounded-xl border">
+          {isLoading ? (
+            <p className="p-4 text-sm text-muted-foreground">Chargement…</p>
+          ) : rows.length === 0 ? (
+            <p className="p-4 text-sm text-muted-foreground">
+              Aucun élément pour cette catégorie.
+            </p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  {isLineType ? <TableHead>Ligne Excel</TableHead> : null}
+                  <TableHead>N° commande</TableHead>
+                  {!isLineType ? <TableHead>Année</TableHead> : null}
+                  {isCommandType ? <TableHead>Lot</TableHead> : null}
+                  {isCommandType && type !== "inchangee" ? <TableHead>Adresse</TableHead> : null}
+                  {type === "creee" || type === "archivee" ? (
+                    <TableHead>Fournisseur</TableHead>
+                  ) : null}
+                  {type === "creee" || type === "archivee" ? <TableHead>Montant</TableHead> : null}
+                  {type === "conflit" ? <TableHead>Changements</TableHead> : null}
+                  {type === "archivee" ? <TableHead>Motif</TableHead> : null}
+                  {isLineType ? <TableHead>Message</TableHead> : null}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {rows.map((row) => (
+                  <TableRow
+                    key={String(
+                      row["id"] ?? row["numero_commande"] ?? JSON.stringify(row).slice(0, 40),
+                    )}
+                  >
+                    {isLineType ? <TableCell>{txt(row["ligne"])}</TableCell> : null}
+                    <TableCell className="font-semibold">
+                      {cell(row, "numero_commande")}
+                    </TableCell>
+                    {!isLineType ? <TableCell>{cell(row, "annee_exercice")}</TableCell> : null}
+                    {isCommandType ? <TableCell>{cell(row, "lot_code")}</TableCell> : null}
+                    {isCommandType && type !== "inchangee" ? (
+                      <TableCell>{cell(row, "adresse")}</TableCell>
+                    ) : null}
+                    {type === "creee" || type === "archivee" ? (
+                      <TableCell>{cell(row, "fournisseur")}</TableCell>
+                    ) : null}
+                    {type === "creee" || type === "archivee" ? (
+                      <TableCell>{money(detailOf(row)["montant"])}</TableCell>
+                    ) : null}
+                    {type === "conflit" ? (
+                      <TableCell>
+                        <ConflitDiff detail={detailOf(row)} />
+                      </TableCell>
+                    ) : null}
+                    {type === "archivee" ? (
+                      <TableCell>
+                        <Badge variant="outline">{txt(row["message"])}</Badge>
+                      </TableCell>
+                    ) : null}
+                    {isLineType ? <TableCell>{txt(row["message"])}</TableCell> : null}
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </ScrollArea>
+
+        <div className="flex items-center justify-between gap-4 pt-2">
+          <p className="text-xs text-muted-foreground">
+            Page {page} / {totalPages}
+          </p>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={page <= 1 || isLoading}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+            >
+              Précédent
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={page >= totalPages || isLoading}
+              onClick={() => setPage((p) => p + 1)}
+            >
+              Suivant
+            </Button>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button
+            onClick={onClose}
+            className="w-full bg-slate-900 font-black text-[10px] rounded-2xl uppercase tracking-widest h-12"
+          >
+            FERMER
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
