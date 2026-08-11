@@ -7,12 +7,15 @@ import {
   snapshotCommande,
   TRAVAUX_FIELDS,
   travauxComparable,
+  decisionImportCommande,
+  commandesAAArchiver,
   detailCreee,
   detailInchangee,
   detailConflit,
   detailIgnoree,
   detailArchivee,
   detailIssue,
+  detailReport,
 } from "../src/lib/travaux.ts";
 
 let passed = 0;
@@ -216,6 +219,91 @@ assert(
   parsedNoNum.commandes.every((c) => c.numero_commande !== null && c.numero_commande !== undefined),
 );
 assert("T4  sans numéro : 1 seule commande reconnue", parsedNoNum.commandes.length === 1);
+
+// =====================================================================
+// Report d'exercice — règle métier validée
+// (numero_commande = identité UNIQUE et immuable ; annee_exercice = mutable)
+// =====================================================================
+
+const baseCmd = (annee, extra = {}) => ({
+  id: "cmd-4930372",
+  numero_commande: "4930372",
+  secteur: "ER",
+  tranche_code: "TR1",
+  adresse: "RUE A",
+  fournisseur: "SARL B",
+  engage: 3000,
+  annee_exercice: annee,
+  ...extra,
+});
+
+// T1 — création : aucun 4930372 en base
+assert(
+  "T1  création : decision = creee",
+  decisionImportCommande({ source: baseCmd(2030), before: null }) === "creee",
+);
+
+// T2 — inchangée : 4930372/2030 identique
+assert(
+  "T2  inchangée : decision = inchangee",
+  decisionImportCommande({ source: baseCmd(2030), before: baseCmd(2030) }) === "inchangee",
+);
+
+// T3 — report d'exercice : seule annee change (2025 → 2030)
+assert(
+  "T3  report : seule annee change → report",
+  decisionImportCommande({ source: baseCmd(2030), before: baseCmd(2025) }) === "report",
+);
+const dReport = detailReport("imp-1", baseCmd(2025), travauxComparable(baseCmd(2025)), travauxComparable(baseCmd(2030)), 5);
+assert("T3  report : type = report", dReport["type"] === "report");
+assert(
+  "T8  report : avant.annee=2025 / apres.annee=2030",
+  dReport["details"]["avant"]["annee_exercice"] === 2025 &&
+    dReport["details"]["apres"]["annee_exercice"] === 2030,
+);
+assert(
+  "T3  report : pas un conflit (champs_differents = [annee_exercice])",
+  JSON.stringify(dReport["details"]["champs_differents"]) === JSON.stringify(["annee_exercice"]),
+);
+
+// T6 — unicité : le numéro existant ne produit JAMAIS une création
+assert(
+  "T6  unicité : numéro existant + autre année → report, jamais creee",
+  decisionImportCommande({ source: baseCmd(2030), before: baseCmd(2025) }) !== "creee",
+);
+assert(
+  "T6  unicité : decision report sur la même ligne (pas de seconde ligne)",
+  decisionImportCommande({ source: baseCmd(2030), before: baseCmd(2025) }) === "report",
+);
+
+// T4 — vrai conflit : même année, montant différent
+assert(
+  "T4  conflit : même année + montant différent",
+  decisionImportCommande({
+    source: baseCmd(2030, { engage: 4500 }),
+    before: baseCmd(2030),
+  }) === "conflit",
+);
+
+// T5 — année + autre champ différent → conflit
+assert(
+  "T5  conflit : année + autre champ",
+  decisionImportCommande({
+    source: baseCmd(2030, { engage: 4500 }),
+    before: baseCmd(2025),
+  }) === "conflit",
+);
+
+// T7 — archivage après report : la ligne reportée (vue, même année) n'est PAS archivée
+const activesApresReport = [
+  { id: "cmd-4930372", annee_exercice: 2030 },
+  { id: "cmd-85566693", annee_exercice: 2030 },
+];
+const missingApresReport = commandesAAArchiver(activesApresReport, 2030, new Set(["cmd-4930372"]));
+assert(
+  "T7  archivage : la commande reportée n'est pas archivée",
+  missingApresReport.every((m) => m.id !== "cmd-4930372"),
+);
 
 console.log("\n==========================================");
 console.log(`Résultat : ${passed} PASS, ${failed} FAIL`);
