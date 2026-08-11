@@ -500,6 +500,16 @@ export const ETATS_METIER = [
   "Attente validation",
   "Annulée",
   "Pas réalisé",
+  "En cours",
+] as const;
+
+/** États explicites reconnus (source unique de vérité) — « Pas réalisé » et « En cours » sont dérivés. */
+export const ETATS_EXPLICITES = [
+  "Terminés",
+  "Planifiés",
+  "Close",
+  "Attente validation",
+  "Annulée",
 ] as const;
 
 export type EtatMetier = (typeof ETATS_METIER)[number];
@@ -526,17 +536,41 @@ export const isPasRealise = (
 };
 
 /**
- * État métier d'une commande : « Pas réalisé » (dérivé, prioritaire) sinon l'état brut
- * restreint à la whitelist ETATS_METIER. Toute valeur parasite (date, montant…) → repli « Autre ».
+ * État métier d'une commande — source unique de vérité (filtre État, KPI FLUX, compteurs).
+ * Priorité :
+ * 1. état explicite reconnu (Terminés, Planifiés, Close, Attente validation, Annulée) ;
+ * 2. sinon, exercice clôturé + aucun paiement (paye 0/NULL) → « Pas réalisé » ;
+ * 3. sinon, exercice courant sans état explicite → « En cours » ;
+ * 4. sinon → « Sans état ».
+ * Les valeurs parasites (dates, montants…) ne deviennent jamais un état.
  */
 export const etatMetier = (
   row: Record<string, unknown>,
   exercice: number = exerciceCourant(),
 ): string => {
-  if (isPasRealise(row, exercice)) return "Pas réalisé";
   const brut = (row["etat_travaux"] || row["etat_commande"]) as string | null | undefined;
-  if (!brut) return "Sans état";
-  return (ETATS_METIER as readonly string[]).includes(brut) ? brut : "Autre";
+  if (brut && (ETATS_EXPLICITES as readonly string[]).includes(brut)) return brut;
+  if (isPasRealise(row, exercice)) return "Pas réalisé";
+  const annee = row["annee_exercice"];
+  if (typeof annee === "number" && annee === exercice) return "En cours";
+  return "Sans état";
+};
+
+/**
+ * Inclusion d'une commande selon l'archivage :
+ * - actives toujours incluses ;
+ * - archivées incluses si « Inclure archivées » ;
+ * - archivées « Pas réalisé » incluses si l'utilisateur sélectionne explicitement « Pas réalisé »
+ *   (sans modifier globalement le comportement de « Inclure archivées »).
+ */
+export const visibleArchivage = (
+  row: Record<string, unknown>,
+  opts: { includeArchived: boolean; selectedEtats: readonly string[]; exercice?: number },
+): boolean => {
+  if (opts.includeArchived) return true;
+  if (row["actif"] === true) return true;
+  if (opts.selectedEtats.includes("Pas réalisé") && isPasRealise(row, opts.exercice)) return true;
+  return false;
 };
 
 export const SECTEURS = ["GT", "GE", "CP"] as const;

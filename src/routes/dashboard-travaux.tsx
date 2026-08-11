@@ -12,6 +12,7 @@ import {
   repartitionCommandesParSecteur,
   secteurDe,
   sliderYearDomain,
+  visibleArchivage,
 } from "@/lib/travaux";
 import {
   Bar,
@@ -440,9 +441,13 @@ function DashboardTravauxPage() {
   }, [allCommandes, exercice]);
 
   // Commandes réellement affichables : actives par défaut, + archivées si demandé.
+  // « Pas réalisé » sélectionné explicitement inclut les archivées nécessaires à ce résultat.
   const visibleCommandes = useMemo(
-    () => allCommandes.filter((row) => includeArchived || row.actif),
-    [allCommandes, includeArchived],
+    () =>
+      allCommandes.filter((row) =>
+        visibleArchivage(row, { includeArchived, selectedEtats, exercice }),
+      ),
+    [allCommandes, includeArchived, selectedEtats, exercice],
   );
 
   // Domaine du slider : années d'exercice disponibles (y compris archivées), élargies,
@@ -555,9 +560,11 @@ function DashboardTravauxPage() {
     const engage = filtered.reduce((s, r) => s + (r.engage || 0), 0);
     const count = filtered.length;
     const countProg = filtered.filter((r) => !!r.ligne_budget).length;
-    const countDone = filtered.filter((r) =>
-      /termine|clos|acheve/i.test(text(r.etat_travaux || r.etat_commande)),
-    ).length;
+    // Source unique de vérité : etatMetier() (même logique que le filtre État).
+    const countDone = filtered.filter((r) => {
+      const e = etatMetier(r, exercice);
+      return e === "Terminés" || e === "Close";
+    }).length;
     return {
       budget,
       engage,
@@ -566,7 +573,11 @@ function DashboardTravauxPage() {
       done: countDone,
       total: count,
     };
-  }, [filtered]);
+  }, [filtered, exercice]);
+
+  // Périmètre explicite du compteur « Commandes » — calculé dynamiquement, jamais codé en dur.
+  const actifsTotal = allCommandes.filter((c) => c.actif).length;
+  const archivesTotal = allCommandes.length - actifsTotal;
 
   const dataSecteur = useMemo(() => repartitionCommandesParSecteur(filtered), [filtered]);
 
@@ -952,7 +963,7 @@ function DashboardTravauxPage() {
           <Kpi
             label="Commandes"
             value={stats.total.toString()}
-            detail={`${stats.done} terminées`}
+            detail={`${stats.done} terminées · ${actifsTotal} actives · ${archivesTotal} archivées`}
             trend="FLUX"
           />
         </section>

@@ -10,6 +10,7 @@ import {
   secteurDe,
   matchVille,
   villeDepuisAdresse,
+  visibleArchivage,
 } from "../src/lib/travaux.ts";
 
 let passed = 0;
@@ -62,8 +63,8 @@ assert("10b annee undefined    → false", isPasRealise(cmd(undefined, 0), EX) =
 assert("11 2030 + paye=0       → false", isPasRealise(cmd(2030, 0), EX) === false);
 
 // ---- 12 : valeurs parasites (dates/montants) exclues ----
-assert("12 etatMetier montant  → Autre", etatMetier(cmd(2026, 100, null, "2235.32"), EX) === "Autre");
-assert("12b etatMetier date    → Autre", etatMetier(cmd(2026, 100, "19.05.2025", null), EX) === "Autre");
+assert("12 etatMetier montant  → En cours (2026)", etatMetier(cmd(2026, 100, null, "2235.32"), EX) === "En cours");
+assert("12b etatMetier date    → En cours (2026)", etatMetier(cmd(2026, 100, "19.05.2025", null), EX) === "En cours");
 assert("12c '2235.32' hors whitelist", !ETATS_METIER.includes("2235.32"));
 assert("12d '19.05.2025' hors whitelist", !ETATS_METIER.includes("19.05.2025"));
 
@@ -73,10 +74,43 @@ assert("etatMetier Planifiés       → Planifiés", etatMetier(cmd(2026, 100, "
 assert("etatMetier Close           → Close", etatMetier(cmd(2026, 100, null, "Close"), EX) === "Close");
 assert("etatMetier Attente validation → Attente validation", etatMetier(cmd(2026, 100, null, "Attente validation"), EX) === "Attente validation");
 assert("etatMetier Annulée         → Annulée", etatMetier(cmd(2026, 100, null, "Annulée"), EX) === "Annulée");
+// Priorité : l'état explicite « Terminés » prime sur le dérivé « Pas réalisé ».
 assert(
-  "etatMetier Pas réalisé prioritaire",
-  etatMetier(cmd(2025, 0, "Terminés", null), EX) === "Pas réalisé",
+  "etatMetier Terminés prioritaire (2025 Terminés paye 0)",
+  etatMetier(cmd(2025, 0, "Terminés", null), EX) === "Terminés",
 );
+
+// ---- En cours : exercice courant sans état explicite ----
+assert(
+  "En cours 2026 état vide paye 0",
+  etatMetier(cmd(2026, 0, null, null), EX) === "En cours",
+);
+assert(
+  "En cours 2026 état vide paye NULL",
+  etatMetier(cmd(2026, null, null, null), EX) === "En cours",
+);
+assert(
+  "En cours 2026 parasite",
+  etatMetier(cmd(2026, 100, null, "1552.1"), EX) === "En cours",
+);
+
+// ---- Pas réalisé : exercice clôturé + paye 0/NULL + aucun état explicite ----
+assert(
+  "Pas réalisé 2025 paye 0 sans état",
+  etatMetier(cmd(2025, 0, null, null), EX) === "Pas réalisé",
+);
+assert(
+  "Pas réalisé 2025 paye NULL sans état",
+  etatMetier(cmd(2025, null, null, null), EX) === "Pas réalisé",
+);
+
+// ---- KPI « terminées » : Terminés ou Close (même source que le filtre) ----
+const terminées = (rows) =>
+  rows.filter((r) => ["Terminés", "Close"].includes(etatMetier(r, EX))).length;
+const jeu22 = Array.from({ length: 20 }, () => cmd(2026, 100, "Terminés", null))
+  .concat(Array.from({ length: 2 }, () => cmd(2026, 100, null, "Close")))
+  .concat([cmd(2025, 0, null, null)]);
+assert("22 terminées (Terminés + Close)", terminées(jeu22) === 22);
 
 // ---- Options du filtre État (équivalent dashboard etatOptions) ----
 const buildEtatOptions = (commandes, exercice) => {
@@ -93,7 +127,40 @@ const sample = [
 const opts = buildEtatOptions(sample, EX);
 assert("options contient Terminés", opts.includes("Terminés"));
 assert("options contient Pas réalisé", opts.includes("Pas réalisé"));
+assert("options contient En cours", opts.includes("En cours"));
 assert("options : aucun montant/date parasite", !opts.some((o) => /[0-9]/.test(o)));
+
+// ---- Inclusion archivage / Pas réalisé (visibleArchivage) ----
+const baseCmd = (annee, actif, extra = {}) => ({
+  id: `${annee}-${Math.random()}`,
+  actif,
+  annee_exercice: annee,
+  paye: 0,
+  ...extra,
+});
+const jeu = [
+  ...Array.from({ length: 50 }, () => baseCmd(2026, true)),
+  ...Array.from({ length: 138 }, () => baseCmd(2025, false)),
+];
+const activesOnly = jeu.filter((r) => visibleArchivage(r, { includeArchived: false, selectedEtats: [], exercice: EX }));
+const allIncl = jeu.filter((r) => visibleArchivage(r, { includeArchived: true, selectedEtats: [], exercice: EX }));
+assert("aucun filtre + includeArchived=false → seules les actives", activesOnly.length === 50);
+assert("aucun filtre + includeArchived=true → actives + archivées", allIncl.length === 188);
+const avecPasRealise = jeu.filter((r) =>
+  visibleArchivage(r, { includeArchived: false, selectedEtats: ["Pas réalisé"], exercice: EX }),
+);
+// 50 actives + les archivées 2025 (paye 0) « Pas réalisé »
+assert("Pas réalisé + includeArchived=false → archivées Pas réalisé accessibles", avecPasRealise.length === 50 + 138);
+const nonPR = [
+  baseCmd(2026, false, { paye: 500 }), // archivée non pas-réalisée
+  baseCmd(2026, true), // active
+];
+const avecNonPR = nonPR.filter((r) =>
+  visibleArchivage(r, { includeArchived: false, selectedEtats: ["Pas réalisé"], exercice: EX }),
+);
+assert("Pas réalisé n'inclut pas une archivée non pas-réalisée", avecNonPR.length === 1);
+// compteur dynamique (jamais codé en dur)
+assert("compteur total dynamique (188 = 50 + 138)", allIncl.length === 50 + 138);
 
 // =====================================================================
 // Répartition par secteur = NOMBRE de commandes (jamais une somme engage)
