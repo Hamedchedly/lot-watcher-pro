@@ -630,6 +630,81 @@ export const visibleParPerimetre = (
     exercice: opts.exercice,
   }) || matchesAnnee(row, opts.yearRange);
 
+/** Format monétaire fr-FR à 2 décimales (signe négatif conservé — jamais Math.abs). */
+const formatMontantAlerte = (v: number) =>
+  new Intl.NumberFormat("fr-FR", {
+    style: "currency",
+    currency: "EUR",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(v);
+
+/** Format numérique fr-FR à 2 décimales. */
+const formatNombreAlerte = (v: number) =>
+  new Intl.NumberFormat("fr-FR", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(v);
+
+/** Valeur strictement numérique (entier ou décimal, virgule ou point). */
+const estNumeriqueStrict = (v: string): boolean => /^[-+]?\d+(?:[.,]\d+)?$/.test(v.trim());
+
+/**
+ * Anomalies de qualité de données d'une commande (journal Dashboard Travaux, colonne ACT.).
+ * Détecte uniquement les anomalies explicitement définies — ne juge jamais la validité
+ * comptable (montant négatif, paye > engage, solde négatif ne sont pas des erreurs en soi).
+ * Aucune valeur n'est modifiée ni recalculée : le contenu importé est conservé tel quel.
+ */
+export const getAlertesCommande = (row: Record<string, unknown>): string[] => {
+  const alertes: string[] = [];
+
+  // 1. Engagement négatif → alerte (signe conservé, valeur originale intacte).
+  const engage = row["engage"];
+  if (typeof engage === "number" && engage < 0) {
+    alertes.push(`⚠️ Engagé négatif : ${formatMontantAlerte(engage)}`);
+  }
+
+  // 2. etat_commande strictement numérique (ce champ est censé contenir un état/libellé).
+  const etatCommande = row["etat_commande"];
+  const etatCommandeNumerique =
+    (typeof etatCommande === "number" && Number.isFinite(etatCommande)) ||
+    (typeof etatCommande === "string" && estNumeriqueStrict(etatCommande));
+  if (etatCommandeNumerique) {
+    const valeur =
+      typeof etatCommande === "number" ? etatCommande : Number(etatCommande.trim());
+    alertes.push(`❌ État commande incohérent : valeur numérique « ${formatNombreAlerte(valeur)} »`);
+  }
+
+  // 3. etat_travaux ressemblant à une date DD.MM.YYYY (ce champ est censé contenir un état).
+  const etatTravaux = row["etat_travaux"];
+  if (typeof etatTravaux === "string" && /^\d{2}\.\d{2}\.\d{4}$/.test(etatTravaux.trim())) {
+    alertes.push(
+      `❌ État travaux incohérent : valeur « ${etatTravaux.trim()} » détectée comme date`,
+    );
+  }
+
+  // 4. Champs de date invalides lorsqu'ils sont renseignés (format ISO attendu).
+  for (const champ of ["date_demarrage", "date_fin_travaux", "date_communication"]) {
+    const valeur = row[champ];
+    if (valeur === null || valeur === undefined || String(valeur).trim() === "") continue;
+    const s = String(valeur).trim();
+    if (!/^\d{4}-\d{2}-\d{2}/.test(s)) {
+      alertes.push(`❌ Date incohérente : ${champ} « ${s} »`);
+    }
+  }
+
+  // 5. Champs numériques non numériques (défensif — colonnes typées numériques en base).
+  for (const champ of ["engage", "paye", "ecart", "solde", "budget"]) {
+    const valeur = row[champ];
+    if (valeur === null || valeur === undefined || String(valeur).trim() === "") continue;
+    if (typeof valeur !== "number" || !Number.isFinite(valeur)) {
+      alertes.push(`❌ Valeur non numérique : ${champ} « ${String(valeur)} »`);
+    }
+  }
+
+  return alertes;
+};
+
 export const SECTEURS = ["GT", "GE", "CP"] as const;
 export type Secteur = (typeof SECTEURS)[number];
 

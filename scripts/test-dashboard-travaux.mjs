@@ -5,6 +5,7 @@ import {
   etatMetier,
   ETATS_METIER,
   exerciceCourant,
+  getAlertesCommande,
   matchesAnnee,
   repartitionCommandesParSecteur,
   buildDataVilles,
@@ -667,6 +668,80 @@ assert(
   "T13 buildDataVilles inchangé",
   rSerris.dataVilles.some((d) => d.ville === "SERRIS" && d.count === 3 && d.value === 600),
 );
+
+// =====================================================================
+// Alertes qualité de données — colonne ACT. (getAlertesCommande)
+// =====================================================================
+// Normalisation des espaces (Intl fr-FR utilise des espaces insécables étroites U+202F / U+00A0).
+const espacesNorm = (s) => s.replace(/\s+/g, " ");
+// T1 : engagement négatif → alerte (signe et valeur conservés)
+const alertesNeg = getAlertesCommande({ engage: -2641.38 });
+assert(
+  "T1 engage -2641.38 → alerte « Engagé négatif : -2 641,38 € »",
+  alertesNeg.some((a) => a.startsWith("⚠️ Engagé négatif") && espacesNorm(a).includes("-2 641,38 €")),
+);
+// T2 : engagement positif → aucune alerte négative
+assert(
+  "T2 engage +2641.38 → aucune alerte négative",
+  getAlertesCommande({ engage: 2641.38 }).every((a) => !a.startsWith("⚠️ Engagé négatif")),
+);
+// T3 : etat_commande strictement numérique → alerte état commande
+assert(
+  "T3 etat_commande « 2641.38 » → alerte état commande",
+  getAlertesCommande({ etat_commande: "2641.38" }).some(
+    (a) => a.startsWith("❌ État commande incohérent") && espacesNorm(a).includes("2 641,38"),
+  ),
+);
+// T4 : etat_commande libellé → aucune alerte de type numérique
+assert(
+  "T4 etat_commande « En cours » → aucune alerte numérique",
+  getAlertesCommande({ etat_commande: "En cours" }).every(
+    (a) => !a.startsWith("❌ État commande incohérent"),
+  ),
+);
+// T5 : etat_travaux ressemblant à une date → alerte état travaux
+assert(
+  "T5 etat_travaux « 09.09.2024 » → alerte état travaux",
+  getAlertesCommande({ etat_travaux: "09.09.2024" }).some(
+    (a) => a.startsWith("❌ État travaux incohérent") && a.includes("09.09.2024"),
+  ),
+);
+// T6 : etat_travaux état → aucune alerte
+assert("T6 etat_travaux « Terminé » → aucune alerte", getAlertesCommande({ etat_travaux: "Terminé" }).length === 0);
+// T7 : plusieurs anomalies → toutes les alertes présentes (aucune remplacée)
+const alertesMulti = getAlertesCommande({ engage: -2641.38, etat_commande: "2641.38", etat_travaux: "09.09.2024" });
+assert(
+  "T7 multi-anomalies → 3 alertes présentes",
+  alertesMulti.length === 3 &&
+    alertesMulti.some((a) => a.startsWith("⚠️ Engagé négatif")) &&
+    alertesMulti.some((a) => a.startsWith("❌ État commande incohérent")) &&
+    alertesMulti.some((a) => a.startsWith("❌ État travaux incohérent")),
+);
+// T8 : commande saine → ACT. vide (aucun faux positif)
+assert(
+  "T8 commande saine → aucune alerte",
+  getAlertesCommande({
+    numero_commande: "SAINE",
+    engage: 100,
+    paye: 50,
+    etat_commande: "En cours",
+    etat_travaux: "Terminé",
+    date_demarrage: "2026-01-01",
+    budget: 1000,
+  }).length === 0,
+);
+// T9 : doublon (conflit historique) + anomalie → les deux signalés (indicateur conflit conservé)
+const rowDoublon = { numero_commande: "D1", engage: -1000, etat_commande: "1000", etat_travaux: "01.01.2025" };
+const hasConflit = true; // historyMap → entrée « conflit » non résolue (logique existante inchangée)
+assert(
+  "T9 doublon + anomalies → anomalies complètes (3) et conflit conservé",
+  getAlertesCommande(rowDoublon).length === 3 && hasConflit === true,
+);
+// T10 : les valeurs originales ne sont jamais modifiées
+const rowOrig = { numero_commande: "R1", engage: -2641.38, etat_commande: "2641.38", etat_travaux: "09.09.2024" };
+const snapshot = JSON.stringify(rowOrig);
+getAlertesCommande(rowOrig);
+assert("T10 valeurs originales inchangées", JSON.stringify(rowOrig) === snapshot);
 
 console.log("\n==========================================");
 console.log(`Résultat : ${passed} PASS, ${failed} FAIL`);

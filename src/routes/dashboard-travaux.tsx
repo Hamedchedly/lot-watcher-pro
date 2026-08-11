@@ -8,6 +8,7 @@ import {
   buildDataVilles,
   etatMetier,
   exerciceCourant,
+  getAlertesCommande,
   matchesAnnee,
   repartitionCommandesParSecteur,
   secteurDe,
@@ -1474,6 +1475,7 @@ function DashboardTravauxPage() {
               <tbody className="divide-y divide-slate-100">
                 {filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).map((row) => {
                   const modif = historyMap.get(row.id);
+                  const alertes = getAlertesCommande(row);
                   const sect = secteurDe(row);
                   const isProg = !!row.ligne_budget;
                   return (
@@ -1535,16 +1537,51 @@ function DashboardTravauxPage() {
                         </span>
                       </td>
                       <td className="p-4 text-center">
-                        {modif ? (
-                          <button
-                            onClick={() => {
-                              setSelectedModif(modif);
-                              setVersionChoice("B");
-                            }}
-                            className="text-amber-500 hover:scale-110"
-                          >
-                            <AlertTriangle className="size-4 fill-amber-50" />
-                          </button>
+                        {alertes.length > 0 || modif ? (
+                          <div className="flex items-center justify-center gap-1">
+                            {alertes.length > 0 && (
+                              <Popover>
+                                <PopoverTrigger asChild>
+                                  <button
+                                    className="text-red-500 hover:scale-110"
+                                    title={alertes.join("\n")}
+                                    aria-label="Anomalies de données"
+                                  >
+                                    <AlertCircle className="size-4" />
+                                  </button>
+                                </PopoverTrigger>
+                                <PopoverContent
+                                  className="w-80 rounded-2xl border-red-200 shadow-2xl p-3"
+                                  align="start"
+                                >
+                                  <p className="text-[9px] font-black uppercase tracking-widest text-red-500 mb-2">
+                                    Anomalies données
+                                  </p>
+                                  <div className="space-y-1">
+                                    {alertes.map((alerte, i) => (
+                                      <p
+                                        key={i}
+                                        className="text-[10px] font-bold text-slate-700 leading-snug"
+                                      >
+                                        {alerte}
+                                      </p>
+                                    ))}
+                                  </div>
+                                </PopoverContent>
+                              </Popover>
+                            )}
+                            {modif && (
+                              <button
+                                onClick={() => {
+                                  setSelectedModif(modif);
+                                  setVersionChoice("B");
+                                }}
+                                className="text-amber-500 hover:scale-110"
+                              >
+                                <AlertTriangle className="size-4 fill-amber-50" />
+                              </button>
+                            )}
+                          </div>
                         ) : (
                           <div className="size-4 mx-auto rounded-full border-2 border-slate-100 group-hover:border-slate-200" />
                         )}
