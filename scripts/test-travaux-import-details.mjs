@@ -5,6 +5,8 @@ import {
   parseTravauxWorkbook,
   champsDifferents,
   snapshotCommande,
+  TRAVAUX_FIELDS,
+  travauxComparable,
   detailCreee,
   detailInchangee,
   detailConflit,
@@ -159,6 +161,61 @@ assert(
   "T   snapshot : champs d'affichage présents",
   "numero_commande" in snap2 && "annee_exercice" in snap2 && "lot_code" in snap2 && "adresse" in snap2 && "fournisseur" in snap2 && "montant" in snap2 && "statut" in snap2,
 );
+
+// =====================================================================
+// Régressions `numero_commande` (correction NOT NULL à l'INSERT)
+// =====================================================================
+
+// ---- Test 1 : invariant TRAVAUX_FIELDS ----
+assert(
+  "T1  invariant : numero_commande dans TRAVAUX_FIELDS",
+  TRAVAUX_FIELDS.includes("numero_commande"),
+);
+
+// ---- Test 2 : régression VALID_COLUMNS (payload INSERT) ----
+const VALID_COLUMNS = [...TRAVAUX_FIELDS, "vu_dans_import_id", "actif"];
+const sourceInsert = {
+  numero_commande: "85566693",
+  secteur: "ER",
+  tranche_code: "TR1",
+  adresse: "RUE A",
+  fournisseur: "SARL B",
+  engage: 1000,
+  annee_exercice: 2024,
+};
+const fullRowInsert = { ...sourceInsert, vu_dans_import_id: "imp-x", actif: true };
+const payloadInsert = Object.fromEntries(
+  Object.entries(fullRowInsert).filter(([key]) => VALID_COLUMNS.includes(key)),
+);
+assert(
+  "T2  VALID_COLUMNS : numero_commande présent dans le payload INSERT",
+  payloadInsert["numero_commande"] === "85566693",
+);
+assert(
+  "T2  VALID_COLUMNS : payload du cas réel",
+  JSON.stringify(payloadInsert["numero_commande"]) === JSON.stringify("85566693"),
+);
+
+// ---- Test 3 : snapshot historique/conflit ----
+assert(
+  "T3  travauxComparable : numero_commande conservé",
+  travauxComparable({ numero_commande: "85566693", secteur: "ER" })["numero_commande"] ===
+    "85566693",
+);
+
+// ---- Test 4 : ligne sans numéro → erreur, jamais dans commandes ----
+const parsedNoNum = parseTravauxWorkbook(
+  workbook([
+    ["ER", "TR1", "2024-001", "RUE A", "TRAVAUX X", 1000],
+    ["ER", "TR1", null, "RUE B", "SANS NUMERO", 2000],
+  ]),
+);
+assert("T4  sans numéro : 1 erreur de parsing", parsedNoNum.erreurs.length === 1);
+assert(
+  "T4  sans numéro : absente de commandes",
+  parsedNoNum.commandes.every((c) => c.numero_commande !== null && c.numero_commande !== undefined),
+);
+assert("T4  sans numéro : 1 seule commande reconnue", parsedNoNum.commandes.length === 1);
 
 console.log("\n==========================================");
 console.log(`Résultat : ${passed} PASS, ${failed} FAIL`);

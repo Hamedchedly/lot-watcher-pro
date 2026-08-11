@@ -246,6 +246,7 @@ export function parseTravauxWorkbook(data: ArrayBuffer): ParsedTravaux {
 }
 
 export const TRAVAUX_FIELDS = [
+  "numero_commande",
   "secteur",
   "tranche_code",
   "charge_clientele",

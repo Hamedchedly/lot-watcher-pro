@@ -177,6 +177,11 @@ export const importTravauxBatch = createServerFn({ method: "POST" })
 
       // Aucune commande existante : création pure.
       if (!before) {
+        // Garde défensive : une commande sans numero_commande ne doit jamais atteindre
+        // l'INSERT (colonne NOT NULL). Erreur métier explicite, pas d'erreur PostgreSQL.
+        if (!row["numero_commande"]) {
+          throw new Error("Impossible de créer la commande : numero_commande manquant.");
+        }
         const result = await db.from("travaux_commandes").insert(row).select("*").single();
         if (result.error)
           throw new Error(`Écriture ${source.numero_commande} : ${result.error.message}`);
