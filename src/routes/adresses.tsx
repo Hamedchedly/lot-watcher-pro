@@ -42,6 +42,9 @@ import {
 import {
   adressesParTranche as adressesParTrancheLib,
   estGarage,
+  formatMontantTravaux,
+  libelleDateTravail,
+  libelleNbCommandesTravaux,
   normaliserRecherche,
   rechercherPatrimoine,
 } from "@/lib/adresses";
@@ -825,6 +828,9 @@ type TravailRow = {
   libelle: string;
   statut: string;
   date_travaux: string | null;
+  date_demarrage?: string | null;
+  date_fin_travaux?: string | null;
+  date_communication?: string | null;
   annee_exercice?: number | null;
   cout: number;
   note: string | null;
@@ -915,7 +921,7 @@ function TravauxList({ scope }: { scope: TravauxScope }) {
             <h4 className="flex items-center gap-2 text-sm font-bold text-primary">
               <Calendar className="size-4" /> {year}
               <span className="text-xs font-medium text-muted-foreground">
-                · {travaux.length} travail{travaux.length > 1 ? "x" : ""}
+                · {libelleNbCommandesTravaux(travaux.length)}
               </span>
               {total > 0 && (
                 <span className="ml-auto text-xs font-semibold text-muted-foreground">
@@ -946,12 +952,18 @@ function TravauxList({ scope }: { scope: TravauxScope }) {
                     {travail.batiment ? ` · Bât. ${travail.batiment}` : ""}
                   </span>
                   <span>
-                    {travail.date_travaux ? formatDate(travail.date_travaux) : "Date non précisée"}
+                    {travail.is_commande
+                      ? libelleDateTravail(
+                          travail.date_demarrage,
+                          travail.date_fin_travaux,
+                          travail.date_communication,
+                        )
+                      : travail.date_travaux
+                        ? formatDate(travail.date_travaux)
+                        : "Date non précisée"}
                   </span>
                   <span className="font-semibold text-foreground">
-                    {new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(
-                      travail.cout || 0,
-                    )}
+                    {formatMontantTravaux(travail.cout)}
                   </span>
                 </div>
                 {travail.note && (

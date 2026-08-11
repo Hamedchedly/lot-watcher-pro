@@ -7,7 +7,11 @@ import {
   entreeDe,
   normaliserRecherche,
   rechercherPatrimoine,
+  libelleDateTravail,
+  formatMontantTravaux,
+  libelleNbCommandesTravaux,
 } from "../src/lib/adresses.ts";
+import { villeDeCommande } from "../src/lib/travaux.ts";
 
 let passed = 0;
 let failed = 0;
@@ -231,6 +235,95 @@ assert(
   "T20 recherche déterministe (fonction pure, sans requête par résultat)",
   JSON.stringify(rechercherPatrimoine("CARON", lotsRef, villesRef)) === JSON.stringify(rCaron),
 );
+
+// =====================================================================
+// Modal « Travaux » historique — ville, dates, montants (TEST 1 → 10)
+// =====================================================================
+const tranchesModal = [
+  { code: "2293", localite: "NANGIS" },
+  { code: "2294", localite: "NANGIS" },
+  { code: "1396", localite: "CHESSY" },
+];
+const villesGeoModal = [
+  { ville: "NANGIS", lat: 0, lng: 0, n: 1 },
+  { ville: "SERRIS", lat: 0, lng: 0, n: 1 },
+];
+const cmdModal = (id, { tranche, adresse, annee, actif, engage }) => ({
+  id,
+  tranche_code: tranche,
+  adresse,
+  annee_exercice: annee,
+  actif,
+  engage,
+});
+// Rattachement d'une ville (même filtre que getTravaux niveau « ville », via villeDeCommande).
+const historiqueDeLaVille = (rows, ville) =>
+  rows.filter((c) => villeDeCommande(c, tranchesModal, villesGeoModal) === ville);
+
+// TEST 1 : commande actif=false incluse dans l'historique
+const histNangis = historiqueDeLaVille(
+  [
+    cmdModal("a", { tranche: "2293", adresse: "RUE", annee: 2024, actif: false, engage: 100 }),
+    cmdModal("b", { tranche: "2294", adresse: "RUE", annee: 2025, actif: false, engage: 200 }),
+    cmdModal("c", { tranche: "2294", adresse: "RUE", annee: 2026, actif: true, engage: 300 }),
+  ],
+  "NANGIS",
+);
+assert("TEST 1 actif=false inclus dans l'historique", histNangis.some((c) => c.actif === false));
+// TEST 2 : ville avec commandes 2024 + 2025 + 2026 → les trois années
+assert(
+  "TEST 2 années 2024+2025+2026 retournées",
+  [2024, 2025, 2026].every((y) => histNangis.some((c) => c.annee_exercice === y)),
+);
+// TEST 3 : adresse d'import prioritaire (adresse « SERRIS » prime sur tranche CHESSY)
+const adressePrime = [{ id: "d", tranche_code: "1396", adresse: "5 RUE Z, SERRIS", annee_exercice: 2026, actif: true }];
+assert(
+  "TEST 3 adresse d'import prioritaire (SERRIS)",
+  historiqueDeLaVille(adressePrime, "SERRIS").length === 1 &&
+    historiqueDeLaVille(adressePrime, "CHESSY").length === 0,
+);
+// TEST 4 : adresse sans ville → fallback tranche.localite
+const fallbackTranche = [{ id: "e", tranche_code: "2293", adresse: "RUE TEST", annee_exercice: 2026, actif: true }];
+assert("TEST 4 fallback tranche.localite → NANGIS", historiqueDeLaVille(fallbackTranche, "NANGIS").length === 1);
+// TEST 5 : date_demarrage présente → affichée
+assert(
+  "TEST 5 date_demarrage → affichée",
+  libelleDateTravail("2024-09-11", null, null).includes("11/09/2024"),
+);
+// TEST 6 : demarrage absente + fin présente → « Fin : … »
+assert(
+  "TEST 6 date_fin_travaux → « Fin : … »",
+  libelleDateTravail(null, "2025-03-28", null).startsWith("Fin :") &&
+    libelleDateTravail(null, "2025-03-28", null).includes("28/03/2025"),
+);
+// TEST 7 : demarrage + fin absentes + communication présente → « Comm. : … »
+assert(
+  "TEST 7 date_communication → « Comm. : … »",
+  libelleDateTravail(null, null, "2025-06-06").startsWith("Comm. :"),
+);
+// TEST 8 : aucune date → « Date non précisée »
+assert("TEST 8 aucune date → « Date non précisée »", libelleDateTravail(null, null, null) === "Date non précisée");
+// TEST 8b : priorité demarrage > fin > comm
+assert(
+  "TEST 8b priorité demarrage > fin > comm",
+  libelleDateTravail("2024-09-11", "2025-03-28", "2025-06-06").includes("11/09/2024"),
+);
+// TEST 9 : annee_exercice n'est jamais utilisée comme date
+assert(
+  "TEST 9 annee_exercice ≠ date (commande 2024 sans date → Date non précisée)",
+  libelleDateTravail(null, null, null) === "Date non précisée",
+);
+// TEST 10 : montant négatif conservé (jamais Math.abs)
+const montantNeg = formatMontantTravaux(-2641.38).replace(/\s+/g, " ");
+assert(
+  "TEST 10 montant négatif conservé",
+  montantNeg.startsWith("-") && montantNeg.includes("2 641,38"),
+);
+
+// Libellé du compteur du modal Travaux (correction « travailx » → « commandes de travaux »)
+assert("T6 1 commande → « 1 commande de travaux »", libelleNbCommandesTravaux(1) === "1 commande de travaux");
+assert("T7 3 commandes → « 3 commandes de travaux »", libelleNbCommandesTravaux(3) === "3 commandes de travaux");
+assert("T8 aucune occurrence de « travailx »", !libelleNbCommandesTravaux(1).includes("travailx") && !libelleNbCommandesTravaux(3).includes("travailx"));
 
 console.log("\n==========================================");
 console.log(`Résultat : ${passed} PASS, ${failed} FAIL`);

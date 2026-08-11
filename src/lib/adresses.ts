@@ -104,6 +104,42 @@ export type ResultatsRecherche = {
 };
 
 /**
+ * Libellé de la date d'un travail (modal « Travaux » historique).
+ * Règle stricte : date_demarrage → sinon date_fin_travaux (« Fin : … ») → sinon
+ * date_communication (« Comm. : … ») → sinon « Date non précisée ».
+ * `annee_exercice` n'est JAMAIS une date : elle ne sert qu'au regroupement annuel.
+ */
+export function libelleDateTravail(
+  dateDemarrage: string | null | undefined,
+  dateFinTravaux: string | null | undefined,
+  dateCommunication: string | null | undefined,
+): string {
+  const fmt = (v: string) => {
+    const d = new Date(v);
+    return Number.isNaN(d.getTime()) ? v : d.toLocaleDateString("fr-FR");
+  };
+  if (dateDemarrage) return fmt(dateDemarrage);
+  if (dateFinTravaux) return `Fin : ${fmt(dateFinTravaux)}`;
+  if (dateCommunication) return `Comm. : ${fmt(dateCommunication)}`;
+  return "Date non précisée";
+}
+
+/** Montant fr-FR (négatifs conservés — jamais Math.abs). */
+export function formatMontantTravaux(v: number | null | undefined): string {
+  return new Intl.NumberFormat("fr-FR", {
+    style: "currency",
+    currency: "EUR",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(v || 0);
+}
+
+/** Libellé du nombre de commandes de travaux : « 1 commande de travaux », « 3 commandes de travaux »… */
+export function libelleNbCommandesTravaux(n: number): string {
+  return `${n} commande${n > 1 ? "s" : ""} de travaux`;
+}
+
+/**
  * Recherche hiérarchique du patrimoine, multi-catégories (jamais exclusive) :
  *  1. VILLES    — dans le référentiel des villes (getVilles, hors lots filtrés) ;
  *  2. ADRESSES  — lots dont l'adresse contient le terme (regroupées par adresse) ;

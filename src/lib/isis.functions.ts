@@ -1,6 +1,8 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
+import { villeDeCommande, type TrancheGeo, type VilleGeoPure } from "@/lib/travaux";
+
 const trancheSchema = z.object({
   code: z.string(),
   libelle: z.string().nullable(),
@@ -293,22 +295,25 @@ export const getTravaux = createServerFn({ method: "POST" })
       .order("date_travaux", { ascending: false, nullsFirst: false })
       .in("tranche_code", trancheCodes);
 
-    // Récupération des commandes de travaux (issues des imports Excel)
+    // Récupération des commandes de travaux (issues des imports Excel).
+    // Le filtre `actif` est VOLONTAIREMENT absent : le modal « Travaux » est un historique
+    // complet (commandes actives + archivées, tous exercices).
     const commandesSelect =
-      "id, tranche_code, lot_code, batiment, adresse, descriptif, engage, date_demarrage, etat_travaux, corps_etat, annee_exercice";
+      "id, tranche_code, lot_code, batiment, adresse, descriptif, engage, date_demarrage, date_fin_travaux, date_communication, etat_travaux, corps_etat, annee_exercice";
     let commandesQuery = supabaseAdmin
       .from("travaux_commandes")
       .select(commandesSelect)
-      .eq("actif", true)
       .order("date_demarrage", { ascending: false, nullsFirst: false });
 
     if (data.niveau === "tranche" && data.trancheCode) {
       commandesQuery = commandesQuery.eq("tranche_code", data.trancheCode);
     } else if (data.niveau === "lot" && data.lotCode) {
       commandesQuery = commandesQuery.eq("lot_code", data.lotCode);
-    } else if (data.niveau === "ville" || data.niveau === "adresse") {
+    } else if (data.niveau === "adresse") {
       commandesQuery = commandesQuery.in("tranche_code", trancheCodes);
     }
+    // niveau « ville » : pas de filtre SQL — le rattachement est fait via villeDeCommande
+    // (adresse d'import prioritaire, sinon tranche.localite) sur TOUTES les commandes.
 
     const [travauxResults, commandesResult] = await Promise.all([
       data.niveau === "lot"
@@ -336,8 +341,36 @@ export const getTravaux = createServerFn({ method: "POST" })
       ).values(),
     ];
 
+    // Périmètre ville : rattachement métier via villeDeCommande (adresse d'import prioritaire,
+    // sinon tranche.localite), sur TOUTES les commandes (actives + archivées, tous exercices).
+    let commandes = commandesResult.data ?? [];
+    if (data.niveau === "ville" && data.ville) {
+      const codes = [
+        ...new Set(commandes.map((c) => c.tranche_code).filter((c): c is string => !!c)),
+      ];
+      const [tranchesRows, villesGeoRows] = await Promise.all([
+        codes.length
+          ? supabaseAdmin.from("tranches").select("code, localite").in("code", codes)
+          : { data: [] as { code: string; localite: string | null }[] },
+        supabaseAdmin.from("villes_geo").select("ville"),
+      ]);
+      const tranches: TrancheGeo[] = (tranchesRows.data ?? []).map((t) => ({
+        code: t.code,
+        localite: t.localite,
+      }));
+      const villesGeo: VilleGeoPure[] = (villesGeoRows.data ?? []).map((v) => ({
+        ville: v.ville,
+        lat: 0,
+        lng: 0,
+        n: 1,
+      }));
+      commandes = commandes.filter(
+        (c) => villeDeCommande(c, tranches, villesGeo) === data.ville,
+      );
+    }
+
     // Conversion des commandes au format "travaux" pour l'affichage
-    const commandesTravaux = (commandesResult.data ?? []).map((c) => {
+    const commandesTravaux = commandes.map((c) => {
       const corps_etat = (c.corps_etat ?? "")
         .toLowerCase()
         .normalize("NFD")
@@ -362,6 +395,9 @@ export const getTravaux = createServerFn({ method: "POST" })
         libelle: `[${type}] ${c.descriptif || c.corps_etat || "Commande"}`,
         statut: c.etat_travaux || "En cours",
         date_travaux: c.date_demarrage,
+        date_demarrage: c.date_demarrage,
+        date_fin_travaux: c.date_fin_travaux,
+        date_communication: c.date_communication,
         annee_exercice: c.annee_exercice,
         cout: c.engage,
         adresse: c.adresse ?? null,
