@@ -87,6 +87,7 @@ export type ImportTravaux = {
   lignes: number;
   creees: number;
   modifiees: number;
+  conflits?: number;
   doublons: number;
   erreurs: number;
   archivees: number;
@@ -119,18 +120,19 @@ export const getTravauxDashboard = createServerFn({ method: "GET" }).handler(asy
   // On tente de récupérer l'historique avec resolu=false, mais on replie si la colonne manque.
   // NB : les builders Supabase sont mutables (chaque .eq() s'accumule sur le même objet),
   // donc chaque tentative doit repartir d'une requête neuve pour que le repli soit réel.
+  // Seules les opérations « conflit » non résolues exigent une décision utilisateur.
   const buildHistoriqueQuery = () =>
     db
       .from("travaux_commandes_historique")
       .select("*, travaux_commandes(numero_commande)")
-      .eq("operation", "modification");
+      .eq("operation", "conflit");
 
-  // On pourrait faire un check de colonne, mais tenter et catcher est plus simple ici pour TanStack Start
+  // On charge TOUTES les commandes (actives et archivées) : le Dashboard peut ainsi filtrer
+  // par année d'exercice et consulter les années historiques sans dépendre de `actif = true`.
   const [commandesResult, importsResult, tranchesResult] = await Promise.all([
     db
       .from("travaux_commandes")
       .select("*")
-      .eq("actif", true)
       .order("engage", { ascending: false, nullsFirst: false }),
     db.from("import_travaux").select("*").order("demarre_at", { ascending: false }).limit(5),
     db.from("tranches").select("code, libelle, localite, nb_logements").eq("actif", true),
@@ -209,8 +211,6 @@ export const updateCommandeTravaux = createServerFn({ method: "POST" })
       "support_communication",
       "date_communication",
       "annee_exercice",
-      "classification_programmation",
-      "classification_secteur",
     ];
 
     const filteredData = Object.fromEntries(
@@ -259,9 +259,18 @@ export const resolveHistoriqueTravaux = createServerFn({ method: "POST" })
     const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
     const db = supabaseAdmin as any;
 
-    // 1. Si l'utilisateur a choisi une version spécifique, on met à jour la commande.
+    // 1. Chargement de la ligne de conflit pour lier la résolution à l'import d'origine.
+    const { data: conflitRow, error: conflitError } = await db
+      .from("travaux_commandes_historique")
+      .select("*")
+      .eq("id", data.id)
+      .single();
+    if (conflitError) throw new Error(`Lecture du conflit : ${conflitError.message}`);
+    const importId = conflitRow?.import_id as string | undefined;
+
+    // 2. Si l'utilisateur a choisi une version, on applique la version choisie sur la commande.
     //    On filtre sur les colonnes réellement existantes pour éviter qu'une colonne
-    //    absente du schéma (classification_*) ne fasse échouer toute la résolution.
+    //    absente du schéma ne fasse échouer toute la résolution.
     const filteredData = Object.fromEntries(
       Object.entries(data.data ?? {}).filter(([key]) =>
         (COMMANDE_UPDATABLE_COLUMNS as readonly string[]).includes(key),
@@ -275,7 +284,7 @@ export const resolveHistoriqueTravaux = createServerFn({ method: "POST" })
       if (updateError) throw new Error(`Mise à jour commande : ${updateError.message}`);
     }
 
-    // 2. On marque l'historique comme résolu
+    // 3. On marque le conflit comme résolu
     const { data: updated, error } = await db
       .from("travaux_commandes_historique")
       .update({ resolu: true })
@@ -283,5 +292,22 @@ export const resolveHistoriqueTravaux = createServerFn({ method: "POST" })
       .select("*")
       .single();
     if (error) throw new Error(`Résolution historique échouée : ${error.message}`);
+
+    // 4. Trace de la résolution dans l'historique (timeline) : la version écartée reste
+    //    consultable via `avant` de la ligne de conflit, la version conservée via `apres`.
+    if (importId) {
+      const apres = data.data ?? {};
+      const trace = {
+        import_id: importId,
+        commande_id: data.commandeId,
+        operation: "resolution",
+        avant: conflitRow?.avant ?? null,
+        apres: { ...apres, version_conservee: data.keepVersion === "A" ? "ancienne" : "nouvelle" },
+        resolu: true,
+      };
+      const { error: traceError } = await db.from("travaux_commandes_historique").insert(trace);
+      if (traceError) throw new Error(`Trace de résolution : ${traceError.message}`);
+    }
+
     return updated;
   });

@@ -38,6 +38,7 @@ type Report = {
   creees: number;
   modifiees: number;
   inchangees: number;
+  conflits: number;
   archivees: number;
   ignorees: number;
   erreurs: number;
@@ -82,7 +83,7 @@ function ImportTravauxPage() {
       const parts = Array.from({ length: Math.ceil(parsed.commandes.length / 100) }, (_, index) =>
         parsed.commandes.slice(index * 100, index * 100 + 100),
       );
-      let totals = { creees: 0, modifiees: 0, inchangees: 0, ignorees: 0 };
+      let totals = { creees: 0, modifiees: 0, inchangees: 0, ignorees: 0, conflits: 0 };
       for (let index = 0; index < parts.length; index += 1) {
         const result = await runBatch({
           data: {
@@ -96,14 +97,24 @@ function ImportTravauxPage() {
           modifiees: totals.modifiees + result.modifiees,
           inchangees: totals.inchangees + result.inchangees,
           ignorees: totals.ignorees + result.ignorees,
+          conflits: totals.conflits + result.conflits,
         };
         setProgress(Math.round(((index + 1) / Math.max(parts.length, 1)) * 100));
         setMessage(
           `Synchronisation ${index + 1}/${parts.length} — ${parsed.commandes.length} commandes`,
         );
       }
-      setMessage("Archivage des commandes absentes…");
-      const result = await finalize({ data: { importId: execution.id } });
+      setMessage("Archivage des commandes absentes de la même année…");
+      const result = await finalize({
+        data: {
+          importId: execution.id,
+          creees: totals.creees,
+          modifiees: totals.modifiees,
+          inchangees: totals.inchangees,
+          ignorees: totals.ignorees,
+          conflits: totals.conflits,
+        },
+      });
       setReport({
         ...totals,
         archivees: result.archivees,
@@ -216,8 +227,8 @@ function ImportTravauxPage() {
           <h2 className="font-semibold">Rapport d’import</h2>
           <div className="grid gap-2 sm:grid-cols-2">
             <p>{report.creees} créée(s)</p>
-            <p>{report.modifiees} modifiée(s)</p>
             <p>{report.inchangees} inchangée(s)</p>
+            <p>{report.conflits} conflit(s) à valider</p>
             <p>{report.archivees} archivée(s)</p>
             <p>{report.doublons} doublon(s)</p>
             <p>{report.ignorees} rattachement(s) non résolu(s)</p>

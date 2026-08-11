@@ -247,6 +247,42 @@ export const TRAVAUX_FIELDS = [
   "lot_code",
   "batiment",
   "annee_exercice",
-  "classification_programmation",
-  "classification_secteur",
 ] as const;
+
+export type TravailComparable = Record<string, string | number | boolean | null>;
+
+/**
+ * Snapshot « comparable » d'une commande : seuls les champs métier de TRAVAUX_FIELDS.
+ * Utilisé pour la comparaison de versions et l'historique (avant / après).
+ */
+export const travauxComparable = (row: Record<string, unknown>): TravailComparable =>
+  Object.fromEntries(TRAVAUX_FIELDS.map((field) => [field, row[field] ?? null])) as TravailComparable;
+
+/** Deux versions d'une commande sont-elles strictement identiques (champs métier) ? */
+export const travauxIdentiques = (a: Record<string, unknown>, b: Record<string, unknown>): boolean =>
+  JSON.stringify(travauxComparable(a)) === JSON.stringify(travauxComparable(b));
+
+/**
+ * Domaine d'années pour le slider du Dashboard.
+ * Indépendant des seules commandes actives : élargi de ±1 an, jamais réduit à une seule année.
+ */
+export const sliderYearDomain = (years: number[], fallbackStart = 2020): [number, number] => {
+  if (!years.length) return [fallbackStart, fallbackStart + 5];
+  const min = Math.min(...years);
+  const max = Math.max(...years);
+  return [Math.max(fallbackStart, min - 1), Math.max(max + 1, min + 1)];
+};
+
+/**
+ * Commandes actives à archiver à la fin d'un import :
+ * uniquement celles de la MÊME année d'exercice que l'import et absentes du fichier.
+ * Si l'import n'a pas d'année, on n'archive rien (comportement sûr, non destructif).
+ */
+export const commandesAAArchiver = (
+  actives: { id: string; annee_exercice?: number | null }[],
+  annee: number | null,
+  vuDansImport: Set<string>,
+): { id: string }[] => {
+  if (annee == null) return [];
+  return actives.filter((row) => row.annee_exercice === annee && !vuDansImport.has(row.id));
+};

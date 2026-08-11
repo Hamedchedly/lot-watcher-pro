@@ -48,6 +48,7 @@ export type Database = {
         Row: {
           annee_exercice: number | null;
           archivees: number;
+          conflits: number;
           creees: number;
           demarre_at: string;
           doublons: number;
@@ -64,6 +65,7 @@ export type Database = {
         Insert: {
           annee_exercice?: number | null;
           archivees?: number;
+          conflits?: number;
           creees?: number;
           demarre_at?: string;
           doublons?: number;
@@ -80,6 +82,7 @@ export type Database = {
         Update: {
           annee_exercice?: number | null;
           archivees?: number;
+          conflits?: number;
           creees?: number;
           demarre_at?: string;
           doublons?: number;
