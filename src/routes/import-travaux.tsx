@@ -31,7 +31,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
-import { parseTravauxWorkbook, type ParsedTravaux } from "@/lib/travaux";
+import { exerciceCourant, parseTravauxWorkbook, type ParsedTravaux } from "@/lib/travaux";
 import {
   createTravauxImport,
   failTravauxImport,
@@ -80,7 +80,7 @@ function ImportTravauxPage() {
   const [error, setError] = useState<string | null>(null);
   const [lastImportId, setLastImportId] = useState<string | null>(null);
   const [detailsType, setDetailsType] = useState<ImportDetailsType | null>(null);
-  const [anneeExercice, setAnneeExercice] = useState<string>(new Date().getFullYear().toString());
+  const [anneeExercice, setAnneeExercice] = useState<string>(exerciceCourant().toString());
 
   const handleFile = async (file: File) => {
     setBusy(true);
@@ -188,7 +188,7 @@ function ImportTravauxPage() {
               <SelectValue placeholder="Sélectionner l'année" />
             </SelectTrigger>
             <SelectContent>
-              {Array.from({ length: 10 }, (_, i) => new Date().getFullYear() - 5 + i).map(
+              {Array.from({ length: 10 }, (_, i) => exerciceCourant() - 5 + i).map(
                 (year) => (
                   <SelectItem key={year} value={year.toString()}>
                     {year}

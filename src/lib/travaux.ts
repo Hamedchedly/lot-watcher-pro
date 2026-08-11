@@ -488,3 +488,53 @@ export const decisionImportCommande = (params: {
   }
   return "conflit";
 };
+
+/** Année d'exercice courante — jamais codée en dur ; avance automatiquement chaque année. */
+export const exerciceCourant = (now: Date = new Date()): number => now.getFullYear();
+
+/** États métier réels de l'application (les valeurs parasites dates/montants sont exclues). */
+export const ETATS_METIER = [
+  "Terminés",
+  "Planifiés",
+  "Close",
+  "Attente validation",
+  "Annulée",
+  "Pas réalisé",
+] as const;
+
+export type EtatMetier = (typeof ETATS_METIER)[number];
+
+/**
+ * « Pas réalisé » — règle métier :
+ * 1. annee_exercice renseignée ;
+ * 2. annee_exercice < exercice courant (exercice clôturé) ;
+ * 3. aucun paiement : paye = 0 / NULL / undefined.
+ *
+ * Exercice courant (ex. 2026) : paye 0/NULL → PAS « Pas réalisé ».
+ * Année future ou annee_exercice NULL → jamais « Pas réalisé ».
+ * Une commande reportée (ex. 2025 → 2026) porte annee_exercice = 2026 → jamais « Pas réalisé ».
+ */
+export const isPasRealise = (
+  row: Record<string, unknown>,
+  exercice: number = exerciceCourant(),
+): boolean => {
+  const annee = row["annee_exercice"];
+  if (annee == null) return false;
+  if (typeof annee !== "number" || annee >= exercice) return false;
+  const paye = row["paye"];
+  return paye === null || paye === undefined || paye === 0;
+};
+
+/**
+ * État métier d'une commande : « Pas réalisé » (dérivé, prioritaire) sinon l'état brut
+ * restreint à la whitelist ETATS_METIER. Toute valeur parasite (date, montant…) → repli « Autre ».
+ */
+export const etatMetier = (
+  row: Record<string, unknown>,
+  exercice: number = exerciceCourant(),
+): string => {
+  if (isPasRealise(row, exercice)) return "Pas réalisé";
+  const brut = (row["etat_travaux"] || row["etat_commande"]) as string | null | undefined;
+  if (!brut) return "Sans état";
+  return (ETATS_METIER as readonly string[]).includes(brut) ? brut : "Autre";
+};

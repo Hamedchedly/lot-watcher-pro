@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import * as SliderPrimitive from "@radix-ui/react-slider";
-import { sliderYearDomain } from "@/lib/travaux";
+import { ETATS_METIER, etatMetier, exerciceCourant, sliderYearDomain } from "@/lib/travaux";
 import {
   Bar,
   BarChart,
@@ -369,8 +369,11 @@ function DashboardTravauxPage() {
   const recentImports = data?.imports ?? [];
   const tranchesDetails = data?.tranchesDetails ?? [];
 
+  // Exercice courant (jamais codé en dur) — utilisé pour l'état dérivé « Pas réalisé ».
+  const exercice = exerciceCourant();
+
   // États Filtres
-  const [yearRange, setYearRange] = useState<[number, number]>([2020, new Date().getFullYear()]);
+  const [yearRange, setYearRange] = useState<[number, number]>([2020, exerciceCourant()]);
   const [includeArchived, setIncludeArchived] = useState(false);
   const [progFilter, setProgFilter] = useState({ prog: true, hors: true });
   const [selectedSectors, setSelectedSectors] = useState<string[]>([...SECTEURS]);
@@ -464,14 +467,14 @@ function DashboardTravauxPage() {
   }, [allCommandes]);
 
   const etatOptions = useMemo(() => {
-    const map = new Map<string, { label: string; value: string }>();
+    // États métier réels (whitelist ETATS_METIER) présents dans les données, y compris
+    // l'état dérivé « Pas réalisé ». Les valeurs parasites (dates, montants) sont exclues.
+    const found = new Set<string>();
     allCommandes.forEach((c) => {
-      const e = c.etat_travaux || c.etat_commande;
-      if (!e) return;
-      if (!map.has(e)) map.set(e, { label: e, value: e });
+      found.add(etatMetier(c, exercice));
     });
-    return [...map.values()].sort((a, b) => a.label.localeCompare(b.label));
-  }, [allCommandes]);
+    return ETATS_METIER.filter((s) => found.has(s)).map((s) => ({ label: s, value: s }));
+  }, [allCommandes, exercice]);
 
   // Commandes réellement affichables : actives par défaut, + archivées si demandé.
   const visibleCommandes = useMemo(
@@ -509,8 +512,7 @@ function DashboardTravauxPage() {
         selectedTypes.length === 0 ||
         (row.corps_etat && selectedTypes.includes(row.corps_etat));
       const matchesEtat =
-        selectedEtats.length === 0 ||
-        selectedEtats.includes(text(row.etat_travaux || row.etat_commande));
+        selectedEtats.length === 0 || selectedEtats.includes(etatMetier(row, exercice));
       const matchesSearch =
         !search ||
         [
