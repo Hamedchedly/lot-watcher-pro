@@ -135,7 +135,9 @@ export const getTravauxDashboard = createServerFn({ method: "GET" }).handler(asy
       .from("travaux_commandes")
       .select("*")
       .order("engage", { ascending: false, nullsFirst: false }),
-    db.from("import_travaux").select("*").order("demarre_at", { ascending: false }).limit(5),
+    // Tous les imports (tous exercices) : l'en-tête affiche la date du dernier import de
+    // l'exercice courant, qui ne figurerait pas forcément dans les 5 plus récents.
+    db.from("import_travaux").select("*").order("demarre_at", { ascending: false }).limit(500),
     db.from("tranches").select("code, libelle, localite, nb_logements").eq("actif", true),
   ]);
 

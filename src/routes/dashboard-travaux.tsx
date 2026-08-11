@@ -8,7 +8,9 @@ import {
   buildDataVilles,
   etatMetier,
   exerciceCourant,
+  formatDateImportFr,
   getAlertesCommande,
+  getDernierImportExercice,
   matchesAnnee,
   repartitionCommandesParSecteur,
   secteurDe,
@@ -329,6 +331,13 @@ function DashboardTravauxPage() {
 
   // Exercice courant (jamais codé en dur) — utilisé pour l'état dérivé « Pas réalisé ».
   const exercice = exerciceCourant();
+
+  // Dernier import de l'EXERCICE COURANT (en-tête) — indépendant du slider d'années.
+  // Un import 2025 effectué après un import 2026 ne modifie pas cette date.
+  const dernierImportExercice = useMemo(
+    () => getDernierImportExercice(recentImports, exercice),
+    [recentImports, exercice],
+  );
 
   // États Filtres
   // Sélection initiale : exercice courant uniquement ([exercice, exercice]). Le domaine
@@ -822,6 +831,15 @@ function DashboardTravauxPage() {
                   )}
                   {recentImports[0]?.erreurs || 0} ERREURS
                 </button>
+                {dernierImportExercice ? (
+                  <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">
+                    · {formatDateImportFr(dernierImportExercice.demarre_at)}
+                  </span>
+                ) : (
+                  <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">
+                    · Aucun import {exercice}
+                  </span>
+                )}
               </div>
             )}
             <div className="flex gap-2">

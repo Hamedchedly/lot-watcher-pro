@@ -5,7 +5,9 @@ import {
   etatMetier,
   ETATS_METIER,
   exerciceCourant,
+  formatDateImportFr,
   getAlertesCommande,
+  getDernierImportExercice,
   matchesAnnee,
   repartitionCommandesParSecteur,
   buildDataVilles,
@@ -742,6 +744,50 @@ const rowOrig = { numero_commande: "R1", engage: -2641.38, etat_commande: "2641.
 const snapshot = JSON.stringify(rowOrig);
 getAlertesCommande(rowOrig);
 assert("T10 valeurs originales inchangées", JSON.stringify(rowOrig) === snapshot);
+
+// =====================================================================
+// Dernier import de l'exercice courant — getDernierImportExercice
+// =====================================================================
+const imp = (annee, date) => ({ annee_exercice: annee, demarre_at: date });
+// T1 : import 2025 plus récent globalement, mais dernier import 2026 → 11/08/2026 09:42
+const t1 = getDernierImportExercice(
+  [imp(2025, "2026-08-10T15:00:00Z"), imp(2026, "2026-08-11T09:42:00Z")],
+  2026,
+);
+assert("T1 dernier import 2026 = 11/08/2026 09:42", t1?.demarre_at === "2026-08-11T09:42:00Z");
+// T2 : deux imports 2026 → le plus récent
+const t2 = getDernierImportExercice(
+  [imp(2026, "2026-08-10T15:00:00Z"), imp(2026, "2026-08-11T09:42:00Z")],
+  2026,
+);
+assert("T2 deux imports 2026 → le plus récent", t2?.demarre_at === "2026-08-11T09:42:00Z");
+// T3 : import 2025 APRÈS l'import 2026 → la date 2026 reste inchangée
+const t3 = getDernierImportExercice(
+  [imp(2025, "2026-08-11T10:00:00Z"), imp(2026, "2026-08-10T15:00:00Z")],
+  2026,
+);
+assert("T3 import 2025 après 2026 → date 2026 conservée (10/08)", t3?.demarre_at === "2026-08-10T15:00:00Z");
+// T4 : aucun import 2026 → null
+assert("T4 aucun import 2026 → null", getDernierImportExercice([imp(2025, "2026-08-11T10:00:00Z")], 2026) === null);
+// T5 : un seul import 2026 → sa date
+const t5 = getDernierImportExercice([imp(2026, "2026-08-11T09:42:00Z")], 2026);
+assert("T5 un seul import 2026 → sa date", t5?.demarre_at === "2026-08-11T09:42:00Z");
+// T6 : plusieurs imports 2026 → uniquement le plus récent
+const t6 = getDernierImportExercice(
+  [imp(2026, "2026-08-01T08:00:00Z"), imp(2026, "2026-08-11T09:42:00Z"), imp(2026, "2026-08-05T12:00:00Z")],
+  2026,
+);
+assert("T6 plusieurs imports 2026 → le plus récent", t6?.demarre_at === "2026-08-11T09:42:00Z");
+// T7 : le helper ne modifie pas les imports (dont erreurs) — compteur inchangé avant/après
+const importeErreurs = { annee_exercice: 2026, demarre_at: "2026-08-11T09:42:00Z", erreurs: 8 };
+const snap7 = JSON.stringify(importeErreurs);
+getDernierImportExercice([importeErreurs], 2026);
+assert("T7 erreurs inchangées par le helper", JSON.stringify(importeErreurs) === snap7);
+// T8 : format fr-FR Europe/Paris (23:25 UTC → 01:25 le lendemain à Paris, UTC+2 en août)
+assert(
+  "T8 format fr-FR Europe/Paris « DD/MM/YYYY à HH:mm »",
+  formatDateImportFr("2026-08-10T23:25:00.000+00:00") === "11/08/2026 à 01:25",
+);
 
 console.log("\n==========================================");
 console.log(`Résultat : ${passed} PASS, ${failed} FAIL`);

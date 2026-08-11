@@ -705,6 +705,44 @@ export const getAlertesCommande = (row: Record<string, unknown>): string[] => {
   return alertes;
 };
 
+export type ImportApercu = { annee_exercice: number | null; demarre_at: string };
+
+/**
+ * Dernier import de l'exercice donné (en-tête du Dashboard Travaux).
+ * Sélectionne les imports de cet exercice puis prend celui dont `demarre_at` est le plus
+ * récent. Retourne null si aucun import n'existe pour cet exercice.
+ * La date provient uniquement de la table d'import : jamais de created_at/updated_at de
+ * commande, jamais de déduction depuis `vu_dans_import_id` sans vérifier l'import.
+ */
+export const getDernierImportExercice = (
+  imports: ImportApercu[],
+  exerciceCourant: number,
+): ImportApercu | null => {
+  let dernier: ImportApercu | null = null;
+  for (const imp of imports) {
+    if (imp.annee_exercice !== exerciceCourant) continue;
+    if (!dernier || new Date(imp.demarre_at).getTime() > new Date(dernier.demarre_at).getTime()) {
+      dernier = imp;
+    }
+  }
+  return dernier;
+};
+
+/** Date/heure d'import au format fr-FR « DD/MM/YYYY à HH:mm » dans le fuseau Europe/Paris. */
+export const formatDateImportFr = (iso: string): string => {
+  const parts = new Intl.DateTimeFormat("fr-FR", {
+    timeZone: "Europe/Paris",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date(iso));
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
+  return `${get("day")}/${get("month")}/${get("year")} à ${get("hour")}:${get("minute")}`;
+};
+
 export const SECTEURS = ["GT", "GE", "CP"] as const;
 export type Secteur = (typeof SECTEURS)[number];
 
