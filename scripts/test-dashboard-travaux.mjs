@@ -14,6 +14,7 @@ import {
   villeDepuisAdresse,
   villeDeCommande,
   visibleArchivage,
+  visibleParPerimetre,
   yearRangeInitial,
 } from "../src/lib/travaux.ts";
 
@@ -594,6 +595,77 @@ assert(
 assert(
   "T12b la commande CHESSY n'est pas dans la vue SERRIS",
   !jeuSerris.some((r) => r.numero_commande === "CH-GT-1" && isSerris(r)),
+);
+
+// =====================================================================
+// Périmètre temporel + archivage — l'année du slider prime sur l'exclusion d'archivage
+// =====================================================================
+const realShape = [
+  ...Array.from({ length: 64 }, (_, i) => ({ numero_commande: `a23-${i}`, annee_exercice: 2023, actif: false })),
+  ...Array.from({ length: 46 }, (_, i) => ({ numero_commande: `a24-${i}`, annee_exercice: 2024, actif: false })),
+  ...Array.from({ length: 28 }, (_, i) => ({ numero_commande: `a25-${i}`, annee_exercice: 2025, actif: false })),
+  ...Array.from({ length: 49 }, (_, i) => ({ numero_commande: `a26-${i}`, annee_exercice: 2026, actif: true })),
+  { numero_commande: "a30-0", annee_exercice: 2030, actif: true },
+];
+assert("P0 188 commandes (64+46+28+49+1)", realShape.length === 188);
+const perimetre = (rows, yr) =>
+  rows.filter(
+    (r) =>
+      visibleParPerimetre(r, { includeArchived: false, selectedEtats: [], yearRange: yr, exercice: EX }) &&
+      matchesAnnee(r, yr), // pipeline réel : visibleCommandes ∩ filtre année (filtered)
+  ).length;
+const annees = (yr) =>
+  [...new Set(realShape.filter((r) => matchesAnnee(r, yr)).map((r) => r.annee_exercice))].sort((a, b) => a - b);
+
+assert("T1 [2026,2026] → années {2026}", JSON.stringify(annees([2026, 2026])) === JSON.stringify([2026]));
+assert("T2 [2025,2026] → années {2025,2026}", JSON.stringify(annees([2025, 2026])) === JSON.stringify([2025, 2026]));
+assert("T3 [2024,2025] → années {2024,2025}", JSON.stringify(annees([2024, 2025])) === JSON.stringify([2024, 2025]));
+assert("T4 [2023,2026] → années {2023,2024,2025,2026}", JSON.stringify(annees([2023, 2026])) === JSON.stringify([2023, 2024, 2025, 2026]));
+assert("T5 [2026,2030] → années {2026,2030}", JSON.stringify(annees([2026, 2030])) === JSON.stringify([2026, 2030]));
+assert("T6 [2023,2030] → toutes les années", JSON.stringify(annees([2023, 2030])) === JSON.stringify([2023, 2024, 2025, 2026, 2030]));
+
+// Périmètres bruts (avant filtres état/secteur/ville)
+assert("P1 [2026,2026] → 49", perimetre(realShape, [2026, 2026]) === 49);
+assert("P2 [2025,2026] → 77 (28 archivées 2025 + 49 actives 2026)", perimetre(realShape, [2025, 2026]) === 77);
+assert("P3 [2024,2025] → 74 (46 + 28)", perimetre(realShape, [2024, 2025]) === 74);
+assert("P4 [2023,2026] → 187 (64+46+28+49)", perimetre(realShape, [2023, 2026]) === 187);
+assert("P5 [2026,2030] → 50 (49+1)", perimetre(realShape, [2026, 2030]) === 50);
+assert("P6 [2023,2030] → 188", perimetre(realShape, [2023, 2030]) === 188);
+
+// T7/T8 : archivées incluses quand leur année est dans le slider
+assert(
+  "T7 archivées 2025 présentes dans [2025,2026]",
+  realShape
+    .filter((r) => r.annee_exercice === 2025 && !r.actif)
+    .every((r) => visibleParPerimetre(r, { includeArchived: false, selectedEtats: [], yearRange: [2025, 2026], exercice: EX })),
+);
+assert(
+  "T8 archivées 2024 présentes dans [2024,2025]",
+  realShape
+    .filter((r) => r.annee_exercice === 2024 && !r.actif)
+    .every((r) => visibleParPerimetre(r, { includeArchived: false, selectedEtats: [], yearRange: [2024, 2025], exercice: EX })),
+);
+
+// T9 : défaut [2026,2026]
+assert("T9 défaut [2026,2026]", JSON.stringify(yearRangeInitial(exerciceCourant())) === JSON.stringify([2026, 2026]));
+
+// T10-T13 : régressions — états, secteurs, ville, carte inchangés
+assert(
+  "T10 etatMetier inchangé",
+  etatMetier({ annee_exercice: 2025, engage: 0, paye: 0 }, EX) === "Pas réalisé" &&
+    etatMetier({ annee_exercice: 2026, engage: 5000, paye: 0 }, EX) === "En cours",
+);
+assert(
+  "T11 secteurDe inchangé",
+  secteurDe({ corps_etat: "(g) Halls" }) === "GE" && secteurDe({ corps_etat: "(o) Plomberie" }) === "CP",
+);
+assert(
+  "T12 villeDeCommande inchangé",
+  villeDeCommande({ tranche_code: "1396", adresse: "RUE X" }, tranches, villesGeo) === "CHESSY",
+);
+assert(
+  "T13 buildDataVilles inchangé",
+  rSerris.dataVilles.some((d) => d.ville === "SERRIS" && d.count === 3 && d.value === 600),
 );
 
 console.log("\n==========================================");

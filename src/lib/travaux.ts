@@ -606,6 +606,30 @@ export const visibleArchivage = (
   return false;
 };
 
+/**
+ * Périmètre visible d'une commande du Dashboard Travaux :
+ * - règles d'archivage existantes (visibleArchivage) — inchangées ;
+ * - OU son année d'exercice est explicitement incluse dans le slider d'années (matchesAnnee).
+ * Le filtre d'année devient ainsi prioritaire sur l'exclusion d'archivage : les commandes
+ * archivées d'une année sélectionnée dans le slider entrent dans le dataset filtré
+ * (ex. [2025,2026] → 28 archivées 2025 + 49 actives 2026), tandis que les commandes
+ * hors intervalle restent exclues.
+ */
+export const visibleParPerimetre = (
+  row: Record<string, unknown>,
+  opts: {
+    includeArchived: boolean;
+    selectedEtats: readonly string[];
+    yearRange: [number, number];
+    exercice: number;
+  },
+): boolean =>
+  visibleArchivage(row, {
+    includeArchived: opts.includeArchived,
+    selectedEtats: opts.selectedEtats,
+    exercice: opts.exercice,
+  }) || matchesAnnee(row, opts.yearRange);
+
 export const SECTEURS = ["GT", "GE", "CP"] as const;
 export type Secteur = (typeof SECTEURS)[number];
 

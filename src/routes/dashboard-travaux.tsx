@@ -13,7 +13,7 @@ import {
   secteurDe,
   sliderYearDomain,
   villeDeCommande,
-  visibleArchivage,
+  visibleParPerimetre,
   yearRangeInitial,
 } from "@/lib/travaux";
 import {
@@ -441,14 +441,16 @@ function DashboardTravauxPage() {
     return ETATS_METIER.filter((s) => found.has(s)).map((s) => ({ label: s, value: s }));
   }, [allCommandes, exercice]);
 
-  // Commandes réellement affichables : actives par défaut, + archivées si demandé.
-  // « Pas réalisé » sélectionné explicitement inclut les archivées nécessaires à ce résultat.
+  // Périmètre visible : règles d'archivage existantes (visibleArchivage) + année du slider.
+  // Le filtre d'année prime sur l'exclusion d'archivage : les commandes archivées d'une année
+  // sélectionnée entrent dans le dataset (ex. [2025,2026] → 28 archivées 2025 + 49 actives 2026),
+  // tandis que les commandes hors intervalle restent exclues. « Inclure archivées » reste actif.
   const visibleCommandes = useMemo(
     () =>
       allCommandes.filter((row) =>
-        visibleArchivage(row, { includeArchived, selectedEtats, exercice }),
+        visibleParPerimetre(row, { includeArchived, selectedEtats, yearRange, exercice }),
       ),
-    [allCommandes, includeArchived, selectedEtats, exercice],
+    [allCommandes, includeArchived, selectedEtats, yearRange, exercice],
   );
 
   // Domaine du slider : années d'exercice disponibles (y compris archivées), élargies,
