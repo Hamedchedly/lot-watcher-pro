@@ -59,6 +59,7 @@ type Report = {
   modifiees: number;
   inchangees: number;
   conflits: number;
+  reports: number;
   archivees: number;
   ignorees: number;
   erreurs: number;
@@ -107,7 +108,7 @@ function ImportTravauxPage() {
       const parts = Array.from({ length: Math.ceil(parsed.commandes.length / 100) }, (_, index) =>
         parsed.commandes.slice(index * 100, index * 100 + 100),
       );
-      let totals = { creees: 0, modifiees: 0, inchangees: 0, ignorees: 0, conflits: 0 };
+      let totals = { creees: 0, modifiees: 0, inchangees: 0, ignorees: 0, conflits: 0, reports: 0 };
       for (let index = 0; index < parts.length; index += 1) {
         const result = await runBatch({
           data: {
@@ -122,6 +123,7 @@ function ImportTravauxPage() {
           inchangees: totals.inchangees + result.inchangees,
           ignorees: totals.ignorees + result.ignorees,
           conflits: totals.conflits + result.conflits,
+          reports: totals.reports + result.reports,
         };
         setProgress(Math.round(((index + 1) / Math.max(parts.length, 1)) * 100));
         setMessage(
@@ -137,6 +139,7 @@ function ImportTravauxPage() {
           inchangees: totals.inchangees,
           ignorees: totals.ignorees,
           conflits: totals.conflits,
+          reports: totals.reports,
         },
       });
       setReport({
@@ -267,6 +270,11 @@ function ImportTravauxPage() {
               onClick={() => setDetailsType("conflit")}
             />
             <ReportCounter
+              label="report(s) d'exercice"
+              count={report.reports}
+              onClick={() => setDetailsType("report")}
+            />
+            <ReportCounter
               label="archivée(s)"
               count={report.archivees}
               onClick={() => setDetailsType("archivee")}
@@ -306,7 +314,8 @@ type ImportDetailsType =
   | "archivee"
   | "doublon"
   | "ignoree"
-  | "erreur";
+  | "erreur"
+  | "report";
 
 const DETAILS_LABELS: Record<ImportDetailsType, string> = {
   creee: "Créées",
@@ -316,6 +325,7 @@ const DETAILS_LABELS: Record<ImportDetailsType, string> = {
   doublon: "Doublons",
   ignoree: "Rattachements non résolus",
   erreur: "Erreurs",
+  report: "Reports d'exercice",
 };
 
 const money = (value: unknown) =>
@@ -409,7 +419,8 @@ function ImportDetailsDialog({
   const cell = (row: Record<string, unknown>, key: string) =>
     txt(detailOf(row)[key] ?? row[key]);
 
-  const isCommandType = type === "creee" || type === "archivee" || type === "inchangee";
+  const isCommandType =
+    type === "creee" || type === "archivee" || type === "inchangee" || type === "report";
   const isLineType = type === "doublon" || type === "ignoree" || type === "erreur";
 
   return (
@@ -441,7 +452,9 @@ function ImportDetailsDialog({
                     <TableHead>Fournisseur</TableHead>
                   ) : null}
                   {type === "creee" || type === "archivee" ? <TableHead>Montant</TableHead> : null}
-                  {type === "conflit" ? <TableHead>Changements</TableHead> : null}
+                  {type === "conflit" || type === "report" ? (
+                    <TableHead>Changements</TableHead>
+                  ) : null}
                   {type === "archivee" ? <TableHead>Motif</TableHead> : null}
                   {isLineType ? <TableHead>Message</TableHead> : null}
                 </TableRow>
@@ -468,7 +481,7 @@ function ImportDetailsDialog({
                     {type === "creee" || type === "archivee" ? (
                       <TableCell>{money(detailOf(row)["montant"])}</TableCell>
                     ) : null}
-                    {type === "conflit" ? (
+                    {type === "conflit" || type === "report" ? (
                       <TableCell>
                         <ConflitDiff detail={detailOf(row)} />
                       </TableCell>

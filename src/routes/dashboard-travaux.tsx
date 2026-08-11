@@ -2153,6 +2153,7 @@ function CommandeHistoriqueDialog({
     archivage: "Archivage",
     conflit: "Conflit de réimport",
     resolution: "Résolution",
+    report: "Report d'exercice",
   };
   const keyLabel: Record<string, string> = {
     numero_commande: "N° commande",
