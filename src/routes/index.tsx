@@ -2,7 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { BarChart3, Building2, ChevronRight, Clock, ListTree, MapPin, Upload } from "lucide-react";
+import { BarChart3, Building2, ChevronRight, Clock, ListChecks, ListTree, MapPin, Upload } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { PatrimoineHomeMap } from "@/components/PatrimoineHomeMap";
@@ -66,17 +66,27 @@ function Index() {
           <div className="flex flex-wrap gap-2">
             <Button asChild variant="outline">
               <Link to="/import">
-                <Upload className="size-4" /> Import ISIS
+                <Upload className="size-4" /> Import Patrimoine — ISIS
               </Link>
             </Button>
             <Button asChild variant="outline">
-              <Link to="/dashboard-travaux">
-                <BarChart3 className="size-4" /> Dashboard travaux
+              <Link to="/import-travaux">
+                <Upload className="size-4" /> Import Suivi budgétaire annuel
+              </Link>
+            </Button>
+            <Button asChild variant="outline">
+              <Link to="/import-psp">
+                <Upload className="size-4" /> Import Historique CMD
+              </Link>
+            </Button>
+            <Button asChild variant="outline">
+              <Link to="/psp-validation">
+                <ListChecks className="size-4" /> Analyse historique CMD
               </Link>
             </Button>
             <Button asChild>
-              <Link to="/import-travaux">
-                <Upload className="size-4" /> Import travaux
+              <Link to="/dashboard-travaux">
+                <BarChart3 className="size-4" /> Dashboard travaux
               </Link>
             </Button>
           </div>
