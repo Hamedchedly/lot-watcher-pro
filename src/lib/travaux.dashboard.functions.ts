@@ -194,70 +194,25 @@ const SELECT_PASP_ENRICHIES =
   "lien_methode, lien_confiance, analyse_id, analyse_statut, type_intervention, cause_probable, " +
   "categorie_budget, categorie_budget_statut";
 
-export const getTravauxDashboard = createServerFn({ method: "GET", strict: false }).handler(
-  async (): Promise<TravauxDashboardData> => {
-  const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
-  const db = supabaseAdmin as any;
-
-  // On tente de récupérer l'historique avec resolu=false, mais on replie si la colonne manque.
-  // NB : les builders Supabase sont mutables (chaque .eq() s'accumule sur le même objet),
-  // donc chaque tentative doit repartir d'une requête neuve pour que le repli soit réel.
-  // Seules les opérations « conflit » non résolues exigent une décision utilisateur.
-  const buildHistoriqueQuery = () =>
-    db
-      .from("travaux_commandes_historique")
-      .select("*, travaux_commandes(numero_commande)")
-      .eq("operation", "conflit");
-
-  // On charge TOUTES les commandes (actives et archivées) : le Dashboard peut ainsi filtrer
-  // par année d'exercice et consulter les années historiques sans dépendre de `actif = true`.
-  const [commandesResult, importsResult, tranchesResult, enrichiesResult] = await Promise.all([
-    db
-      .from("travaux_commandes")
-      .select("*")
-      .order("engage", { ascending: false, nullsFirst: false }),
-    // Tous les imports (tous exercices) : l'en-tête affiche la date du dernier import de
-    // l'exercice courant, qui ne figurerait pas forcément dans les 5 plus récents.
-    db.from("import_travaux").select("*").order("demarre_at", { ascending: false }).limit(500),
-    db.from("tranches").select("code, libelle, localite, nb_logements").eq("actif", true),
-    // Enrichissement Historique CMD via la vue de rapprochement (lecture seule).
-    db.from("v_travaux_commandes_enrichies").select(SELECT_PASP_ENRICHIES),
-  ]);
-
-  let historiqueResult;
-  try {
-    historiqueResult = await buildHistoriqueQuery()
-      .eq("resolu", false)
-      .order("created_at", { ascending: false });
-    if (historiqueResult.error && historiqueResult.error.message.includes("resolu")) {
-      historiqueResult = await buildHistoriqueQuery().order("created_at", { ascending: false });
-    }
-  } catch (e) {
-    historiqueResult = await buildHistoriqueQuery().order("created_at", { ascending: false });
-  }
-
-  if (commandesResult.error)
-    throw new Error(`Chargement des commandes : ${commandesResult.error.message}`);
-  if (historiqueResult.error)
-    throw new Error(`Chargement de l'historique : ${historiqueResult.error.message}`);
-  if (importsResult.error)
-    throw new Error(`Chargement des imports : ${importsResult.error.message}`);
-  if (tranchesResult.error)
-    throw new Error(`Chargement des tranches : ${tranchesResult.error.message}`);
-
-  // Fusion sécurisée des enrichissements Historique CMD sur chaque commande (par id).
-  // Récupération PRÉFÉRENTIELLE via la vue de rapprochement unique — aucune logique de
-  // rapprochement dupliquée côté frontend. Si la vue échoue, on renvoie les données brutes.
+/**
+ * Fusion sécurisée des enrichissements Historique CMD sur chaque commande (par id).
+ * Récupération PRÉFÉRENTIELLE via la vue de rapprochement unique — aucune logique de
+ * rapprochement dupliquée côté frontend. Si la vue échoue, on renvoie les données brutes.
+ * MÊME MODÈLE de données pour le Dashboard Travaux, la fiche commande Fournisseur et
+ * /adresses (parité totale) : chaque commande garde toutes ses colonnes suivi
+ * (`travaux_commandes`) complétées par l'enrichissement PSP.
+ */
+function fusionnerEnrichissement(
+  commandes: CommandeTravaux[],
+  enrichies: Record<string, unknown>[],
+): CommandeTravauxEnrichie[] {
   const enrichiesParCommande = new Map<string, Record<string, unknown>>();
-  if (!enrichiesResult.error) {
-    for (const e of (enrichiesResult.data ?? []) as Record<string, unknown>[]) {
-      if (e && typeof e["commande_id"] === "string" && !enrichiesParCommande.has(e["commande_id"])) {
-        enrichiesParCommande.set(e["commande_id"], e);
-      }
+  for (const e of enrichies) {
+    if (e && typeof e["commande_id"] === "string" && !enrichiesParCommande.has(e["commande_id"])) {
+      enrichiesParCommande.set(e["commande_id"], e);
     }
   }
-
-  const commandes = ((commandesResult.data ?? []) as CommandeTravaux[]).map((c) => {
+  return commandes.map((c) => {
     const e = enrichiesParCommande.get(c.id);
     if (!e) return c as CommandeTravauxEnrichie;
     const dn = (e["psp_donnees_brutes"] as Record<string, unknown> | null) ?? null;
@@ -293,16 +248,75 @@ export const getTravauxDashboard = createServerFn({ method: "GET", strict: false
       categorie_budget_statut: (e["categorie_budget_statut"] as string | null) ?? null,
     } as CommandeTravauxEnrichie;
   });
+}
 
-  return {
-    commandes,
-    historique: (historiqueResult.data ?? []) as (HistoriqueTravaux & {
-      travaux_commandes: { numero_commande: string };
-    })[],
-    imports: (importsResult.data ?? []) as ImportTravaux[],
-    tranchesDetails: (tranchesResult.data ?? []) as TrancheDetail[],
-  } satisfies TravauxDashboardData;
-});
+export const getTravauxDashboard = createServerFn({ method: "GET", strict: false }).handler(
+  async (): Promise<TravauxDashboardData> => {
+    const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
+    const db = supabaseAdmin as any;
+
+    // On tente de récupérer l'historique avec resolu=false, mais on replie si la colonne manque.
+    // NB : les builders Supabase sont mutables (chaque .eq() s'accumule sur le même objet),
+    // donc chaque tentative doit repartir d'une requête neuve pour que le repli soit réel.
+    // Seules les opérations « conflit » non résolues exigent une décision utilisateur.
+    const buildHistoriqueQuery = () =>
+      db
+        .from("travaux_commandes_historique")
+        .select("*, travaux_commandes(numero_commande)")
+        .eq("operation", "conflit");
+
+    // On charge TOUTES les commandes (actives et archivées) : le Dashboard peut ainsi filtrer
+    // par année d'exercice et consulter les années historiques sans dépendre de `actif = true`.
+    const [commandesResult, importsResult, tranchesResult, enrichiesResult] = await Promise.all([
+      db
+        .from("travaux_commandes")
+        .select("*")
+        .order("engage", { ascending: false, nullsFirst: false }),
+      // Tous les imports (tous exercices) : l'en-tête affiche la date du dernier import de
+      // l'exercice courant, qui ne figurerait pas forcément dans les 5 plus récents.
+      db.from("import_travaux").select("*").order("demarre_at", { ascending: false }).limit(500),
+      db.from("tranches").select("code, libelle, localite, nb_logements").eq("actif", true),
+      // Enrichissement Historique CMD via la vue de rapprochement (lecture seule).
+      db.from("v_travaux_commandes_enrichies").select(SELECT_PASP_ENRICHIES),
+    ]);
+
+    let historiqueResult;
+    try {
+      historiqueResult = await buildHistoriqueQuery()
+        .eq("resolu", false)
+        .order("created_at", { ascending: false });
+      if (historiqueResult.error && historiqueResult.error.message.includes("resolu")) {
+        historiqueResult = await buildHistoriqueQuery().order("created_at", { ascending: false });
+      }
+    } catch (e) {
+      historiqueResult = await buildHistoriqueQuery().order("created_at", { ascending: false });
+    }
+
+    if (commandesResult.error)
+      throw new Error(`Chargement des commandes : ${commandesResult.error.message}`);
+    if (historiqueResult.error)
+      throw new Error(`Chargement de l'historique : ${historiqueResult.error.message}`);
+    if (importsResult.error)
+      throw new Error(`Chargement des imports : ${importsResult.error.message}`);
+    if (tranchesResult.error)
+      throw new Error(`Chargement des tranches : ${tranchesResult.error.message}`);
+
+    // Fusion suivi + enrichissement Historique CMD (même modèle que la fiche Fournisseur).
+    const commandes = fusionnerEnrichissement(
+      (commandesResult.data ?? []) as CommandeTravaux[],
+      (enrichiesResult.error ? [] : (enrichiesResult.data ?? [])) as Record<string, unknown>[],
+    );
+
+    return {
+      commandes,
+      historique: (historiqueResult.data ?? []) as (HistoriqueTravaux & {
+        travaux_commandes: { numero_commande: string };
+      })[],
+      imports: (importsResult.data ?? []) as ImportTravaux[],
+      tranchesDetails: (tranchesResult.data ?? []) as TrancheDetail[],
+    } satisfies TravauxDashboardData;
+  },
+);
 
 /**
  * Enrichissement Historique CMD des commandes d'un périmètre patrimoine (route /adresses).
@@ -317,12 +331,24 @@ export const getPspEnrichissementCommandes = createServerFn({ method: "POST", st
     if (data.commandeIds.length === 0) return [];
     const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
     const db = supabaseAdmin as any;
-    const { data: rows, error } = await db
-      .from("v_travaux_commandes_enrichies")
-      .select(SELECT_PASP_ENRICHIES)
-      .in("commande_id", data.commandeIds);
-    if (error) return [];
-    return (rows ?? []) as CommandeTravauxEnrichie[];
+    // MÊME MODÈLE que le Dashboard : colonnes suivi (travaux_commandes) + enrichissement
+    // Historique CMD (vue de rapprochement), fusionnés. Lecture seule.
+    const [commandesResult, enrichiesResult] = await Promise.all([
+      db
+        .from("travaux_commandes")
+        .select("*")
+        .in("id", data.commandeIds)
+        .order("engage", { ascending: false, nullsFirst: false }),
+      db
+        .from("v_travaux_commandes_enrichies")
+        .select(SELECT_PASP_ENRICHIES)
+        .in("commande_id", data.commandeIds),
+    ]);
+    if (commandesResult.error) return [];
+    return fusionnerEnrichissement(
+      (commandesResult.data ?? []) as CommandeTravaux[],
+      (enrichiesResult.error ? [] : (enrichiesResult.data ?? [])) as Record<string, unknown>[],
+    );
   });
 
 export const updateCommandeTravaux = createServerFn({ method: "POST" })
@@ -404,7 +430,16 @@ export const getTravauxImportDetails = createServerFn({ method: "POST" })
     z
       .object({
         importId: z.string().uuid(),
-        type: z.enum(["creee", "conflit", "inchangee", "archivee", "doublon", "ignoree", "erreur", "report"]),
+        type: z.enum([
+          "creee",
+          "conflit",
+          "inchangee",
+          "archivee",
+          "doublon",
+          "ignoree",
+          "erreur",
+          "report",
+        ]),
         page: z.number().int().min(1).optional(),
         pageSize: z.number().int().min(1).max(200).optional(),
       })

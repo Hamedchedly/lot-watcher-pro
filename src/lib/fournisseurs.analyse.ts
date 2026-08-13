@@ -759,3 +759,25 @@ export function trancheDeCommande(c: {
   if (codes?.length) return [...new Set(codes)].join(", ");
   return null;
 }
+
+// ── Affichage métier partagé (labels / couleurs) — Phase 5 mutualisation ───────
+// Utilisés par la liste des entreprises ET la fiche fournisseur (badges niveau /
+// famille). Les classes Tailwind sont des constantes d'affichage, jamais du calcul.
+
+export const NIVEAU_LABEL: Record<string, string> = {
+  principal: "Principal",
+  secondaire: "Secondaire",
+  occasionnel: "Occasionnel",
+};
+
+export const NIVEAU_COULEUR: Record<string, string> = {
+  principal: "bg-emerald-100 text-emerald-700",
+  secondaire: "bg-amber-100 text-amber-700",
+  occasionnel: "bg-slate-100 text-slate-600",
+};
+
+export const PROFIL_BADGE: Record<string, string> = {
+  TCE: "bg-violet-100 text-violet-700",
+  CEA: "bg-teal-100 text-teal-700",
+  "CVC-P": "bg-sky-100 text-sky-700",
+};

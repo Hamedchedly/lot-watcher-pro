@@ -389,9 +389,12 @@ try {
   await page.keyboard.press("Escape"); // ferme le popover avant la suite.
 
   // 8) Clic sur un numéro de commande → fiche commande EN OVERLAY (même page, aucune navigation).
+  //    Cible stable : la commande suivi 5061140 (année 2026, présente dans travaux_commandes,
+  //    dans la vue enrichie ET dans le journal du Dashboard par défaut → parité vérifiable).
   const urlFicheAvant = page.url();
   const numBtn = cmdTable
     .locator("tbody tr")
+    .filter({ hasText: "5061140" })
     .first()
     .locator("button[title*='Ouvrir la fiche commande']")
     .first();
@@ -408,6 +411,50 @@ try {
     timeout: 15000,
   });
   ok("fiche commande : descriptif complet visible", true);
+
+  // 8a) PARITÉ TOTALE : la fiche ouverte depuis Fournisseur doit afficher TOUTES les
+  //     sections et données réelles de la commande (même modèle que le Dashboard),
+  //     uniquement en lecture seule.
+  const titreFicheFournisseur = await page.evaluate(
+    () => document.querySelector("[role='dialog'] h2")?.textContent ?? "",
+  );
+  const mNumFiche = /Fiche Commande #(\S+)/.exec(titreFicheFournisseur);
+  const numCommandeFournisseur = mNumFiche?.[1] ?? "";
+  ok("numéro de commande extrait de la fiche fournisseur", numCommandeFournisseur !== "");
+  const ficheTxtFournisseur = await page.evaluate(
+    () => document.querySelector("[role='dialog']")?.textContent ?? "",
+  );
+  ok(
+    "fiche fournisseur : en-tête complet (Type, Tranche, ID Lot, État, Prog., Année)",
+    ficheTxtFournisseur.includes("Type") &&
+      ficheTxtFournisseur.includes("Tranche") &&
+      ficheTxtFournisseur.includes("ID Lot") &&
+      ficheTxtFournisseur.includes("État") &&
+      ficheTxtFournisseur.includes("Prog.") &&
+      ficheTxtFournisseur.includes("Année"),
+  );
+  ok(
+    "fiche fournisseur : sections Localisation & Nature / Intervenants / Finance présentes",
+    ficheTxtFournisseur.includes("Localisation & Nature") &&
+      ficheTxtFournisseur.includes("Intervenants") &&
+      ficheTxtFournisseur.includes("Finance"),
+  );
+  ok(
+    "fiche fournisseur : Historique CMD + Rapprochement présents (données PSP)",
+    ficheTxtFournisseur.includes("Historique CMD") && ficheTxtFournisseur.includes("Rapprochement"),
+  );
+  ok(
+    "fiche fournisseur : descriptif RÉEL affiché (pas « Aucun descriptif renseigné »)",
+    !ficheTxtFournisseur.includes("Aucun descriptif renseigné"),
+  );
+  ok(
+    "fiche fournisseur : montants 2 décimales affichés (Finance / Historique CMD)",
+    /[\d\s]*,\d{2}\s*€/.test(ficheTxtFournisseur),
+  );
+  ok(
+    "fiche fournisseur : lecture seule (aucun bouton MODIFIER)",
+    (await page.locator("[role='dialog'] button", { hasText: "MODIFIER" }).count()) === 0,
+  );
 
   // 8b) Z-INDEX : la carte est isolée et le Dialog est AU-DESSUS de tout.
   const zIndexOk = await page.evaluate(() => {
@@ -468,10 +515,22 @@ try {
   });
   ok("fiche patrimoine précise rendue (lots de l'adresse)", true);
 
-  // 10) COMPARATIF réel : la fiche commande du Dashboard utilise le MÊME composant/design.
+  // 10) PARITÉ RÉELLE : ouvrir dans le Dashboard la MÊME commande que celle ouverte
+  //     depuis le Fournisseur (5061140, année 2026 → présente dans le journal par défaut)
+  //     et comparer sections / données / montants.
   await page.goto(`${BASE}/dashboard-travaux`, { waitUntil: "networkidle", timeout: 60000 });
   await page.waitForSelector("table tbody tr", { timeout: 30000 });
-  await page.locator("table tbody tr").first().locator("td:nth-child(2) button").first().click();
+  // Recherche Rapide : isole la commande (le journal est paginé par défaut à 20 lignes).
+  await page.locator("input[placeholder*='CMD']").fill(numCommandeFournisseur);
+  await page.waitForTimeout(700);
+  const journal = page.locator("table").filter({ has: page.locator("th").getByText("N° Commande") });
+  await journal
+    .locator("tbody tr")
+    .filter({ hasText: numCommandeFournisseur })
+    .first()
+    .locator("button")
+    .first()
+    .click();
   await page.waitForFunction(() => document.body.textContent.includes("Fiche Commande #"), null, {
     timeout: 20000,
   });
@@ -479,6 +538,12 @@ try {
     () => document.querySelector("[role='dialog']")?.getAttribute("class") ?? "",
   );
   ok("Dashboard : fiche commande ouverte (composant partagé)", true);
+  ok(
+    "Dashboard : même commande ouverte que Fournisseur (#" + numCommandeFournisseur + ")",
+    (
+      await page.evaluate(() => document.querySelector("[role='dialog'] h2")?.textContent ?? "")
+    ).includes(numCommandeFournisseur),
+  );
   ok(
     "Dashboard & Fournisseur : mêmes classes de fiche (max-w-5xl, max-h-[90vh], rounded-3xl)",
     classesDash.includes("max-w-5xl") &&
@@ -497,6 +562,21 @@ try {
     bodyDash.includes("Rapprochement") &&
       bodyDash.includes("Finance") &&
       bodyDash.includes("FERMER LA FICHE"),
+  );
+  // PARITÉ de contenu : mêmes sections, mêmes montants (mêmes données chargées).
+  ok(
+    "PARITÉ : mêmes sections dans Dashboard et Fournisseur (Historique CMD, Rapprochement, Finance, Localisation & Nature, Intervenants)",
+    ["Historique CMD", "Rapprochement", "Finance", "Localisation & Nature", "Intervenants"].every(
+      (s) => bodyDash.includes(s) && ficheTxtFournisseur.includes(s),
+    ),
+  );
+  const montantsFournisseur = [...ficheTxtFournisseur.matchAll(/[\d\s]*,\d{2}\s*€/g)].map(
+    (m) => m[0],
+  );
+  const montantsDash = [...bodyDash.matchAll(/[\d\s]*,\d{2}\s*€/g)].map((m) => m[0]);
+  ok(
+    "PARITÉ montants : chaque montant affiché côté Fournisseur est identique dans le Dashboard",
+    montantsFournisseur.length > 0 && montantsFournisseur.every((v) => montantsDash.includes(v)),
   );
   await page.getByRole("button", { name: "FERMER LA FICHE" }).click();
 } finally {

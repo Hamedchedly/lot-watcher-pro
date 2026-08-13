@@ -1,7 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { ArrowDown, ArrowUp, Building2, Plus, Search, Star, X } from "lucide-react";
 import { toast } from "sonner";
 
@@ -42,8 +42,11 @@ import {
   type LigneFournisseurListe,
 } from "@/lib/fournisseurs.functions";
 import { libelleEntreprise, premierePropositionCorpsEtat } from "@/lib/fournisseurs";
-import { ORDRE_NIVEAU } from "@/lib/fournisseurs.analyse";
+import { ORDRE_NIVEAU, PROFIL_BADGE, trierLignes } from "@/lib/fournisseurs.analyse";
+import { money2, pct } from "@/lib/formats";
 import { formatDateCommandeFr } from "@/lib/psp.validation";
+import EvoCell from "@/components/EvoCell";
+import Labeled from "@/components/Labeled";
 
 export const Route = createFileRoute("/fournisseurs/")({
   head: () => ({
@@ -58,31 +61,6 @@ export const Route = createFileRoute("/fournisseurs/")({
   }),
   component: FournisseursPage,
 });
-
-const money2 = (value: unknown) =>
-  typeof value === "number"
-    ? new Intl.NumberFormat("fr-FR", {
-        style: "currency",
-        currency: "EUR",
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      }).format(value)
-    : "—";
-
-const pct = (v: number | null | undefined) => (v == null ? "—" : `${(v * 100).toFixed(1)} %`);
-const evo = (v: number | null | undefined) =>
-  v == null ? "—" : `${v >= 0 ? "+" : ""}${(v * 100).toFixed(0)} %`;
-const niveauLabel: Record<string, string> = {
-  principal: "Principal",
-  secondaire: "Secondaire",
-  occasionnel: "Occasionnel",
-};
-
-const PROFIL_BADGE: Record<string, string> = {
-  TCE: "bg-violet-100 text-violet-700",
-  CEA: "bg-teal-100 text-teal-700",
-  "CVC-P": "bg-sky-100 text-sky-700",
-};
 
 /** Colonne « Activités principales » : corps d'état à niveau EFFECTIF principal (codes conservés). */
 function ActivitesPrincipalesCell({ corps }: { corps: string[] }) {
@@ -102,7 +80,8 @@ function FamilleCell({ famille }: { famille: string }) {
   );
 }
 
-/** Tri local de la table : valeurs réelles (jamais le texte formaté), nulles en fin. */
+/** Tri local de la table : valeurs réelles (jamais le texte formaté), nulles en fin.
+ *  Mécanique de tri mutualisée (trierLignes) — seules les clés de colonne restent locales. */
 function trierListe(list: LigneFournisseurListe[], key: string, dir: "asc" | "desc") {
   const get = (l: LigneFournisseurListe): number | string | null => {
     if (key === "ref_isis") {
@@ -127,20 +106,7 @@ function trierListe(list: LigneFournisseurListe[], key: string, dir: "asc" | "de
     const v = (l as unknown as Record<string, unknown>)[key];
     return typeof v === "number" ? v : v == null ? null : String(v);
   };
-  return [...list].sort((a, b) => {
-    const va = get(a);
-    const vb = get(b);
-    if (va == null && vb == null) return 0;
-    if (va == null) return 1;
-    if (vb == null) return -1;
-    if (typeof va === "string" && typeof vb === "string") {
-      return dir === "asc" ? va.localeCompare(vb) : vb.localeCompare(va);
-    }
-    const na = Number(va);
-    const nb = Number(vb);
-    if (!Number.isNaN(na) && !Number.isNaN(nb)) return dir === "asc" ? na - nb : nb - na;
-    return 0;
-  });
+  return trierLignes(list, get, dir);
 }
 
 function FournisseursPage() {
@@ -601,15 +567,7 @@ function FournisseursPage() {
                         {money2(l.montant_annee)}
                       </TableCell>
                       <TableCell className="text-right">
-                        <span
-                          className={
-                            l.evolution_montant != null && l.evolution_montant < 0
-                              ? "text-red-500"
-                              : "text-emerald-600"
-                          }
-                        >
-                          {evo(l.evolution_montant)}
-                        </span>
+                        <EvoCell v={l.evolution_montant} />
                       </TableCell>
                       <TableCell className="text-right">
                         {pct(
@@ -823,15 +781,6 @@ function AjouterFournisseurDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  );
-}
-
-function Labeled({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="space-y-1">
-      <Label className="text-xs">{label}</Label>
-      {children}
-    </div>
   );
 }
 

@@ -105,7 +105,11 @@ import {
 } from "@/lib/psp.validation";
 import { getPspDecision, savePspDecision } from "@/lib/psp.validation.functions";
 import { getFournisseursPourCommandes } from "@/lib/fournisseurs.functions";
-import CommandeFicheDialog, { type DecideState } from "@/components/CommandeFicheDialog";
+import { money0 } from "@/lib/formats";
+import CommandeFicheDialog, {
+  type DecideState,
+  type FicheFournisseurInfo,
+} from "@/components/CommandeFicheDialog";
 
 export const Route = createFileRoute("/dashboard-travaux")({
   validateSearch: (s: Record<string, unknown>) => ({
@@ -125,21 +129,6 @@ export const Route = createFileRoute("/dashboard-travaux")({
 
 type Commande = CommandeTravauxEnrichie;
 
-// Montants affichés dans la fiche commande : TOUJOURS 2 décimales (affichage uniquement,
-// les valeurs stockées ne sont pas modifiées).
-const money2 = (value: unknown) =>
-  typeof value === "number"
-    ? new Intl.NumberFormat("fr-FR", {
-        style: "currency",
-        currency: "EUR",
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      }).format(value)
-    : "—";
-const confianceLabel = (v: number | null | undefined): string =>
-  typeof v === "number" ? `${Math.round(v * 100)}%` : "—";
-const statutTxt = (v: string | null | undefined): string =>
-  v === "valide" ? "valide" : v === "a_confirmer" ? "à confirmer" : (v ?? "—");
 type ClassementRow = {
   label: string;
   value: number;
@@ -150,14 +139,6 @@ const SECTEURS = ["GT", "GE", "CP"] as const;
 const SECTOR_COLORS = { GT: "#2563eb", GE: "#0f766e", CP: "#c2410c" };
 const PAGE_SIZE = 20;
 
-const money = (value: unknown) =>
-  typeof value === "number"
-    ? new Intl.NumberFormat("fr-FR", {
-        style: "currency",
-        currency: "EUR",
-        maximumFractionDigits: 0,
-      }).format(value)
-    : "—";
 const text = (value: unknown) => (value == null ? "" : String(value));
 
 /** Slider d'années (double curseur Radix) : remplace les <input type="range"> natifs. */
@@ -307,7 +288,6 @@ const DashboardMap = lazy(() => import("@/components/DashboardMap"));
 
 function ClientOnlyMap({
   dataVilles,
-  money,
   missing,
 }: {
   dataVilles: {
@@ -318,7 +298,6 @@ function ClientOnlyMap({
     count: number;
     paye: number;
   }[];
-  money: (v: number) => string;
   missing: number;
 }) {
   const [isClient, setIsClient] = useState(false);
@@ -340,7 +319,7 @@ function ClientOnlyMap({
         </div>
       }
     >
-      <DashboardMap dataVilles={dataVilles} money={money} missing={missing} />
+      <DashboardMap dataVilles={dataVilles} missing={missing} />
     </Suspense>
   );
 }
@@ -433,11 +412,7 @@ function DashboardTravauxPage() {
   const [historyFor, setHistoryFor] = useState<Commande | null>(null);
   const [selectedImportErrors, setSelectedImportErrors] = useState<ImportTravaux | null>(null);
   // Fournisseur référencé pour la fiche affichée (nom enrichi — source jamais modifiée).
-  const [fournisseurFiche, setFournisseurFiche] = useState<{
-    id: string;
-    nom: string;
-    identifiants: string[];
-  } | null>(null);
+  const [fournisseurFiche, setFournisseurFiche] = useState<FicheFournisseurInfo | null>(null);
   const [versionChoice, setVersionChoice] = useState<"A" | "B">("B");
 
   // Décision humaine Historique CMD (nature / corps d'état) — couche psp_decisions.
@@ -1249,8 +1224,8 @@ function DashboardTravauxPage() {
 
         {/* KPIs */}
         <section className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <Kpi label="Engagé Total" value={money(stats.engage)} trend="ACTUEL" />
-          <Kpi label="Budget Prévu" value={money(stats.budget)} trend="CIBLE" />
+          <Kpi label="Engagé Total" value={money0(stats.engage)} trend="ACTUEL" />
+          <Kpi label="Budget Prévu" value={money0(stats.budget)} trend="CIBLE" />
           <Kpi label="% Programmation" value={`${stats.pctProg}%`} trend="QUALITÉ" />
           <Kpi
             label="Commandes"
@@ -1284,11 +1259,7 @@ function DashboardTravauxPage() {
             </div>
             {mapMode === "map" ? (
               <div className="absolute inset-0 z-0">
-                <ClientOnlyMap
-                  dataVilles={dataVilles}
-                  money={money}
-                  missing={villesNonLocalisees}
-                />
+                <ClientOnlyMap dataVilles={dataVilles} missing={villesNonLocalisees} />
               </div>
             ) : (
               <>
@@ -1325,7 +1296,7 @@ function DashboardTravauxPage() {
                             )}
                           </div>
                           <span className="text-[10px] font-black text-slate-900 shrink-0">
-                            {money(row.value)}
+                            {money0(row.value)}
                           </span>
                         </div>
                         <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
@@ -1385,7 +1356,7 @@ function DashboardTravauxPage() {
                               {d.value} commandes
                             </p>
                             <p className="text-xs font-black text-blue-400">
-                              Engagé : {money(d.engage)}
+                              Engagé : {money0(d.engage)}
                             </p>
                           </div>
                         );
@@ -1452,7 +1423,7 @@ function DashboardTravauxPage() {
                           <p className="text-[9px] font-bold text-slate-400 uppercase mb-2">
                             {d.adresse}
                           </p>
-                          <p className="text-xs font-black text-blue-400">{money(d.value)}</p>
+                          <p className="text-xs font-black text-blue-400">{money0(d.value)}</p>
                         </div>
                       );
                     }
@@ -1463,7 +1434,7 @@ function DashboardTravauxPage() {
                   <LabelList
                     dataKey="value"
                     position="right"
-                    formatter={(v: number) => money(v)}
+                    formatter={(v: number) => money0(v)}
                     className="text-[9px] font-black fill-slate-900"
                   />
                   {dataTranche.map((entry, index) => (
@@ -1853,9 +1824,9 @@ function DashboardTravauxPage() {
                         {row.numero_fournisseur || "—"}
                       </td>
                       <td className="p-4 text-right font-black text-slate-900">
-                        {money(row.engage)}
+                        {money0(row.engage)}
                       </td>
-                      <td className="p-4 text-right text-slate-600">{money(row.paye)}</td>
+                      <td className="p-4 text-right text-slate-600">{money0(row.paye)}</td>
                       <td className="p-4 text-center">
                         <div
                           className={`mx-auto size-2 rounded-full ${isProg ? "bg-green-500 shadow-green-200" : "bg-slate-300"} shadow-sm`}
@@ -1991,7 +1962,7 @@ function DashboardTravauxPage() {
                   <span className="text-[9px] font-black text-slate-300">#0{i + 1}</span>
                   <span className="text-[10px] font-black text-slate-700 uppercase">{d.name}</span>
                 </div>
-                <span className="text-[10px] font-black text-blue-600">{money(d.value)}</span>
+                <span className="text-[10px] font-black text-blue-600">{money0(d.value)}</span>
               </div>
             ))}
           </div>
@@ -2235,7 +2206,7 @@ function CommandeHistoriqueDialog({
     v === null || v === undefined
       ? "—"
       : typeof v === "number" && moneyKeys.has(k)
-        ? money(v)
+        ? money0(v)
         : String(v);
 
   return (

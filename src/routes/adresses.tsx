@@ -55,6 +55,7 @@ import {
 } from "@/lib/travaux.dashboard.functions";
 import { getFournisseursPourCommandes } from "@/lib/fournisseurs.functions";
 import { libelleEntreprise } from "@/lib/fournisseurs";
+import type { FicheFournisseurInfo } from "@/components/CommandeFicheDialog";
 
 const searchSchema = z.object({
   q: z.string().optional(),
@@ -924,13 +925,12 @@ function TravauxList({ scope }: { scope: TravauxScope }) {
     enabled: commandeIds.length > 0,
   });
   const fournisseurByCommande = useMemo(() => {
-    const m = new Map<string, { id: string; nom: string; identifiants: string[] }>();
-    Object.entries(
-      (fournisseursData as Record<string, { id: string; nom: string; identifiants: string[] }>) ??
-        {},
-    ).forEach(([id, f]) => {
-      if (f) m.set(id, f);
-    });
+    const m = new Map<string, FicheFournisseurInfo>();
+    Object.entries((fournisseursData as Record<string, FicheFournisseurInfo>) ?? {}).forEach(
+      ([id, f]) => {
+        if (f) m.set(id, f);
+      },
+    );
     return m;
   }, [fournisseursData]);
 

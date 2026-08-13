@@ -72,6 +72,7 @@ import {
 } from "@/lib/fournisseurs.functions";
 import {
   ORDRE_NIVEAU,
+  PROFIL_BADGE,
   extraireAdressePhysique,
   timestampDateCommande,
   trancheDeCommande,
@@ -83,6 +84,10 @@ import {
   type ProfilNiveau,
   type VilleFournisseur,
 } from "@/lib/fournisseurs.analyse";
+import { evo, money2, pct } from "@/lib/formats";
+import EvoCell from "@/components/EvoCell";
+import Labeled from "@/components/Labeled";
+import NiveauBadge from "@/components/NiveauBadge";
 import {
   estValeurEtatPlausible,
   libelleEntreprise,
@@ -102,53 +107,6 @@ export const Route = createFileRoute("/fournisseurs/$fournisseurId")({
   }),
   component: FournisseurFiche,
 });
-
-const money2 = (value: unknown) =>
-  typeof value === "number"
-    ? new Intl.NumberFormat("fr-FR", {
-        style: "currency",
-        currency: "EUR",
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      }).format(value)
-    : "—";
-
-const pct = (v: number | null | undefined) => (v == null ? "—" : `${(v * 100).toFixed(1)} %`);
-const evo = (v: number | null | undefined) =>
-  v == null ? "—" : `${v > 0 ? "+" : ""}${(v * 100).toFixed(0)} %`;
-
-/**
- * Indicateur d'évolution avec couleur de signe :
- * positif → vert, négatif → rouge, nul → neutre (jamais de couleur pour un montant).
- */
-function EvoCell({ v }: { v: number | null | undefined }) {
-  if (v == null) return <span className="text-muted-foreground">—</span>;
-  const classe =
-    v > 0
-      ? "font-semibold text-emerald-600"
-      : v < 0
-        ? "font-semibold text-red-600"
-        : "font-semibold text-muted-foreground";
-  return <span className={classe}>{evo(v)}</span>;
-}
-
-const PROFIL_BADGE: Record<string, string> = {
-  TCE: "bg-violet-100 text-violet-700",
-  CEA: "bg-teal-100 text-teal-700",
-  "CVC-P": "bg-sky-100 text-sky-700",
-};
-
-const NIVEAU_LABEL: Record<string, string> = {
-  principal: "Principal",
-  secondaire: "Secondaire",
-  occasionnel: "Occasionnel",
-};
-
-const NIVEAU_COULEUR: Record<string, string> = {
-  principal: "bg-emerald-100 text-emerald-700",
-  secondaire: "bg-amber-100 text-amber-700",
-  occasionnel: "bg-slate-100 text-slate-600",
-};
 
 const FournisseurVillesMap = lazy(() => import("@/components/FournisseurVillesMap"));
 
@@ -803,12 +761,7 @@ function FournisseurFiche() {
                                 </SelectContent>
                               </Select>
                             ) : (
-                              <Badge
-                                variant="outline"
-                                className={NIVEAU_COULEUR[a.niveau ?? "occasionnel"] ?? ""}
-                              >
-                                {NIVEAU_LABEL[a.niveau ?? "occasionnel"]}
-                              </Badge>
+                              <NiveauBadge niveau={a.niveau} />
                             )}
                           </TableCell>
                           <TableCell className="text-xs text-muted-foreground">
@@ -1263,11 +1216,29 @@ function FournisseurFiche() {
         commande={
           commandeOuverte
             ? ({
+                // Fallback d'affichage pour les lignes Historique CMD sans commande suivi
+                // (id null → aucun enrichissement possible) : toutes les données disponibles
+                // de la CommandeFournisseur sont transmises. Dès qu'un `commandeId` existe,
+                // le composant charge la fiche COMPLÈTE (même modèle que le Dashboard) et
+                // ce fallback n'est jamais utilisé pour le rendu.
                 id: commandeOuverte.id ?? undefined,
                 numero_commande: commandeOuverte.numero_commande,
                 descriptif: commandeOuverte.descriptif ?? undefined,
-                nature_travaux: commandeOuverte.nature_travaux ?? undefined,
-                montant: commandeOuverte.montant,
+                corps_etat: commandeOuverte.corps_etat ?? undefined,
+                tranche_code: commandeOuverte.tranche_code ?? undefined,
+                lot_code: commandeOuverte.lot_code ?? undefined,
+                batiment: commandeOuverte.batiment ?? undefined,
+                adresse: commandeOuverte.adresse ?? undefined,
+                annee_exercice: commandeOuverte.annee ?? undefined,
+                etat_commande: commandeOuverte.etat ?? undefined,
+                etat_travaux: commandeOuverte.etat ?? undefined,
+                engage: commandeOuverte.montant,
+                date_demarrage: commandeOuverte.date_demarrage ?? undefined,
+                psp_date_commande: commandeOuverte.date_commande ?? undefined,
+                psp_corps_etat_libelle: commandeOuverte.nature_travaux ?? undefined,
+                psp_patrimoine: commandeOuverte.patrimoine ?? undefined,
+                psp_fournisseur: commandeOuverte.fournisseur_source_code ?? undefined,
+                psp_numero_commande_interne: commandeOuverte.numero_commande,
               } as unknown as CommandeTravauxEnrichie)
             : null
         }
@@ -1286,15 +1257,6 @@ function Ligne({ label, value }: { label: string; value: ReactNode }) {
       <span className="text-muted-foreground">{label}</span>
       <span className="font-semibold">{value}</span>
     </p>
-  );
-}
-
-function Labeled({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="space-y-1">
-      <Label className="text-xs">{label}</Label>
-      {children}
-    </div>
   );
 }
 
@@ -1606,18 +1568,11 @@ function ReinitialiserActivitesDialog({
                         {a.corps_etat}
                       </TableCell>
                       <TableCell>
-                        <Badge
-                          variant="outline"
-                          className={NIVEAU_COULEUR[actuel ?? "occasionnel"] ?? ""}
-                        >
-                          {NIVEAU_LABEL[actuel ?? "occasionnel"]}
-                        </Badge>
+                        <NiveauBadge niveau={actuel} />
                       </TableCell>
                       <TableCell>
                         {auto ? (
-                          <Badge variant="outline" className={NIVEAU_COULEUR[auto] ?? ""}>
-                            {NIVEAU_LABEL[auto]}
-                          </Badge>
+                          <NiveauBadge niveau={auto} />
                         ) : (
                           <span className="text-xs text-muted-foreground">Aucun historique</span>
                         )}

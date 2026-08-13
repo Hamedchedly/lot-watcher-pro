@@ -18,6 +18,7 @@ import { Dialog, DialogContent, DialogFooter } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { libelleEntreprise } from "@/lib/fournisseurs";
+import { money2 } from "@/lib/formats";
 import { getFournisseursPourCommandes } from "@/lib/fournisseurs.functions";
 import {
   construireCleMetierCommande,
@@ -35,16 +36,7 @@ import {
   type CommandeTravauxEnrichie,
 } from "@/lib/travaux.dashboard.functions";
 
-/** Montants à 2 décimales (affichage uniquement — valeurs jamais modifiées). */
-const money2 = (value: unknown) =>
-  typeof value === "number"
-    ? new Intl.NumberFormat("fr-FR", {
-        style: "currency",
-        currency: "EUR",
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      }).format(value)
-    : "—";
+/** Confiance (ratio → %) et statut du lien — affichage uniquement. */
 const confianceLabel = (v: number | null | undefined): string =>
   typeof v === "number" ? `${Math.round(v * 100)}%` : "—";
 const statutTxt = (v: string | null | undefined): string =>
