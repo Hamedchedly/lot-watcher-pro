@@ -256,3 +256,148 @@ export const getPspValidationDetail = createServerFn({ method: "POST" })
     });
     return { row, classification: cls, score, perimetre: perim };
   });
+
+// ── Décisions humaines (psp_decisions) — couche métier séparée ─────────────────
+// Les décisions ne modifient JAMAIS les sources (psp_import_rows, travaux_commandes,
+// Excel) : elles constituent uniquement une couche de décision métier réutilisée
+// à chaque import tant que statut = 'valide'.
+// Colonnes utilisées (conformes au schéma réel déjà en base) : id, cle_metier,
+// type_decision, decision_utilisateur, statut, motif, created_at, updated_at.
+// Aucune migration, aucune modification de schéma.
+
+const decisionKeySchema = z.object({
+  cleMetier: z.string().min(1),
+  typeDecision: z.enum(["nature", "corps_etat", "perimetre_psp", "rapprochement"]),
+});
+
+const saveDecisionSchema = z.object({
+  cleMetier: z.string().min(1),
+  typeDecision: z.enum(["nature", "corps_etat", "perimetre_psp", "rapprochement"]),
+  decisionUtilisateur: z.string().min(1),
+  statut: z.enum(["valide", "proposition", "rejete"]),
+  motif: z.string().nullish(),
+});
+
+/** Retourne la décision VALIDÉE existante pour une clé métier (ou null). */
+export const getPspDecision = createServerFn({ method: "POST" })
+  .validator((d: unknown) => decisionKeySchema.parse(d))
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("../integrations/supabase-ext/client.server");
+    const db = supabaseAdmin as any;
+    const { data: rows, error } = await db
+      .from("psp_decisions")
+      .select("*")
+      .eq("cle_metier", data.cleMetier)
+      .eq("type_decision", data.typeDecision)
+      .eq("statut", "valide")
+      .order("updated_at", { ascending: false })
+      .limit(1);
+    if (error) throw new Error(`Lecture de la décision : ${error.message}`);
+    return rows?.[0] ?? null;
+  });
+
+/** Enregistre (insert ou mise à jour sans UNIQUE présumé) une décision humaine. */
+export const savePspDecision = createServerFn({ method: "POST" })
+  .validator((d: unknown) => saveDecisionSchema.parse(d))
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("../integrations/supabase-ext/client.server");
+    const db = supabaseAdmin as any;
+    const now = new Date().toISOString();
+    const payload = {
+      cle_metier: data.cleMetier,
+      type_decision: data.typeDecision,
+      decision_utilisateur: data.decisionUtilisateur,
+      statut: data.statut,
+      motif: data.motif ?? null,
+      updated_at: now,
+    };
+
+    const { data: existing, error: errRead } = await db
+      .from("psp_decisions")
+      .select("id")
+      .eq("cle_metier", data.cleMetier)
+      .eq("type_decision", data.typeDecision)
+      .limit(1);
+    if (errRead) throw new Error(`Lecture de la décision : ${errRead.message}`);
+
+    if (existing && existing.length > 0) {
+      const { data: updated, error } = await db
+        .from("psp_decisions")
+        .update(payload)
+        .eq("id", existing[0].id)
+        .select("*")
+        .single();
+      if (error) throw new Error(`Mise à jour de la décision : ${error.message}`);
+      return updated;
+    }
+
+    const { data: inserted, error: errInsert } = await db
+      .from("psp_decisions")
+      .insert({ ...payload, created_at: now })
+      .select("*")
+      .single();
+    if (errInsert) throw new Error(`Enregistrement de la décision : ${errInsert.message}`);
+    return inserted;
+  });
+
+/**
+ * Résout la décision à appliquer, dans l'ordre :
+ *  1. décision humaine valide (psp_decisions) ;
+ *  2. règle générale active (psp_rules) — jamais créée automatiquement ici ;
+ *  3. sinon retourne null → l'affichage montre la source + l'incohérence à trancher.
+ */
+export const resoudreDecisionPsp = createServerFn({ method: "POST" })
+  .validator((d: unknown) =>
+    z
+      .object({
+        cleMetier: z.string().min(1),
+        typeDecision: z.enum(["nature", "corps_etat", "perimetre_psp", "rapprochement"]),
+        numeroCommande: z.string().optional(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("../integrations/supabase-ext/client.server");
+    const db = supabaseAdmin as any;
+
+    // 1. Décision humaine validée (réutilisée automatiquement aux prochains imports).
+    const { data: decisions, error: errDec } = await db
+      .from("psp_decisions")
+      .select("*")
+      .eq("cle_metier", data.cleMetier)
+      .eq("type_decision", data.typeDecision)
+      .eq("statut", "valide")
+      .order("updated_at", { ascending: false })
+      .limit(1);
+    if (errDec) throw new Error(`Lecture de la décision : ${errDec.message}`);
+    if (decisions && decisions.length > 0) {
+      return {
+        valeur: decisions[0].decision_utilisateur ?? null,
+        source: "decision",
+        decision: decisions[0],
+      };
+    }
+
+    // 2. Règle générale active (psp_rules) — lecture seule, ne crée jamais de règle.
+    try {
+      const { data: regles, error: errRules } = await db
+        .from("psp_rules")
+        .select("*")
+        .in("statut", ["valide", "active"])
+        .order("priorite", { ascending: true });
+      if (!errRules && regles && regles.length > 0 && data.numeroCommande) {
+        const numero = data.numeroCommande.trim();
+        const hit = regles.find((r: Record<string, unknown>) => {
+          const c = String(r["condition"] ?? "");
+          return c.includes(numero) || c.includes(data.typeDecision) || c.includes(data.cleMetier);
+        });
+        if (hit && hit["resultat"] !== null && hit["resultat"] !== undefined) {
+          return { valeur: String(hit["resultat"]), source: "regle", decision: null };
+        }
+      }
+    } catch {
+      // La lecture des règles ne doit jamais faire échouer la résolution.
+    }
+
+    return { valeur: null, source: null, decision: null };
+  });

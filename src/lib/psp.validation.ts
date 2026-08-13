@@ -588,3 +588,110 @@ export function detecterCorrectionsRecurrentes(
     .filter((c) => c.n >= seuil)
     .map((c) => ({ domaine: c.domaine, type: c.type, occurrences: c.n, motif_exemple: c.motif }));
 }
+
+// ── Helpers d'enrichissement Historique CMD (purs, partagés Dashboard + adresses) ──
+// Aucune écriture ici. Ces fonctions ne font que du formatage / de la détection :
+// les données sources (psp_import_rows, travaux_commandes, Excel) restent intactes.
+
+const MOIS_EN = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/**
+ * Formate une date Historique CMD en français (DD/MM/YYYY).
+ * Accepte les formats réellement rencontrés : chaîne locale JS
+ * (« Wed Feb 01 2023 23:59:39 GMT+0100 … »), ISO (YYYY-MM-DD) et française.
+ * Retourne null si non convertible — ne lève jamais.
+ */
+export function formatDateCommandeFr(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  const s = String(value).trim();
+  if (!s) return null;
+  const pad = (n: number) => String(n).padStart(2, "0");
+
+  // YYYY-MM-DD[ T…]
+  let m = s.match(/^(\d{4})-(\d{2})-(\d{2})([ T]|$)/);
+  if (m) return `${m[3]}/${m[2]}/${m[1]}`;
+
+  // DD/MM/YYYY · DD-MM-YYYY · DD.MM.YYYY
+  m = s.match(/^(\d{1,2})[\/\.-](\d{1,2})[\/\.-](\d{4})$/);
+  if (m) return `${pad(Number(m[1]))}/${pad(Number(m[2]))}/${m[3]}`;
+
+  // Weekday Mon DD YYYY …
+  m = s.match(/^[A-Za-z]+,? ([A-Za-z]{3}) (\d{1,2}) (\d{4})/);
+  if (m) {
+    const mois = MOIS_EN.indexOf(m[1] ?? "");
+    if (mois >= 0) return `${pad(Number(m[2]))}/${pad(mois + 1)}/${m[3]}`;
+  }
+
+  // Repli : Date.parse générique.
+  const d = new Date(s);
+  if (!Number.isNaN(d.getTime())) {
+    return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`;
+  }
+  return null;
+}
+
+/** Types de décision humaine enregistrables dans psp_decisions. */
+export const TYPES_DECISION_PSP = ["nature", "corps_etat", "perimetre_psp", "rapprochement"] as const;
+export type TypeDecisionPsp = (typeof TYPES_DECISION_PSP)[number];
+
+/** Statuts autorisés d'une décision psp_decisions. */
+export const STATUTS_DECISION_PSP = ["valide", "proposition", "rejete"] as const;
+export type StatutDecisionPsp = (typeof STATUTS_DECISION_PSP)[number];
+
+/**
+ * Clé métier d'une décision : COMMANDE:<numero_commande>:<type>.
+ * <numero_commande> = COMN_NUM (numero_commande_interne), l'identifiant technique
+ * unique de la ligne source ISIS — jamais COMC_NOLIG (nullable, non unique).
+ */
+export function construireCleMetierCommande(numeroCommande: string, type: TypeDecisionPsp): string {
+  return `COMMANDE:${numeroCommande || "?"}:${type}`;
+}
+
+/**
+ * Vrai si les deux natures sont renseignées et différentes
+ * (incohérence à présenter à l'utilisateur, aucune valeur modifiée).
+ */
+export function detecterIncoherenceNature(
+  suiviAnnuel: string | null | undefined,
+  historique: string | null | undefined,
+): boolean {
+  const a = (suiviAnnuel ?? "").trim().toUpperCase();
+  const b = (historique ?? "").trim().toUpperCase();
+  return a !== "" && b !== "" && a !== b;
+}
+
+/**
+ * WNOTES depuis donnees_brutes — le parser PSP mappe WNOTES.Ana_comd_trav_er
+ * vers `descriptif` (et une variante vers `observations`). La donnée est lue
+ * telle quelle, jamais recopiée dans travaux_commandes.
+ */
+export function extraireWNotes(
+  donneesBrutes: Record<string, unknown> | null | undefined,
+): string | null {
+  const d = donneesBrutes ?? {};
+  const v = d["descriptif"] ?? d["observations"] ?? null;
+  return typeof v === "string" && v.trim() !== "" ? v.trim() : null;
+}
+
+/**
+ * Chargé d'opération Historique CMD (UTIC_CODE.Ana_comd_trav_er normalisée en
+ * `charge_operation` par le parser) depuis donnees_brutes.
+ */
+export function extraireChargePsp(
+  donneesBrutes: Record<string, unknown> | null | undefined,
+): string | null {
+  const d = donneesBrutes ?? {};
+  const v = d["charge_operation"] ?? d["utic_code"] ?? d["utic"] ?? d["UTIC_CODE"] ?? null;
+  return typeof v === "string" && v.trim() !== "" ? v.trim() : null;
+}
+
+/**
+ * RattachEment WPATRIMOINE ambigu ? Le parser ne choisit JAMAIS arbitrairement :
+ * il marque er_ambigue / niveau_rattachement='ambiguous' → « À VALIDER ».
+ */
+export function patrimoineAmbigue(
+  donneesBrutes: Record<string, unknown> | null | undefined,
+): boolean {
+  const d = donneesBrutes ?? {};
+  return d["er_ambigue"] === true || d["niveau_rattachement"] === "ambiguous";
+}

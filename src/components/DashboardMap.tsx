@@ -49,17 +49,17 @@ export default function DashboardMap({
   money: (v: number) => string;
   missing?: number;
 }) {
-  const max = useMemo(
-    () => Math.max(0, ...dataVilles.map((d) => d.value)),
-    [dataVilles],
-  );
+  const max = useMemo(() => Math.max(0, ...dataVilles.map((d) => d.value)), [dataVilles]);
   const points = useMemo(
     () => dataVilles.map((d) => [d.lat, d.lng] as [number, number]),
     [dataVilles],
   );
 
   return (
-    <div className="relative h-full w-full">
+    /* `isolate` : la carte crée son propre stacking context — ses panes/popups/légende
+       (z-index internes jusqu'à 700/1000) ne peuvent JAMAIS passer au-dessus d'un Dialog
+       (z-50) ouvert sur la page. La carte reste entièrement interactive sans dialog. */
+    <div className="relative isolate h-full w-full">
       <MapContainer
         center={[48.8566, 2.3522]}
         zoom={9}
@@ -86,18 +86,14 @@ export default function DashboardMap({
             >
               <Popup>
                 <div className="p-2 font-sans">
-                  <p className="text-[10px] font-black uppercase text-slate-400 mb-1">
-                    {d.ville}
-                  </p>
+                  <p className="text-[10px] font-black uppercase text-slate-400 mb-1">{d.ville}</p>
                   <p className="text-xs font-black text-slate-700">
                     {d.count} commande{d.count > 1 ? "s" : ""}
                   </p>
                   <p className="text-xs font-black text-slate-700">
                     Engagé : {moneyCents(d.value)}
                   </p>
-                  <p className="text-xs font-black text-slate-700">
-                    Payé : {moneyCents(d.paye)}
-                  </p>
+                  <p className="text-xs font-black text-slate-700">Payé : {moneyCents(d.paye)}</p>
                 </div>
               </Popup>
             </CircleMarker>
@@ -114,8 +110,7 @@ export default function DashboardMap({
           <div
             className="h-2 w-32 rounded-full"
             style={{
-              background:
-                "linear-gradient(90deg, #facc15 0%, #f97316 50%, #ef4444 100%)",
+              background: "linear-gradient(90deg, #facc15 0%, #f97316 50%, #ef4444 100%)",
             }}
           />
           <span className="text-[8px] font-black uppercase tracking-widest text-slate-400">

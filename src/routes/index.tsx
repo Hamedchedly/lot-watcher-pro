@@ -84,8 +84,13 @@ function Index() {
                 <ListChecks className="size-4" /> Analyse historique CMD
               </Link>
             </Button>
+            <Button asChild variant="outline">
+              <Link to="/fournisseurs">
+                <Building2 className="size-4" /> Fournisseurs
+              </Link>
+            </Button>
             <Button asChild>
-              <Link to="/dashboard-travaux">
+              <Link to="/dashboard-travaux" search={{ commande: undefined }}>
                 <BarChart3 className="size-4" /> Dashboard travaux
               </Link>
             </Button>

@@ -48,6 +48,13 @@ import {
   normaliserRecherche,
   rechercherPatrimoine,
 } from "@/lib/adresses";
+import { formatDateCommandeFr, extraireWNotes } from "@/lib/psp.validation";
+import {
+  getPspEnrichissementCommandes,
+  type CommandeTravauxEnrichie,
+} from "@/lib/travaux.dashboard.functions";
+import { getFournisseursPourCommandes } from "@/lib/fournisseurs.functions";
+import { libelleEntreprise } from "@/lib/fournisseurs";
 
 const searchSchema = z.object({
   q: z.string().optional(),
@@ -77,9 +84,7 @@ function AdressesPage() {
   // recherche en client avec normalisation (villes/adresses/locataires) — aucune requête par résultat.
   const searchMode = !!q?.trim();
   const { data, isLoading: isLoadingLots } = useQuery({
-    queryKey: searchMode
-      ? ["adresses", "toutes"]
-      : ["adresses", q, ville, tranche, rue, adresse],
+    queryKey: searchMode ? ["adresses", "toutes"] : ["adresses", q, ville, tranche, rue, adresse],
     queryFn: () =>
       searchMode
         ? fetchAdresses({ data: {} })
@@ -398,9 +403,10 @@ function AdressesPage() {
                   <span className="text-xs text-muted-foreground">
                     {isLoadingVilles
                       ? "Chargement…"
-                      : `${villeRows.length} ville${villeRows.length > 1 ? "s" : ""} · ${
-                          villeRows.reduce((s, r) => s + r.lots, 0)
-                        } lots`}
+                      : `${villeRows.length} ville${villeRows.length > 1 ? "s" : ""} · ${villeRows.reduce(
+                          (s, r) => s + r.lots,
+                          0,
+                        )} lots`}
                   </span>
                 </header>
                 <div className="overflow-x-auto">
@@ -598,7 +604,10 @@ function AdressesPage() {
                     </thead>
                     <tbody className="divide-y">
                       {visibleLots.map((lot) => (
-                        <tr key={lot.code_patrimoine} className="hover:bg-muted/50 transition-colors">
+                        <tr
+                          key={lot.code_patrimoine}
+                          className="hover:bg-muted/50 transition-colors"
+                        >
                           <td className="px-4 py-3 font-medium">
                             <button
                               onClick={() => setSelectedLot(lot)}
@@ -866,6 +875,7 @@ function TravauxDialog({ scope, onClose }: { scope: TravauxScope | null; onClose
 
 function TravauxList({ scope }: { scope: TravauxScope }) {
   const fetchTravaux = useServerFn(getTravaux);
+  const fetchEnrich = useServerFn(getPspEnrichissementCommandes);
   const { data, isLoading, isError } = useQuery({
     queryKey: ["travaux", scope],
     queryFn: () =>
@@ -884,6 +894,45 @@ function TravauxList({ scope }: { scope: TravauxScope }) {
                   },
       }),
   });
+
+  // Enrichissement Historique CMD des commandes liées à ce périmètre (lecture seule de la
+  // vue de rapprochement). Aucune modification des données sources ; les fiches restent
+  // fonctionnelles même si la vue est indisponible.
+  const travauxRows = (data ?? []) as TravailRow[];
+  const commandeIds = useMemo(
+    () => travauxRows.filter((t) => t.is_commande && t.id).map((t) => t.id),
+    [travauxRows],
+  );
+  const { data: enrData } = useQuery({
+    queryKey: ["travaux-enrich", commandeIds],
+    queryFn: () => fetchEnrich({ data: { commandeIds } }),
+    enabled: commandeIds.length > 0,
+  });
+  const enrichByCommande = useMemo(() => {
+    const map = new Map<string, CommandeTravauxEnrichie>();
+    ((enrData as CommandeTravauxEnrichie[]) ?? []).forEach((e) => {
+      if (e.commande_id) map.set(e.commande_id, e);
+    });
+    return map;
+  }, [enrData]);
+
+  // Fournisseur référencé (nom enrichi du référentiel — sources jamais modifiées).
+  const fetchFournisseurs = useServerFn(getFournisseursPourCommandes);
+  const { data: fournisseursData } = useQuery({
+    queryKey: ["travaux-fournisseurs", commandeIds],
+    queryFn: () => fetchFournisseurs({ data: { commandeIds } }),
+    enabled: commandeIds.length > 0,
+  });
+  const fournisseurByCommande = useMemo(() => {
+    const m = new Map<string, { id: string; nom: string; identifiants: string[] }>();
+    Object.entries(
+      (fournisseursData as Record<string, { id: string; nom: string; identifiants: string[] }>) ??
+        {},
+    ).forEach(([id, f]) => {
+      if (f) m.set(id, f);
+    });
+    return m;
+  }, [fournisseursData]);
 
   const groupedTravaux = useMemo(() => {
     if (!data) return null;
@@ -932,48 +981,146 @@ function TravauxList({ scope }: { scope: TravauxScope }) {
               )}
             </h4>
             <ul className="divide-y rounded-lg border bg-card">
-            {travaux.map((travail) => (
-              <li key={travail.id} className="space-y-2 p-3 text-sm">
-                <div className="flex flex-wrap items-start justify-between gap-2">
-                  <p className="font-medium">{travail.libelle}</p>
-                  <TravauxStatus statut={travail.statut} />
-                </div>
-                <div className="grid gap-1 text-xs text-muted-foreground sm:grid-cols-2">
-                  <span>
-                    {travail.adresse || "Adresse non précisée"}
-                    {travail.etage || travail.porte
-                      ? ` · ${travail.etage || "—"} / ${travail.porte || "—"}`
-                      : ""}
-                  </span>
-                  <span>
-                    {travail.tranche_code
-                      ? `Tranche ${travail.tranche_code}`
-                      : "Tranche non précisée"}
-                    {travail.batiment ? ` · Bât. ${travail.batiment}` : ""}
-                  </span>
-                  <span>
+              {travaux.map((travail) => (
+                <li key={travail.id} className="space-y-2 p-3 text-sm">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <p className="font-medium">
+                      {travail.libelle.replace(/^\[(GE|GT|CP|HO|AC)\]\s*/i, "")}
+                    </p>
+                    <TravauxStatus statut={travail.statut} />
+                  </div>
+                  <div className="grid gap-1 text-xs text-muted-foreground sm:grid-cols-2">
+                    <span>
+                      {travail.adresse || "Adresse non précisée"}
+                      {travail.etage || travail.porte
+                        ? ` · ${travail.etage || "—"} / ${travail.porte || "—"}`
+                        : ""}
+                    </span>
+                    <span>
+                      {travail.tranche_code
+                        ? `Tranche ${travail.tranche_code}`
+                        : "Tranche non précisée"}
+                      {travail.batiment ? ` · Bât. ${travail.batiment}` : ""}
+                    </span>
                     {travail.is_commande
-                      ? libelleDateTravail(
-                          travail.date_demarrage,
-                          travail.date_fin_travaux,
-                          travail.date_communication,
-                        )
+                      ? travail.date_demarrage ||
+                        travail.date_fin_travaux ||
+                        travail.date_communication
+                        ? libelleDateTravail(
+                            travail.date_demarrage,
+                            travail.date_fin_travaux,
+                            travail.date_communication,
+                          )
+                        : null
                       : travail.date_travaux
                         ? formatDate(travail.date_travaux)
-                        : "Date non précisée"}
-                  </span>
-                  <span className="font-semibold text-foreground">
-                    {formatMontantTravaux(travail.cout)}
-                  </span>
-                </div>
-                {travail.note && (
-                  <p className="text-xs text-muted-foreground bg-muted/50 p-2 rounded italic border-l-2 border-primary/30">
-                    {travail.note}
-                  </p>
-                )}
-              </li>
-            ))}
-          </ul>
+                        : null}
+                    <span className="font-semibold text-foreground">
+                      {formatMontantTravaux(travail.cout)}
+                    </span>
+                  </div>
+                  {travail.note &&
+                    (() => {
+                      const note = travail.note.replace(/^(GE|GT|CP|HO|AC)\s*-\s*/i, "");
+                      return note ? (
+                        <p className="text-xs text-muted-foreground bg-muted/50 p-2 rounded italic border-l-2 border-primary/30">
+                          {note}
+                        </p>
+                      ) : null;
+                    })()}
+                  {travail.is_commande &&
+                    (() => {
+                      const e = enrichByCommande.get(travail.id) as
+                        CommandeTravauxEnrichie | undefined;
+                      if (!e) return null;
+                      const wnature = e.psp_corps_etat_libelle;
+                      const wnotes = extraireWNotes(e.psp_donnees_brutes);
+                      const corpsSuivi = e.corps_etat_suivi_annuel ?? e.corps_etat ?? null;
+                      const numero = e.psp_numero_commande_interne ?? e.numero_commande ?? null;
+                      const fiche = fournisseurByCommande.get(travail.id);
+                      return (
+                        <div className="space-y-1 rounded-lg border border-indigo-100 bg-indigo-50/40 p-2 text-xs">
+                          {numero ? (
+                            <p>
+                              <Link
+                                to="/dashboard-travaux"
+                                search={{ commande: numero }}
+                                className="font-bold text-primary hover:underline"
+                              >
+                                Commande #{numero}
+                              </Link>
+                            </p>
+                          ) : null}
+                          {fiche ? (
+                            <p className="flex justify-between gap-2">
+                              <span className="font-semibold text-indigo-500">Fournisseur</span>
+                              <span className="font-semibold text-slate-700">
+                                <Link
+                                  to="/fournisseurs/$fournisseurId"
+                                  params={{ fournisseurId: fiche.id }}
+                                  className="text-primary hover:underline"
+                                >
+                                  {libelleEntreprise(fiche.nom)}
+                                </Link>
+                                {fiche.identifiants?.length ? (
+                                  <span className="text-slate-400">
+                                    {" "}
+                                    · {fiche.identifiants.join(", ")}
+                                  </span>
+                                ) : null}
+                              </span>
+                            </p>
+                          ) : null}
+                          {e.psp_date_commande ? (
+                            <p className="flex justify-between gap-2">
+                              <span className="font-semibold text-indigo-500">Date commande</span>
+                              <span className="font-semibold text-slate-700">
+                                {formatDateCommandeFr(e.psp_date_commande)}
+                              </span>
+                            </p>
+                          ) : null}
+                          {e.nature_historique ? (
+                            <p className="flex justify-between gap-2">
+                              <span className="font-semibold text-indigo-500">Catégorie</span>
+                              <span className="font-semibold text-slate-700">
+                                {e.nature_historique}
+                              </span>
+                            </p>
+                          ) : null}
+                          {corpsSuivi ? (
+                            <p className="flex justify-between gap-2">
+                              <span className="font-semibold text-indigo-500">Corps d'état</span>
+                              <span className="font-semibold text-slate-700">{corpsSuivi}</span>
+                            </p>
+                          ) : null}
+                          {wnature ? (
+                            <p className="flex justify-between gap-2">
+                              <span className="font-semibold text-indigo-500">Nature Travaux</span>
+                              <span className="font-semibold text-slate-700">{wnature}</span>
+                            </p>
+                          ) : null}
+                          {wnotes ? (
+                            <p className="whitespace-pre-wrap">
+                              <span className="font-semibold text-indigo-500">
+                                Descriptif Travaux —{" "}
+                              </span>
+                              <span className="text-slate-600">{wnotes}</span>
+                            </p>
+                          ) : null}
+                          {e.psp_numero_commande_interne ? (
+                            <p className="flex justify-between gap-2">
+                              <span className="font-semibold text-indigo-500">COMN_NUM</span>
+                              <span className="font-semibold text-slate-700">
+                                {e.psp_numero_commande_interne}
+                              </span>
+                            </p>
+                          ) : null}
+                        </div>
+                      );
+                    })()}
+                </li>
+              ))}
+            </ul>
           </div>
         );
       })}
