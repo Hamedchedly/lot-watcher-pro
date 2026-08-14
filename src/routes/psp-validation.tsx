@@ -60,6 +60,7 @@ import {
   OPTIONS_NATURE_EXCEPTIONNELLE,
   OPTIONS_TYPE_INTERVENTION,
   champsInterditsModification,
+  construireCleMetierCommande,
   construireFeedbackPsp,
   filtrerCommandesValidation,
   rechercherCommandes,
@@ -69,6 +70,7 @@ import {
   type PspNiveauPriorite,
 } from "@/lib/psp.validation";
 import {
+  getPspDecision,
   getPspValidationApercu,
   getPspValidationDetail,
 } from "@/lib/psp.validation.functions";
@@ -869,6 +871,55 @@ function DetailCommandeDialog({
   onRejeter: (c: PspCommandeValidation) => void;
   onIndetermine: (c: PspCommandeValidation) => void;
 }) {
+  // Décisions humaines déjà enregistrées (réutilisation automatique) pour cette commande —
+  // simple information, aucune écriture ici.
+  const fetchGetDecision = useServerFn(getPspDecision);
+  const [decisionInfo, setDecisionInfo] = useState<string | null>(null);
+  useEffect(() => {
+    const comn = state
+      ? String(
+          (state.detail as { row?: { numero_commande_interne?: unknown } } | null)?.row
+            ?.numero_commande_interne ?? "",
+        )
+      : "";
+    if (!comn) {
+      setDecisionInfo(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const [resNature, resCorps] = await Promise.all([
+          fetchGetDecision({
+            data: {
+              cleMetier: construireCleMetierCommande(comn, "nature"),
+              typeDecision: "nature",
+            },
+          }),
+          fetchGetDecision({
+            data: {
+              cleMetier: construireCleMetierCommande(comn, "corps_etat"),
+              typeDecision: "corps_etat",
+            },
+          }),
+        ]);
+        if (cancelled) return;
+        const valeurs: string[] = [];
+        const nV = (resNature as { decision_utilisateur?: string } | null)?.decision_utilisateur;
+        const cV = (resCorps as { decision_utilisateur?: string } | null)?.decision_utilisateur;
+        if (nV) valeurs.push(`nature : ${nV}`);
+        if (cV) valeurs.push(`corps d'état : ${cV}`);
+        setDecisionInfo(valeurs.length > 0 ? valeurs.join(" · ") : null);
+      } catch {
+        if (!cancelled) setDecisionInfo(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state]);
+
   // La commande affichée vient du détail chargé (row + classification).
   if (!state) return null;
   const d = state.detail as
@@ -983,6 +1034,12 @@ function DetailCommandeDialog({
               label="Chargé d'opération"
               value={String((row.donnees_brutes as Record<string, unknown> | null)?.charge_operation ?? "Inconnu / non importé")}
             />
+            {decisionInfo ? (
+              <div className="mt-2 rounded-md border border-emerald-500/30 bg-emerald-500/10 p-2 text-xs text-emerald-700">
+                <span className="font-bold">Décision enregistrée — </span>
+                {decisionInfo}
+              </div>
+            ) : null}
           </div>
 
           <Separator className="my-3" />

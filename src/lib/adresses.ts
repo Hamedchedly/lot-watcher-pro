@@ -219,3 +219,94 @@ export function pushRecent(entry: Omit<RecentAdresse, "at">) {
   const next = [{ ...entry, at: Date.now() }, ...others].slice(0, 5);
   window.localStorage.setItem(RECENTS_KEY, JSON.stringify(next));
 }
+
+/* ---------- Locataire actuel (source de vérité : table `occupants`) ---------- */
+
+/**
+ * Occupant tel que renvoyé par `getOccupants` (table `occupants`).
+ * `date_sortie` est RÉSERVÉE à une future colonne — elle n'existe pas dans le
+ * modèle actuel (vérifié en base). Le helper la traite dès qu'elle apparaîtra,
+ * sans migration ni changement aujourd'hui.
+ */
+export type OccupantActuel = {
+  id: string;
+  lot_code: string;
+  nom: string | null;
+  prenom: string | null;
+  date_naissance: string | null;
+  date_entree: string | null;
+  created_at: string | null;
+  date_sortie?: string | null;
+};
+
+/** Nom d'affichage « PRENOM NOM » (même format partout). null → « — ». */
+export function nomCompletOccupant(
+  o: Pick<OccupantActuel, "nom" | "prenom"> | null | undefined,
+): string {
+  return [o?.prenom, o?.nom].filter(Boolean).join(" ") || "—";
+}
+
+/**
+ * Règle « locataire actuel » — UNIQUE fonction de référence (fiche logement,
+ * fiche locataire, liste des occupants).
+ *
+ *  1. occupants avec une `date_entree` renseignée ;
+ *  2. si `date_sortie` est présente : elle doit être >= aujourd'hui
+ *     (une sortie passée exclut l'occupant) ;
+ *  3. parmi les candidats : `date_entree` la plus récente ;
+ *  4. tie-break : `nom` ASC ;
+ *  5. `[]` → null.
+ *
+ * Aucune dépendance à l'ordre SQL : le tri est explicite en mémoire.
+ * `options.aujourdHui` permet un test déterministe (défaut : date du jour).
+ */
+export function determinerLocataireActuel(
+  occupants: OccupantActuel[],
+  options?: { aujourdHui?: string },
+): OccupantActuel | null {
+  const aujourdHui = options?.aujourdHui ?? new Date().toISOString().slice(0, 10);
+  const candidats = occupants
+    .filter((o) => typeof o.date_entree === "string" && o.date_entree.trim() !== "")
+    .filter((o) => {
+      const sortie = typeof o.date_sortie === "string" ? o.date_sortie.trim() : "";
+      if (!sortie) return true;
+      return sortie >= aujourdHui;
+    });
+  if (candidats.length === 0) return null;
+  return (
+    [...candidats].sort((a, b) => {
+      const da = String(a.date_entree);
+      const db = String(b.date_entree);
+      if (da !== db) return da < db ? 1 : -1; // date_entree DESC
+      return collator.compare(String(a.nom ?? ""), String(b.nom ?? ""));
+    })[0] ?? null
+  );
+}
+
+/** Search d'/adresses (route à validateSearch) — helper partagé (Phase 6B).
+ *  Normalise la construction des liens vers /adresses (q / ville / tranche / rue / adresse
+ *  / retour). `retour` porte la provenance (ex. fournisseurId) pour un retour contextuel. */
+export function construireSearchAdresses(p: {
+  q?: string | null | undefined;
+  ville?: string | null | undefined;
+  tranche?: string | null | undefined;
+  rue?: string | null | undefined;
+  adresse?: string | null | undefined;
+  retour?: string | null | undefined;
+}): {
+  q: string | undefined;
+  ville: string | undefined;
+  tranche: string | undefined;
+  rue: string | undefined;
+  adresse: string | undefined;
+  retour: string | undefined;
+} {
+  return {
+    q: p.q ?? undefined,
+    ville: p.ville ?? undefined,
+    tranche: p.tranche ?? undefined,
+    rue: p.rue ?? undefined,
+    adresse: p.adresse ?? undefined,
+    retour: p.retour ?? undefined,
+  };
+}

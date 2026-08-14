@@ -83,7 +83,6 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -93,13 +92,41 @@ import {
   resolveHistoriqueTravaux,
   checkTravauxLatestImport,
   type CommandeTravaux,
+  type CommandeTravauxEnrichie,
   type HistoriqueTravaux,
   type TravauxDashboardData,
   type ImportTravaux,
 } from "@/lib/travaux.dashboard.functions";
 import { getVillesGeo, type VilleGeo } from "@/lib/geo.functions";
+import {
+  construireCleMetierCommande,
+  extraireChargePsp,
+  type TypeDecisionPsp,
+} from "@/lib/psp.validation";
+import { getPspDecision, savePspDecision } from "@/lib/psp.validation.functions";
+import { getFournisseursPourCommandes } from "@/lib/fournisseurs.functions";
+import { money0 } from "@/lib/formats";
+import { construireSearchAdresses } from "@/lib/adresses";
+import CommandeFicheDialog, {
+  type DecideState,
+  type FicheFournisseurInfo,
+} from "@/components/CommandeFicheDialog";
 
 export const Route = createFileRoute("/dashboard-travaux")({
+  // `?commande=` porte un NUMÉRO de commande (TanStack JSON-parse → number) ;
+  // `?de=`/`?a=` persistent la plage d'années (exercice) du slider (Phase 6B).
+  validateSearch: (s: Record<string, unknown>) => {
+    const nombre = (v: unknown): number | undefined =>
+      typeof v === "number" || typeof v === "string" ? Number(v) : undefined;
+    return {
+      commande:
+        typeof s["commande"] === "string" || typeof s["commande"] === "number"
+          ? String(s["commande"])
+          : undefined,
+      de: nombre(s["de"]),
+      a: nombre(s["a"]),
+    };
+  },
   head: () => ({
     meta: [
       { title: "Dashboard suivi travaux" },
@@ -112,7 +139,8 @@ export const Route = createFileRoute("/dashboard-travaux")({
   component: DashboardTravauxPage,
 });
 
-type Commande = CommandeTravaux;
+type Commande = CommandeTravauxEnrichie;
+
 type ClassementRow = {
   label: string;
   value: number;
@@ -123,14 +151,6 @@ const SECTEURS = ["GT", "GE", "CP"] as const;
 const SECTOR_COLORS = { GT: "#2563eb", GE: "#0f766e", CP: "#c2410c" };
 const PAGE_SIZE = 20;
 
-const money = (value: unknown) =>
-  typeof value === "number"
-    ? new Intl.NumberFormat("fr-FR", {
-        style: "currency",
-        currency: "EUR",
-        maximumFractionDigits: 0,
-      }).format(value)
-    : "—";
 const text = (value: unknown) => (value == null ? "" : String(value));
 
 /** Slider d'années (double curseur Radix) : remplace les <input type="range"> natifs. */
@@ -280,11 +300,16 @@ const DashboardMap = lazy(() => import("@/components/DashboardMap"));
 
 function ClientOnlyMap({
   dataVilles,
-  money,
   missing,
 }: {
-  dataVilles: { ville: string; lat: number; lng: number; value: number; count: number; paye: number }[];
-  money: (v: number) => string;
+  dataVilles: {
+    ville: string;
+    lat: number;
+    lng: number;
+    value: number;
+    count: number;
+    paye: number;
+  }[];
   missing: number;
 }) {
   const [isClient, setIsClient] = useState(false);
@@ -306,7 +331,7 @@ function ClientOnlyMap({
         </div>
       }
     >
-      <DashboardMap dataVilles={dataVilles} money={money} missing={missing} />
+      <DashboardMap dataVilles={dataVilles} missing={missing} />
     </Suspense>
   );
 }
@@ -317,6 +342,8 @@ function DashboardTravauxPage() {
   const updateCommande = useServerFn(updateCommandeTravaux);
   const resolveHistory = useServerFn(resolveHistoriqueTravaux);
   const fetchCheckImport = useServerFn(checkTravauxLatestImport);
+  const fetchGetDecision = useServerFn(getPspDecision);
+  const saveDecision = useServerFn(savePspDecision);
 
   const { data, isLoading, isError, error } = useQuery<TravauxDashboardData>({
     queryKey: ["travaux-dashboard"],
@@ -331,6 +358,9 @@ function DashboardTravauxPage() {
   });
 
   const allCommandes = data?.commandes ?? [];
+  const routeSearch = Route.useSearch();
+  const navigate = Route.useNavigate();
+  const commandeParam = routeSearch.commande;
   const historique = data?.historique ?? [];
   const recentImports = data?.imports ?? [];
   const tranchesDetails = data?.tranchesDetails ?? [];
@@ -360,9 +390,23 @@ function DashboardTravauxPage() {
   // aussi l'alerte « Analyse des Erreurs d'Import » à partir des données réellement rechargées).
 
   // États Filtres
-  // Sélection initiale : exercice courant uniquement ([exercice, exercice]). Le domaine
-  // accessible (sliderYearDomain) reste toutes les années — les deux sont distincts.
-  const [yearRange, setYearRange] = useState<[number, number]>(yearRangeInitial(exercice));
+  // Sélection initiale : exercice courant uniquement ([exercice, exercice]), SAUF si
+  // l'URL porte une plage persistée (`?de=&a=`, Phase 6B). Le domaine accessible
+  // (sliderYearDomain) reste toutes les années — les deux sont distincts.
+  const [yearRange, setYearRange] = useState<[number, number]>([
+    routeSearch.de ?? exercice,
+    routeSearch.a ?? exercice,
+  ]);
+
+  // Phase 6B : persiste la plage d'années (exercice) dans l'URL → partageable et
+  // conservée lors du retour navigateur (ex. depuis /adresses) et de l'ouverture de fiche.
+  useEffect(() => {
+    navigate({
+      replace: true,
+      search: (prev) => ({ ...prev, de: yearRange[0], a: yearRange[1] }),
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [yearRange[0], yearRange[1]]);
   const [includeArchived, setIncludeArchived] = useState(false);
   const [progFilter, setProgFilter] = useState({ prog: true, hors: true });
   const [selectedSectors, setSelectedSectors] = useState<string[]>([...SECTEURS]);
@@ -370,6 +414,7 @@ function DashboardTravauxPage() {
   const [selectedVilles, setSelectedVilles] = useState<string[]>([]);
   const [selectedTypes, setSelectedTypes] = useState<string[]>([]);
   const [selectedEtats, setSelectedEtats] = useState<string[]>([]);
+  const [selectedCharges, setSelectedCharges] = useState<string[]>([]);
   const [actFilter, setActFilter] = useState(false);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
@@ -392,7 +437,14 @@ function DashboardTravauxPage() {
   const [selectedDetail, setSelectedDetail] = useState<Commande | null>(null);
   const [historyFor, setHistoryFor] = useState<Commande | null>(null);
   const [selectedImportErrors, setSelectedImportErrors] = useState<ImportTravaux | null>(null);
+  // Fournisseur référencé pour la fiche affichée (nom enrichi — source jamais modifiée).
+  const [fournisseurFiche, setFournisseurFiche] = useState<FicheFournisseurInfo | null>(null);
   const [versionChoice, setVersionChoice] = useState<"A" | "B">("B");
+
+  // Décision humaine Historique CMD (nature / corps d'état) — couche psp_decisions.
+  const [decide, setDecide] = useState<DecideState | null>(null);
+  const [appliedNature, setAppliedNature] = useState<string | null>(null);
+  const [appliedCorps, setAppliedCorps] = useState<string | null>(null);
 
   // Bouton « ACTUALISER » : rechargement réel depuis Supabase PUIS réévaluation de l'alerte.
   // L'identité d'un import repose sur son `id` ; la détection d'un nouvel import se fait par
@@ -465,6 +517,121 @@ function DashboardTravauxPage() {
     },
   });
 
+  const saveDecisionMutation = useMutation({
+    mutationFn: (variables: {
+      cleMetier: string;
+      typeDecision: TypeDecisionPsp;
+      decisionUtilisateur: string;
+      statut: "valide" | "proposition" | "rejete";
+    }) => saveDecision({ data: variables }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["travaux-dashboard"] });
+    },
+  });
+
+  // Décisions existantes (réutilisées automatiquement aux prochains imports) pour la
+  // commande affichée : nature + corps d'état. Une décision « valide » évite une nouvelle
+  // demande ; « proposition » et « rejete » ne sont jamais appliquées comme valeur retenue.
+  useEffect(() => {
+    const num = selectedDetail?.numero_commande;
+    if (!num) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const [rn, rc] = await Promise.all([
+          fetchGetDecision({
+            data: { cleMetier: construireCleMetierCommande(num, "nature"), typeDecision: "nature" },
+          }),
+          fetchGetDecision({
+            data: {
+              cleMetier: construireCleMetierCommande(num, "corps_etat"),
+              typeDecision: "corps_etat",
+            },
+          }),
+        ]);
+        if (cancelled) return;
+        setAppliedNature(
+          (rn as { decision_utilisateur?: string } | null)?.decision_utilisateur ?? null,
+        );
+        setAppliedCorps(
+          (rc as { decision_utilisateur?: string } | null)?.decision_utilisateur ?? null,
+        );
+      } catch {
+        if (!cancelled) {
+          setAppliedNature(null);
+          setAppliedCorps(null);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedDetail?.numero_commande]);
+
+  const handleSaveDecision = async (value: string) => {
+    if (!decide) return;
+    try {
+      await saveDecisionMutation.mutateAsync({
+        cleMetier: decide.cleMetier,
+        typeDecision: decide.type,
+        decisionUtilisateur: value,
+        statut: "valide",
+      });
+      if (decide.type === "nature") setAppliedNature(value);
+      else setAppliedCorps(value);
+      setDecide(null);
+      toast.success("Décision enregistrée — réutilisée aux prochains imports.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Enregistrement de la décision impossible.");
+    }
+  };
+  // Navigation depuis un numéro de commande (param ?commande=) — ouvre la fiche.
+  // La fiche est pilotée par l'URL : retirer le param (bouton retour navigateur)
+  // ferme l'overlay → le retour navigateur est « back-aware ».
+  useEffect(() => {
+    if (!commandeParam) {
+      setSelectedDetail(null);
+      return;
+    }
+    if (allCommandes.length === 0) return;
+    const found = allCommandes.find((c) => c.numero_commande === commandeParam);
+    if (found) setSelectedDetail(found);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [commandeParam, allCommandes]);
+
+  // Fournisseur référencé pour la commande affichée (référentiel, lecture seule).
+  useEffect(() => {
+    if (!selectedDetail?.id) {
+      setFournisseurFiche(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await getFournisseursPourCommandes({
+          data: { commandeIds: [selectedDetail.id] },
+        });
+        if (cancelled) return;
+        const map = res as Record<string, { id: string; nom: string; identifiants: string[] }>;
+        setFournisseurFiche(map[selectedDetail.id] ?? null);
+      } catch {
+        if (!cancelled) setFournisseurFiche(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedDetail?.id]);
+
+  const closeFiche = () => {
+    setSelectedDetail(null);
+    setIsEditing(false);
+    // Retire ?commande= en conservant les autres paramètres (de/a).
+    if (commandeParam) navigate({ search: (prev) => ({ ...prev, commande: undefined }) });
+  };
+
   const resolveMutation = useMutation({
     mutationFn: (variables: {
       id: string;
@@ -529,6 +696,18 @@ function DashboardTravauxPage() {
     return ETATS_METIER.filter((s) => found.has(s)).map((s) => ({ label: s, value: s }));
   }, [allCommandes, exercice]);
 
+  // Chargés d'opération Historique CMD (UTIC_CODE normalisé) — Règle N°10 : filtrables,
+  // les commandes restent dans l'historique source, jamais supprimées.
+  const chargeOptions = useMemo(() => {
+    const map = new Map<string, { label: string; value: string }>();
+    allCommandes.forEach((c) => {
+      const charge = extraireChargePsp(c.psp_donnees_brutes) ?? c.psp_charge_operation ?? "";
+      if (!charge) return;
+      if (!map.has(charge)) map.set(charge, { label: charge, value: charge });
+    });
+    return [...map.values()].sort((a, b) => a.label.localeCompare(b.label));
+  }, [allCommandes]);
+
   // Périmètre visible : règles d'archivage existantes (visibleArchivage) + année du slider.
   // Le filtre d'année prime sur l'exclusion d'archivage : les commandes archivées d'une année
   // sélectionnée entrent dans le dataset (ex. [2025,2026] → 28 archivées 2025 + 49 actives 2026),
@@ -543,7 +722,10 @@ function DashboardTravauxPage() {
 
   // Domaine du slider : années d'exercice disponibles (y compris archivées), élargies,
   // jamais réduites à une seule année — le slider reste utilisable avec une seule année.
-  const yearDomain = useMemo<[number, number]>(() => sliderYearDomain(options.years), [options.years]);
+  const yearDomain = useMemo<[number, number]>(
+    () => sliderYearDomain(options.years),
+    [options.years],
+  );
 
   useEffect(() => {
     if (options.years.length > 0) {
@@ -567,8 +749,7 @@ function DashboardTravauxPage() {
         (row.tranche_code && selectedTranches.includes(row.tranche_code));
       const matchesVille = selectedVilles.length === 0 || selectedVilles.includes(ville);
       const matchesType =
-        selectedTypes.length === 0 ||
-        (row.corps_etat && selectedTypes.includes(row.corps_etat));
+        selectedTypes.length === 0 || (row.corps_etat && selectedTypes.includes(row.corps_etat));
       const matchesEtat =
         selectedEtats.length === 0 || selectedEtats.includes(etatMetier(row, exercice));
       const matchesSearch =
@@ -580,6 +761,9 @@ function DashboardTravauxPage() {
           row.fournisseur,
           row.numero_fournisseur,
         ].some((v) => text(v).toLowerCase().includes(search.toLowerCase()));
+      const chargeRow = extraireChargePsp(row.psp_donnees_brutes) ?? row.psp_charge_operation ?? "";
+      const matchesCharge =
+        selectedCharges.length === 0 || (chargeRow !== "" && selectedCharges.includes(chargeRow));
       return (
         matchesYear &&
         matchesProg &&
@@ -588,6 +772,7 @@ function DashboardTravauxPage() {
         matchesVille &&
         matchesType &&
         matchesEtat &&
+        matchesCharge &&
         matchesSearch
       );
     });
@@ -640,6 +825,7 @@ function DashboardTravauxPage() {
     selectedVilles,
     selectedTypes,
     selectedEtats,
+    selectedCharges,
     search,
     tableFilters,
     sortConfig,
@@ -653,9 +839,7 @@ function DashboardTravauxPage() {
   const filteredJournal = useMemo(
     () =>
       actFilter
-        ? filtered.filter(
-            (row) => getAlertesCommande(row).length > 0 || historyMap.has(row.id),
-          )
+        ? filtered.filter((row) => getAlertesCommande(row).length > 0 || historyMap.has(row.id))
         : filtered,
     [filtered, actFilter, historyMap],
   );
@@ -687,7 +871,8 @@ function DashboardTravauxPage() {
   const dataSecteur = useMemo(() => repartitionCommandesParSecteur(filtered), [filtered]);
 
   /** Ville canonique d'une commande (source de vérité : villeDeCommande). */
-  const villeDe = (r: Commande) => villeDeCommande(r, tranchesDetails, villesGeo ?? []) ?? "Inconnue";
+  const villeDe = (r: Commande) =>
+    villeDeCommande(r, tranchesDetails, villesGeo ?? []) ?? "Inconnue";
 
   const dataClassement = useMemo<ClassementRow[]>(() => {
     if (rankingMode === "ville") {
@@ -707,22 +892,19 @@ function DashboardTravauxPage() {
 
     if (rankingMode === "tranche") {
       // Classement par tranche : la ville affichée est celle avec le plus gros montant engagé.
-      const map = filtered.reduce(
-        (acc, r) => {
-          const tranche = r.tranche_code || "Sans tranche";
-          const ville = villeDe(r);
-          const engage = r.engage || 0;
-          const g = acc.get(tranche) ?? { tranche, ville, value: 0, villeValue: -1 };
-          g.value += engage;
-          if (engage > g.villeValue) {
-            g.villeValue = engage;
-            g.ville = ville;
-          }
-          acc.set(tranche, g);
-          return acc;
-        },
-        new Map<string, { tranche: string; ville: string; value: number; villeValue: number }>(),
-      );
+      const map = filtered.reduce((acc, r) => {
+        const tranche = r.tranche_code || "Sans tranche";
+        const ville = villeDe(r);
+        const engage = r.engage || 0;
+        const g = acc.get(tranche) ?? { tranche, ville, value: 0, villeValue: -1 };
+        g.value += engage;
+        if (engage > g.villeValue) {
+          g.villeValue = engage;
+          g.ville = ville;
+        }
+        acc.set(tranche, g);
+        return acc;
+      }, new Map<string, { tranche: string; ville: string; value: number; villeValue: number }>());
       return [...map.values()]
         .filter((g) => g.value > 0)
         .sort((a, b) => b.value - a.value)
@@ -730,22 +912,19 @@ function DashboardTravauxPage() {
     }
 
     // Classement par adresse : la ville et la/les tranche(s) sont affichées à côté.
-    const map = filtered.reduce(
-      (acc, r) => {
-        const adresse = r.adresse || "Adresse inconnue";
-        const g = acc.get(adresse) ?? {
-          adresse,
-          ville: villeDe(r),
-          tranches: new Set<string>(),
-          value: 0,
-        };
-        g.value += r.engage || 0;
-        if (r.tranche_code) g.tranches.add(r.tranche_code);
-        acc.set(adresse, g);
-        return acc;
-      },
-      new Map<string, { adresse: string; ville: string; tranches: Set<string>; value: number }>(),
-    );
+    const map = filtered.reduce((acc, r) => {
+      const adresse = r.adresse || "Adresse inconnue";
+      const g = acc.get(adresse) ?? {
+        adresse,
+        ville: villeDe(r),
+        tranches: new Set<string>(),
+        value: 0,
+      };
+      g.value += r.engage || 0;
+      if (r.tranche_code) g.tranches.add(r.tranche_code);
+      acc.set(adresse, g);
+      return acc;
+    }, new Map<string, { adresse: string; ville: string; tranches: Set<string>; value: number }>());
     return [...map.values()]
       .filter((g) => g.value > 0)
       .sort((a, b) => b.value - a.value)
@@ -869,8 +1048,8 @@ function DashboardTravauxPage() {
           </h2>
           <p className="mt-2 text-sm font-medium text-slate-500">
             La connexion à la base de données a échoué. Vérifiez que les variables{" "}
-            <code>EXT_SUPABASE_URL</code> et <code>EXT_SUPABASE_SERVICE_ROLE_KEY</code>{" "}
-            sont configurées, puis rechargez la page.
+            <code>EXT_SUPABASE_URL</code> et <code>EXT_SUPABASE_SERVICE_ROLE_KEY</code> sont
+            configurées, puis rechargez la page.
           </p>
           <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 font-mono text-xs text-red-600">
             {message}
@@ -1078,8 +1257,8 @@ function DashboardTravauxPage() {
 
         {/* KPIs */}
         <section className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <Kpi label="Engagé Total" value={money(stats.engage)} trend="ACTUEL" />
-          <Kpi label="Budget Prévu" value={money(stats.budget)} trend="CIBLE" />
+          <Kpi label="Engagé Total" value={money0(stats.engage)} trend="ACTUEL" />
+          <Kpi label="Budget Prévu" value={money0(stats.budget)} trend="CIBLE" />
           <Kpi label="% Programmation" value={`${stats.pctProg}%`} trend="QUALITÉ" />
           <Kpi
             label="Commandes"
@@ -1113,11 +1292,7 @@ function DashboardTravauxPage() {
             </div>
             {mapMode === "map" ? (
               <div className="absolute inset-0 z-0">
-                <ClientOnlyMap
-                  dataVilles={dataVilles}
-                  money={money}
-                  missing={villesNonLocalisees}
-                />
+                <ClientOnlyMap dataVilles={dataVilles} missing={villesNonLocalisees} />
               </div>
             ) : (
               <>
@@ -1136,7 +1311,8 @@ function DashboardTravauxPage() {
                   {dataClassement.map((row, idx) => {
                     const max = dataClassement[0]?.value || 1;
                     const pct = (row.value / max) * 100;
-                    const color = pct > 70 ? "bg-red-500" : pct > 40 ? "bg-orange-400" : "bg-yellow-400";
+                    const color =
+                      pct > 70 ? "bg-red-500" : pct > 40 ? "bg-orange-400" : "bg-yellow-400";
                     return (
                       <div key={`${rankingMode}-${idx}-${row.label}`} className="group relative">
                         <div className="flex items-center justify-between mb-1 gap-2">
@@ -1146,12 +1322,14 @@ function DashboardTravauxPage() {
                             </span>
                             {row.ville && (
                               <span className="text-[9px] font-bold text-slate-400 truncate">
-                                {row.tranche ? `· ${row.ville} · Tr. ${row.tranche}` : `· ${row.ville}`}
+                                {row.tranche
+                                  ? `· ${row.ville} · Tr. ${row.tranche}`
+                                  : `· ${row.ville}`}
                               </span>
                             )}
                           </div>
                           <span className="text-[10px] font-black text-slate-900 shrink-0">
-                            {money(row.value)}
+                            {money0(row.value)}
                           </span>
                         </div>
                         <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
@@ -1211,7 +1389,7 @@ function DashboardTravauxPage() {
                               {d.value} commandes
                             </p>
                             <p className="text-xs font-black text-blue-400">
-                              Engagé : {money(d.engage)}
+                              Engagé : {money0(d.engage)}
                             </p>
                           </div>
                         );
@@ -1278,7 +1456,7 @@ function DashboardTravauxPage() {
                           <p className="text-[9px] font-bold text-slate-400 uppercase mb-2">
                             {d.adresse}
                           </p>
-                          <p className="text-xs font-black text-blue-400">{money(d.value)}</p>
+                          <p className="text-xs font-black text-blue-400">{money0(d.value)}</p>
                         </div>
                       );
                     }
@@ -1289,7 +1467,7 @@ function DashboardTravauxPage() {
                   <LabelList
                     dataKey="value"
                     position="right"
-                    formatter={(v: number) => money(v)}
+                    formatter={(v: number) => money0(v)}
                     className="text-[9px] font-black fill-slate-900"
                   />
                   {dataTranche.map((entry, index) => (
@@ -1364,6 +1542,7 @@ function DashboardTravauxPage() {
                         setSelectedTranches([]);
                         setSelectedTypes([]);
                         setSelectedEtats([]);
+                        setSelectedCharges([]);
                         setProgFilter({ prog: true, hors: true });
                       }}
                       className="text-[9px] font-black text-red-500 h-6 px-2"
@@ -1405,6 +1584,18 @@ function DashboardTravauxPage() {
                       selected={selectedEtats}
                       onChange={setSelectedEtats}
                       icon={CheckCircle2}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-[9px] font-black uppercase text-slate-400 tracking-wider">
+                      Chargé d'opération (Hist. CMD)
+                    </Label>
+                    <MultiSelect
+                      label="Chargés d'opération"
+                      options={chargeOptions}
+                      selected={selectedCharges}
+                      onChange={setSelectedCharges}
+                      icon={User}
                     />
                   </div>
                   <div className="space-y-2">
@@ -1626,7 +1817,17 @@ function DashboardTravauxPage() {
                       <td className="p-4 font-bold text-slate-400">{yearOf(row)}</td>
                       <td className="p-4 font-black text-blue-600 truncate">
                         <button
-                          onClick={() => setSelectedDetail(row)}
+                          onClick={() => {
+                            setSelectedDetail(row);
+                            // Ouvre la fiche VIA l'URL (param ?commande=) en FUSIONNANT avec
+                            // les autres paramètres (de/a) : le bouton retour navigateur
+                            // retirera le param et fermera l'overlay.
+                            if (row.numero_commande) {
+                              navigate({
+                                search: (prev) => ({ ...prev, commande: row.numero_commande }),
+                              });
+                            }
+                          }}
                           className="hover:underline flex items-center gap-1"
                         >
                           {row.numero_commande}
@@ -1636,13 +1837,7 @@ function DashboardTravauxPage() {
                       <td className="p-4 font-black text-slate-700 truncate">
                         <Link
                           to="/adresses"
-                          search={{
-                            q: "",
-                            ville: undefined,
-                            tranche: row.tranche_code || undefined,
-                            rue: undefined,
-                            adresse: undefined,
-                          }}
+                          search={construireSearchAdresses({ tranche: row.tranche_code })}
                           className="hover:underline"
                         >
                           {row.tranche_code || "—"}
@@ -1666,9 +1861,9 @@ function DashboardTravauxPage() {
                         {row.numero_fournisseur || "—"}
                       </td>
                       <td className="p-4 text-right font-black text-slate-900">
-                        {money(row.engage)}
+                        {money0(row.engage)}
                       </td>
-                      <td className="p-4 text-right text-slate-600">{money(row.paye)}</td>
+                      <td className="p-4 text-right text-slate-600">{money0(row.paye)}</td>
                       <td className="p-4 text-center">
                         <div
                           className={`mx-auto size-2 rounded-full ${isProg ? "bg-green-500 shadow-green-200" : "bg-slate-300"} shadow-sm`}
@@ -1763,304 +1958,25 @@ function DashboardTravauxPage() {
         </section>
       </div>
 
-      {/* MODALE FICHE DÉTAILLÉE ÉDITABLE */}
-      <Dialog
+      {/* MODALE FICHE DÉTAILLÉE ÉDITABLE — composant PARTAGÉ (Dashboard + Fournisseur) */}
+      <CommandeFicheDialog
         open={!!selectedDetail}
-        onOpenChange={(o) => {
-          if (!o) {
-            setSelectedDetail(null);
-            setIsEditing(false);
-          }
-        }}
-      >
-        <DialogContent className="max-w-5xl rounded-3xl p-0 overflow-hidden border-none shadow-2xl">
-          <div className="bg-slate-900 p-8 text-white relative">
-            <div className="bg-slate-800/50 rounded-2xl p-4 mb-6 border border-white/5">
-              <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2">
-                Descriptif complet
-              </p>
-              {isEditing ? (
-                <Textarea
-                  value={editForm.descriptif || ""}
-                  onChange={(e) => setEditForm((p) => ({ ...p, descriptif: e.target.value }))}
-                  className="bg-slate-800 border-slate-700 text-xs font-medium text-white min-h-[60px] rounded-xl"
-                />
-              ) : (
-                <p className="text-xs text-slate-300 leading-relaxed font-medium">
-                  {selectedDetail?.descriptif || "Aucun descriptif renseigné."}
-                </p>
-              )}
-            </div>
-            <div className="mb-6">
-              <h2 className="text-2xl font-black uppercase tracking-tighter mb-1">
-                Fiche Commande #{selectedDetail?.numero_commande}
-              </h2>
-              <p className="text-[9px] font-black text-slate-500 uppercase tracking-[0.3em]">
-                Détail exhaustif & Édition Directe
-              </p>
-            </div>
-            <div className="flex items-center justify-between mb-8">
-              <div className="grid grid-cols-2 md:grid-cols-6 gap-8 flex-1">
-                <div className="space-y-1">
-                  <p className="text-[9px] font-black text-slate-500 uppercase">Type</p>
-                  {isEditing ? (
-                    <select
-                      value={editForm.secteur || ""}
-                      onChange={(e) => setEditForm((p) => ({ ...p, secteur: e.target.value }))}
-                      className="bg-slate-800 border-slate-700 text-xs font-black w-full rounded p-1 outline-none"
-                    >
-                      <option value="GT">GT</option>
-                      <option value="GE">GE</option>
-                      <option value="CP">CP</option>
-                    </select>
-                  ) : (
-                    <p className="text-sm font-black">
-                      {selectedDetail ? secteurDe(selectedDetail) : "—"}
-                    </p>
-                  )}
-                </div>
-                <div className="space-y-1">
-                  <p className="text-[9px] font-black text-slate-500 uppercase">Tranche</p>
-                  <p className="text-sm font-black text-blue-400">
-                    <Link
-                      to="/adresses"
-                      search={{
-                        q: "",
-                        ville: undefined,
-                        tranche: selectedDetail?.tranche_code || undefined,
-                        rue: undefined,
-                        adresse: undefined,
-                      }}
-                      className="hover:underline"
-                    >
-                      {selectedDetail?.tranche_code || "—"}
-                    </Link>
-                  </p>
-                </div>
-                <div className="space-y-1">
-                  <p className="text-[9px] font-black text-slate-500 uppercase">ID Lot</p>
-                  {isEditing ? (
-                    <Input
-                      value={editForm.lot_code || ""}
-                      onChange={(e) => setEditForm((p) => ({ ...p, lot_code: e.target.value }))}
-                      className="bg-slate-800 border-slate-700 text-xs font-black h-7 rounded-lg"
-                    />
-                  ) : (
-                    <p className="text-sm font-black text-teal-400">
-                      {selectedDetail?.lot_code ? (
-                        <Link
-                          to="/adresses"
-                          search={{
-                            q: selectedDetail.lot_code,
-                            ville: undefined,
-                            tranche: undefined,
-                            rue: undefined,
-                            adresse: undefined,
-                          }}
-                          className="hover:underline flex items-center gap-1"
-                        >
-                          {selectedDetail.lot_code} <ChevronRight className="size-3" />
-                        </Link>
-                      ) : (
-                        "Non rattaché"
-                      )}
-                    </p>
-                  )}
-                </div>
-                <div className="space-y-1">
-                  <p className="text-[9px] font-black text-slate-500 uppercase">État</p>
-                  {isEditing ? (
-                    <Input
-                      value={editForm.etat_travaux || ""}
-                      onChange={(e) => setEditForm((p) => ({ ...p, etat_travaux: e.target.value }))}
-                      className="bg-slate-800 border-slate-700 text-xs font-black h-7 rounded-lg"
-                    />
-                  ) : (
-                    <p className="text-sm font-black uppercase text-amber-400">
-                      {selectedDetail?.etat_travaux || selectedDetail?.etat_commande || "—"}
-                    </p>
-                  )}
-                </div>
-                <div className="space-y-1">
-                  <p className="text-[9px] font-black text-slate-500 uppercase">Prog.</p>
-                  <p className="text-sm font-black uppercase">
-                    {selectedDetail?.ligne_budget ? "Programmée" : "Hors Budget"}
-                  </p>
-                </div>
-                <div className="space-y-1">
-                  <p className="text-[9px] font-black text-slate-500 uppercase">Année</p>
-                  <p className="text-sm font-black uppercase">
-                    {selectedDetail?.annee_exercice ?? "—"}
-                  </p>
-                </div>
-              </div>
-              <div className="ml-8">
-                {!isEditing ? (
-                  <div className="flex gap-2">
-                    <Button
-                      onClick={handleEditStart}
-                      variant="outline"
-                      className="bg-white/10 border-white/20 hover:bg-white/20 text-white font-black text-[10px] uppercase tracking-widest rounded-xl"
-                    >
-                      <Edit3 className="size-3.5 mr-2" /> MODIFIER
-                    </Button>
-                    <Button
-                      onClick={() => setHistoryFor(selectedDetail)}
-                      variant="ghost"
-                      className="text-white/80 hover:text-white font-black text-[10px] uppercase tracking-widest rounded-xl"
-                    >
-                      <History className="size-3.5 mr-2" /> HISTORIQUE
-                    </Button>
-                  </div>
-                ) : (
-                  <div className="flex gap-2">
-                    <Button
-                      onClick={handleSave}
-                      className="bg-blue-600 hover:bg-blue-500 text-white font-black text-[10px] uppercase tracking-widest rounded-xl"
-                    >
-                      <Save className="size-3.5 mr-2" /> SAUVER
-                    </Button>
-                    <Button
-                      onClick={() => setIsEditing(false)}
-                      variant="ghost"
-                      className="text-white font-black text-[10px] uppercase tracking-widest rounded-xl"
-                    >
-                      ANNULER
-                    </Button>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-          <div className="p-8 grid grid-cols-1 md:grid-cols-2 gap-12 bg-white">
-            <div className="space-y-8">
-              <section>
-                <h3 className="flex items-center gap-2 text-xs font-black uppercase tracking-widest text-slate-400 mb-4">
-                  <Building2 className="size-4 text-blue-600" /> Localisation & Nature
-                </h3>
-                <div className="space-y-4">
-                  <div className="flex justify-between border-b border-slate-50 pb-2">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase">Adresse</span>
-                    {isEditing ? (
-                      <Input
-                        value={editForm.adresse || ""}
-                        onChange={(e) => setEditForm((p) => ({ ...p, adresse: e.target.value }))}
-                        className="text-xs font-black h-7 w-48 rounded-lg"
-                      />
-                    ) : (
-                      <span className="text-xs font-black text-slate-700">
-                        {selectedDetail?.adresse || "—"}
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex justify-between border-b border-slate-50 pb-2">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase">
-                      Corps d'état
-                    </span>
-                    {isEditing ? (
-                      <Input
-                        value={editForm.corps_etat || ""}
-                        onChange={(e) => setEditForm((p) => ({ ...p, corps_etat: e.target.value }))}
-                        className="text-xs font-black h-7 w-48 rounded-lg"
-                      />
-                    ) : (
-                      <span className="text-xs font-black text-slate-700">
-                        {selectedDetail?.corps_etat || "—"}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </section>
-              <section>
-                <h3 className="flex items-center gap-2 text-xs font-black uppercase tracking-widest text-slate-400 mb-4">
-                  <User className="size-4 text-blue-600" /> Intervenants
-                </h3>
-                <div className="space-y-4">
-                  <div className="flex justify-between border-b border-slate-50 pb-2">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase">
-                      Entreprise
-                    </span>
-                    {isEditing ? (
-                      <div className="flex gap-2">
-                        <Input
-                          value={editForm.fournisseur || ""}
-                          onChange={(e) =>
-                            setEditForm((p) => ({ ...p, fournisseur: e.target.value }))
-                          }
-                          className="text-xs font-black h-7 w-32 rounded-lg"
-                        />
-                        <Input
-                          value={editForm.numero_fournisseur || ""}
-                          onChange={(e) =>
-                            setEditForm((p) => ({ ...p, numero_fournisseur: e.target.value }))
-                          }
-                          className="text-xs font-black h-7 w-16 rounded-lg"
-                        />
-                      </div>
-                    ) : (
-                      <span className="text-xs font-black text-slate-700">
-                        {selectedDetail?.fournisseur || "—"} ({selectedDetail?.numero_fournisseur})
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </section>
-            </div>
-            <div className="space-y-8">
-              <section>
-                <h3 className="flex items-center gap-2 text-xs font-black uppercase tracking-widest text-slate-400 mb-4">
-                  <Euro className="size-4 text-blue-600" /> Finance
-                </h3>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="bg-slate-50 p-4 rounded-2xl">
-                    <p className="text-[9px] font-black text-slate-400 uppercase">Engagé</p>
-                    {isEditing ? (
-                      <Input
-                        type="number"
-                        value={editForm.engage || 0}
-                        onChange={(e) =>
-                          setEditForm((p) => ({ ...p, engage: Number(e.target.value) }))
-                        }
-                        className="text-xs font-black h-7 rounded-lg"
-                      />
-                    ) : (
-                      <p className="text-lg font-black text-blue-700">
-                        {money(selectedDetail?.engage)}
-                      </p>
-                    )}
-                  </div>
-                  <div className="bg-slate-50 p-4 rounded-2xl">
-                    <p className="text-[9px] font-black text-slate-400 uppercase">Payé</p>
-                    {isEditing ? (
-                      <Input
-                        type="number"
-                        value={editForm.paye || 0}
-                        onChange={(e) =>
-                          setEditForm((p) => ({ ...p, paye: Number(e.target.value) }))
-                        }
-                        className="text-xs font-black h-7 rounded-lg"
-                      />
-                    ) : (
-                      <p className="text-lg font-black">{money(selectedDetail?.paye)}</p>
-                    )}
-                  </div>
-                </div>
-              </section>
-            </div>
-          </div>
-          <DialogFooter className="p-6 bg-white border-t">
-            <Button
-              onClick={() => {
-                setSelectedDetail(null);
-                setIsEditing(false);
-              }}
-              className="w-full bg-slate-900 font-black text-[10px] uppercase tracking-[0.2em] rounded-2xl h-12"
-            >
-              FERMER LA FICHE
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        commande={selectedDetail}
+        onClose={closeFiche}
+        isEditing={isEditing}
+        editForm={editForm}
+        onEditField={(patch) => setEditForm((p) => ({ ...p, ...patch }) as CommandeTravauxEnrichie)}
+        onStartEdit={handleEditStart}
+        onSave={handleSave}
+        onCancelEdit={() => setIsEditing(false)}
+        onOpenHistorique={() => setHistoryFor(selectedDetail)}
+        appliedNature={appliedNature}
+        appliedCorps={appliedCorps}
+        onDecider={setDecide}
+        fournisseur={fournisseurFiche}
+      />
+
+      <DecideDialog state={decide} onClose={() => setDecide(null)} onSave={handleSaveDecision} />
 
       {/* DRILL-DOWN SECTEUR */}
       <Dialog open={!!drilldownSector} onOpenChange={(o) => !o && setDrilldownSector(null)}>
@@ -2083,7 +1999,7 @@ function DashboardTravauxPage() {
                   <span className="text-[9px] font-black text-slate-300">#0{i + 1}</span>
                   <span className="text-[10px] font-black text-slate-700 uppercase">{d.name}</span>
                 </div>
-                <span className="text-[10px] font-black text-blue-600">{money(d.value)}</span>
+                <span className="text-[10px] font-black text-blue-600">{money0(d.value)}</span>
               </div>
             ))}
           </div>
@@ -2327,7 +2243,7 @@ function CommandeHistoriqueDialog({
     v === null || v === undefined
       ? "—"
       : typeof v === "number" && moneyKeys.has(k)
-        ? money(v)
+        ? money0(v)
         : String(v);
 
   return (
@@ -2448,3 +2364,61 @@ function CommandeHistoriqueDialog({
   );
 }
 
+// ── Enrichissement Historique CMD — sections de la Fiche Commande ──────────────
+// Sources immuables : nature/corps d'état affichés en 2 variantes sans écrasement,
+// corps d'état avec code en préfixe, PMR hors PSP, WPATRIMOINE à valider si ambigu,
+// WNOTES lue telle quelle, rapprochement via la vue.
+
+function DecideDialog({
+  state,
+  onClose,
+  onSave,
+}: {
+  state: DecideState | null;
+  onClose: () => void;
+  onSave: (value: string) => void;
+}) {
+  const [choice, setChoice] = useState<string | null>(null);
+  useEffect(() => {
+    setChoice(null);
+  }, [state]);
+
+  return (
+    <Dialog open={!!state} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-w-md rounded-3xl border-none shadow-2xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-base font-black uppercase tracking-tight">
+            <AlertTriangle className="size-4 text-amber-600" /> {state?.titre ?? "Décision"}
+          </DialogTitle>
+          <DialogDescription>
+            Choisissez la valeur à retenir pour cette commande. Les données sources (Excel, suivi
+            annuel, Historique CMD) ne sont jamais modifiées.
+          </DialogDescription>
+        </DialogHeader>
+        <RadioGroup value={choice ?? ""} onValueChange={(v) => setChoice(v)} className="space-y-2">
+          {state?.options.map((o, i) => (
+            <label
+              key={i}
+              className="flex cursor-pointer items-start gap-2 rounded-xl border border-slate-200 p-3"
+            >
+              <RadioGroupItem value={o.value} id={`dec-${i}`} />
+              <span className="text-xs font-semibold text-slate-700">{o.label}</span>
+            </label>
+          ))}
+        </RadioGroup>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
+            Annuler
+          </Button>
+          <Button
+            className="bg-amber-600 text-white hover:bg-amber-700"
+            disabled={!choice}
+            onClick={() => choice && onSave(choice)}
+          >
+            Valider la décision
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}

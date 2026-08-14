@@ -3,6 +3,7 @@ import { useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { ChevronRight, FileSpreadsheet, Upload, Calendar } from "lucide-react";
+import PageHeader from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import {
@@ -166,18 +167,14 @@ function ImportTravauxPage() {
 
   return (
     <main className="mx-auto max-w-3xl space-y-6 p-4 sm:p-8">
-      <header className="flex items-start justify-between gap-4">
-        <div className="space-y-1">
-          <h1 className="text-2xl font-semibold tracking-tight">Import Suivi budgétaire annuel</h1>
-          <p className="text-sm text-muted-foreground">
-            Importation du suivi budgétaire et financier de l'exercice. Les commandes sont
-            rapprochées par numéro, les changements sont historisés et les absentes archivées.
-          </p>
-        </div>
+      <PageHeader
+        title="Import Suivi budgétaire annuel"
+        subtitle="Importation du suivi budgétaire et financier de l'exercice. Les commandes sont rapprochées par numéro, les changements sont historisés et les absentes archivées."
+      >
         <Button asChild variant="outline">
           <Link to="/">Accueil</Link>
         </Button>
-      </header>
+      </PageHeader>
       <div className="rounded-xl border border-dashed bg-surface p-8 text-center space-y-6">
         <div className="mx-auto max-w-xs text-left space-y-2">
           <Label htmlFor="annee-exercice" className="flex items-center gap-2">

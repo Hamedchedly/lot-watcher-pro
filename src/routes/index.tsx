@@ -2,9 +2,19 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { BarChart3, Building2, ChevronRight, Clock, ListChecks, ListTree, MapPin, Upload } from "lucide-react";
+import {
+  BarChart3,
+  Building2,
+  ChevronRight,
+  Clock,
+  ListChecks,
+  ListTree,
+  MapPin,
+  Upload,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { LISTE_FOURNISSEURS_SEARCH_VIDE } from "@/routes/fournisseurs.index";
 import { PatrimoineHomeMap } from "@/components/PatrimoineHomeMap";
 import { getPatrimoine } from "@/lib/isis.functions";
 import { isLogement } from "@/lib/isis";
@@ -84,8 +94,13 @@ function Index() {
                 <ListChecks className="size-4" /> Analyse historique CMD
               </Link>
             </Button>
+            <Button asChild variant="outline">
+              <Link to="/fournisseurs" search={LISTE_FOURNISSEURS_SEARCH_VIDE}>
+                <Building2 className="size-4" /> Fournisseurs
+              </Link>
+            </Button>
             <Button asChild>
-              <Link to="/dashboard-travaux">
+              <Link to="/dashboard-travaux" search={{ commande: undefined, de: undefined, a: undefined }}>
                 <BarChart3 className="size-4" /> Dashboard travaux
               </Link>
             </Button>
