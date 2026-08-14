@@ -1,20 +1,25 @@
 import type { ReactNode } from "react";
-import { BarChart3, Coins, PiggyBank, Scale } from "lucide-react";
+import { BarChart3, Coins, Layers, PiggyBank, Scale } from "lucide-react";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import PspSecteurBadge from "@/components/preparation-psp/PspSecteurBadge";
 import { money0 } from "@/lib/formats";
 import {
+  BUDGET_SOURCE,
   PSP_ANNEES,
   PSP_BUDGET_DISPONIBLE_PAR_ANNEE,
   kpiGlobal,
+  totauxParCategorie,
+  type PspCategorie,
   type PspOperation,
 } from "@/lib/psp.prep";
 import { cn } from "@/lib/utils";
 
 /**
  * KPI du module : Budget disponible, Budget programmé, Écart disponible,
- * Nombre d'opérations — puis la répartition par année (2027 → 2031).
- * Tous les montants sont calculés à partir des opérations (jamais saisis).
+ * Nombre d'opérations — puis la répartition par année (2027 → 2031) et par
+ * catégorie budgétaire C (GE / GT / CP). Tous les montants sont calculés à
+ * partir des opérations (jamais saisis).
  */
 export default function PspKpi({
   operations,
@@ -24,6 +29,7 @@ export default function PspKpi({
   exercice: number;
 }) {
   const kpi = kpiGlobal(operations);
+  const totauxC = totauxParCategorie(operations);
 
   return (
     <section className="space-y-4">
@@ -32,7 +38,7 @@ export default function PspKpi({
           icone={<Coins className="size-4" />}
           label="Budget disponible"
           valeur={money0(kpi.disponible)}
-          note={`${PSP_ANNEES.length} exercices`}
+          note={`${PSP_ANNEES.length} exercices · source ${BUDGET_SOURCE}`}
           accent="text-primary"
         />
         <CarteKpi
@@ -114,6 +120,43 @@ export default function PspKpi({
                   </p>
                   <p className="text-[10px] text-muted-foreground">
                     écart sur {money0(disponible)}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="shadow-panel">
+        <CardHeader className="pb-2">
+          <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+            <Layers className="size-4 text-muted-foreground" />
+            Répartition par catégorie budgétaire (C)
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            {(["GE", "GT", "CP"] as PspCategorie[]).map((c) => {
+              const t = totauxC[c];
+              const part = kpi.programme > 0 ? (t.total / kpi.programme) * 100 : 0;
+              return (
+                <div key={c} className="rounded-lg border bg-surface/60 p-3">
+                  <div className="flex items-center justify-between">
+                    <PspSecteurBadge categorie={c} />
+                    <span className="text-[10px] font-bold text-muted-foreground">
+                      {t.nbOperations} opération{t.nbOperations > 1 ? "s" : ""}
+                    </span>
+                  </div>
+                  <p className="tabnum mt-2 text-lg font-black">{money0(t.total)}</p>
+                  <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-border">
+                    <div
+                      className="h-full rounded-full bg-primary/70"
+                      style={{ width: `${part}%` }}
+                    />
+                  </div>
+                  <p className="tabnum mt-1 text-[10px] text-muted-foreground">
+                    {part.toFixed(0)} % du programme
                   </p>
                 </div>
               );

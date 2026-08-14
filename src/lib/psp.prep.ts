@@ -1,16 +1,20 @@
 /**
- * PSP — Module « Préparation PSP » (prototype V1).
+ * PSP — Module « Préparation PSP » (V2).
  *
- * PROTOTYPE UI : données MOCK, aucun accès Supabase, aucune écriture en base.
+ * PROTOTYPE : logique PUR + données de préparation. Aucune écriture en base.
  * Ce module est PUR (pas de React, pas d'alias `@/`) : testable en Node
- * (type stripping) et remplaçable à l'identique par les vraies données
- * Supabase plus tard (sources futures : fichiers de programmation Secteur 11,
- * tables psp_*, travaux_commandes).
+ * (type stripping). La lecture des vraies données PAT S11 est isolée dans
+ * l'adaptateur `psp.prep.data.ts` (+ `psp.prep.data.functions.ts` côté serveur).
  *
  * Contrat de conception :
  *  - les totaux sont TOUJOURS calculés, jamais saisis ;
- *  - aucune valeur affichée n'est modifiée : seul le formatage vit côté UI ;
- *  - les champs sont en snake_case pour un branchement Supabase direct.
+ *  - `C` = catégorie budgétaire (GE / GT / CP) — JAMAIS le code corps d'état ;
+ *  - le champ « Corps d'état » (code + libellé) reste indépendant de C ;
+ *  - le TR (tranche) est la clé patrimoniale prioritaire ; l'adresse Excel
+ *    n'est jamais une clé d'identification ;
+ *  - les mutations locales (ajout / modification / déplacement) ne touchent
+ *    jamais Supabase — elles restent en mémoire ;
+ *  - la source budgétaire est clairement identifiée (`BUDGET_SOURCE`).
  */
 
 // ── Constantes de programmation ─────────────────────────────────────────────
@@ -19,14 +23,23 @@
 export const PSP_ANNEES = [2027, 2028, 2029, 2030, 2031] as const;
 export type PspAnnee = (typeof PSP_ANNEES)[number];
 
-/** Secteur patrimonial (GE / GT / CP). */
-export const PSP_SECTEURS = ["GE", "GT", "CP"] as const;
-export type PspSecteur = (typeof PSP_SECTEURS)[number];
+/** Catégorie budgétaire (colonne « C » du fichier de programmation) : GE / GT / CP. */
+export const PSP_CATEGORIES = ["GE", "GT", "CP"] as const;
+export type PspCategorie = (typeof PSP_CATEGORIES)[number];
+
+/** Alias historique : la catégorie budgétaire C = GE/GT/CP (anciennement « secteur »). */
+export type PspSecteur = PspCategorie;
 
 /**
- * Enveloppe budgétaire annuelle disponible (mock V1).
+ * Source de l'enveloppe budgétaire. Tant que la dotation budgétaire officielle
+ * n'est pas définie, les enveloppes annuelles restent MOCK (aucune invention).
+ */
+export const BUDGET_SOURCE = "MOCK" as const;
+
+/**
+ * Enveloppe budgétaire annuelle disponible (mock V2 — BUDGET_SOURCE = MOCK).
  * « Budget disponible » = somme des enveloppes ; « Écart disponible » =
- * disponible − programmé. À remplacer par la vraie dotation budgétaire.
+ * disponible − programmé.
  */
 export const PSP_BUDGET_DISPONIBLE_PAR_ANNEE: Record<string, number> = {
   "2027": 3_200_000,
@@ -38,7 +51,7 @@ export const PSP_BUDGET_DISPONIBLE_PAR_ANNEE: Record<string, number> = {
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
-/** Devis d'une opération (mock V1 : entreprise + montant). */
+/** Devis d'une opération (mock V1/V2 : entreprise + montant). */
 export type PspDevis = {
   entreprise: string;
   montant: number;
@@ -48,8 +61,11 @@ export type PspDevis = {
 /**
  * Opération programmée.
  * `programme` : montants par année — clé = "2027"…"2031" (0 si non programmé).
- * `reportee` : opération issue de l'ancienne programmation (ex. 2026).
- * `budget`   : enveloppe totale de l'opération (recalculée si non fournie).
+ * `categorie` : colonne « C » du fichier de programmation = GE / GT / CP.
+ * `reportee`  : opération issue de l'ancienne programmation (ex. 2026).
+ * `budget`    : enveloppe totale de l'opération (recalculée si non fournie).
+ * `sous_secteur` : référence patrimoniale réelle (table tranches) — enrichie
+ *                  par l'adaptateur `psp.prep.data.ts` quand disponible.
  */
 export type PspOperation = {
   id: string;
@@ -57,11 +73,12 @@ export type PspOperation = {
   tranche: string;
   charge_clientele: string;
   charge_operation: string;
-  secteur: PspSecteur;
+  categorie: PspCategorie;
   corps_etat_code: string;
   corps_etat: string;
   adresse: string;
   ville: string;
+  sous_secteur: string | null;
   nature_travaux: string;
   budget: number;
   programme: Record<string, number>;
@@ -248,7 +265,7 @@ export const grouperParChargéClientele = (ops: PspOperation[]): GroupeChargé[]
 /** Filtres du tableau Détail (chaîne vide = filtre inactif). */
 export type FiltresDetail = {
   q: string;
-  secteur: string;
+  categorie: string;
   tranche: string;
   charge_clientele: string;
   corps_etat: string;
@@ -257,7 +274,7 @@ export type FiltresDetail = {
 
 export const FILTRES_VIDES: FiltresDetail = {
   q: "",
-  secteur: "",
+  categorie: "",
   tranche: "",
   charge_clientele: "",
   corps_etat: "",
@@ -277,7 +294,7 @@ const normaliser = (v: string): string =>
 export const filtrerOperations = (ops: PspOperation[], filtres: FiltresDetail): PspOperation[] => {
   const q = normaliser(filtres.q);
   return ops.filter((op) => {
-    if (filtres.secteur && op.secteur !== filtres.secteur) return false;
+    if (filtres.categorie && op.categorie !== filtres.categorie) return false;
     if (filtres.tranche && op.tranche !== filtres.tranche) return false;
     if (filtres.charge_clientele && op.charge_clientele !== filtres.charge_clientele) return false;
     if (filtres.corps_etat && op.corps_etat !== filtres.corps_etat) return false;
@@ -317,7 +334,7 @@ export type CleTri =
 export const valeurTriOperation = (op: PspOperation, cle: CleTri): string | number => {
   if (cle === "total") return totalOperation(op);
   if (cle === "annee") return op.annee;
-  if (cle === "secteur") return op.secteur;
+  if (cle === "secteur") return op.categorie;
   if (cle === "tranche") return op.tranche;
   if (cle === "charge_clientele") return op.charge_clientele;
   if (cle === "corps_etat") return op.corps_etat;
@@ -382,8 +399,8 @@ export const construireCsvProgrammation = (ops: PspOperation[]): string => {
       op.annee,
       op.tranche,
       op.charge_clientele,
-      op.secteur,
-      op.corps_etat_code,
+      op.categorie,
+      op.categorie,
       op.corps_etat,
       `${op.adresse}, ${op.ville}`,
       op.nature_travaux,
@@ -409,7 +426,7 @@ const O = (
   tranche: string,
   charge_clientele: string,
   charge_operation: string,
-  secteur: PspSecteur,
+  categorie: PspCategorie,
   corps_etat_code: string,
   corps_etat: string,
   adresse: string,
@@ -436,11 +453,12 @@ const O = (
     tranche,
     charge_clientele,
     charge_operation,
-    secteur,
+    categorie,
     corps_etat_code,
     corps_etat,
     adresse,
     ville,
+    sous_secteur: null,
     nature_travaux,
     budget: budget ?? total,
     programme: parAnnee,
@@ -1294,3 +1312,242 @@ export const ANCIENNE_PROGRAMMATION: AncienneProgrammationItem[] = [
     montant: 78000,
   },
 ];
+
+// ── Mutations LOCALES (aucune écriture Supabase) ────────────────────────────
+
+/** Saisie d'une opération (formulaire ajout / modification). */
+export type SaisieOperation = {
+  tranche: string;
+  categorie: PspCategorie;
+  charge_clientele: string;
+  charge_operation: string;
+  corps_etat: string;
+  adresse: string;
+  ville: string;
+  nature_travaux: string;
+  annee: PspAnnee;
+  /** 5 montants pour 2027→2031. */
+  programme: number[];
+  remarques: string | null;
+};
+
+/**
+ * Construit une opération à partir d'une saisie (pur, déterministe).
+ * `budget` = total programmé (recalculé, jamais saisi).
+ */
+export const creerOperation = (saisie: SaisieOperation, id: string): PspOperation => {
+  const programme: Record<string, number> = {};
+  PSP_ANNEES.forEach((a, i) => {
+    programme[String(a)] = Math.max(0, Number(saisie.programme[i]) || 0);
+  });
+  const { corps_etat_code, corps_etat } = extraireCorpsEtat(saisie.corps_etat);
+  const total = PSP_ANNEES.reduce((s, a) => s + (programme[String(a)] ?? 0), 0);
+  return {
+    id,
+    annee: saisie.annee,
+    tranche: saisie.tranche,
+    charge_clientele: saisie.charge_clientele,
+    charge_operation: saisie.charge_operation,
+    categorie: saisie.categorie,
+    corps_etat_code,
+    corps_etat,
+    adresse: saisie.adresse,
+    ville: saisie.ville,
+    sous_secteur: null,
+    nature_travaux: saisie.nature_travaux,
+    budget: total,
+    programme,
+    remarques: saisie.remarques,
+    devis: [],
+    reportee: false,
+    ancienne_annee: null,
+    ancien_montant: null,
+  };
+};
+
+/** Ajout local (retourne une nouvelle liste — les opérations sont immuables). */
+export const ajouterOperationListe = (
+  ops: PspOperation[],
+  saisie: SaisieOperation,
+  id: string,
+): PspOperation[] => [...ops, creerOperation(saisie, id)];
+
+/** Patch de modification d'une opération (champs partiels). */
+export type PatchOperation = Partial<
+  Omit<PspOperation, "id" | "programme" | "budget" | "devis" | "reportee">
+> & {
+  programme?: Record<string, number>;
+};
+
+/**
+ * Modification locale : le budget est TOUJOURS recalculé après le patch, ce qui
+ * recale immédiatement totaux annuels, totaux GE/GT/CP et écarts (calculs purs).
+ */
+export const modifierOperationListe = (
+  ops: PspOperation[],
+  id: string,
+  patch: PatchOperation,
+): PspOperation[] =>
+  ops.map((op) => {
+    if (op.id !== id) return op;
+    const next: PspOperation = { ...op, ...patch };
+    next.budget = totalOperation(next);
+    return next;
+  });
+
+/** Suppression locale. */
+export const supprimerOperationListe = (ops: PspOperation[], id: string): PspOperation[] =>
+  ops.filter((op) => op.id !== id);
+
+/**
+ * Mémoire locale d'un déplacement d'opération entre deux années.
+ * Conserve : opération, années précédente/nouvelle, montant, motif, date.
+ * Aucune écriture Supabase.
+ */
+export type DeplacementMemo = {
+  id: string;
+  operationId: string;
+  tranche: string;
+  nature_travaux: string;
+  anneePrecedente: PspAnnee;
+  anneeNouvelle: PspAnnee;
+  montant: number;
+  motif: string | null;
+  date: string;
+};
+
+/**
+ * Déplace l'opération vers l'année cible : le montant programmé dans son année
+ * principale (`op.annee`) est remis à 0 et reporté sur l'année cible.
+ * Ex. 2027 = 35 000 → cible 2028 ⇒ 2027 = 0, 2028 = 35 000.
+ * Retourne la nouvelle liste + la trace mémoire (ou null si aucun déplacement).
+ */
+export const deplacerOperation = (
+  ops: PspOperation[],
+  id: string,
+  cible: PspAnnee,
+  motif: string | null,
+): { ops: PspOperation[]; deplacement: DeplacementMemo | null } => {
+  const op = ops.find((o) => o.id === id);
+  if (!op) return { ops, deplacement: null };
+  const source = op.annee;
+  if (cible === source) return { ops, deplacement: null };
+  const montant = montantAnnee(op, source);
+  if (montant <= 0) return { ops, deplacement: null };
+
+  const programme: Record<string, number> = { ...op.programme };
+  programme[String(source)] = 0;
+  programme[String(cible)] = (programme[String(cible)] ?? 0) + montant;
+
+  const apres = modifierOperationListe(ops, id, { annee: cible, programme });
+  const next = apres.find((o) => o.id === id);
+  if (!next) return { ops, deplacement: null };
+  const deplacement: DeplacementMemo = {
+    id: `depl-${Date.now()}-${id}`,
+    operationId: id,
+    tranche: op.tranche,
+    nature_travaux: op.nature_travaux,
+    anneePrecedente: source,
+    anneeNouvelle: cible,
+    montant,
+    motif,
+    date: new Date().toISOString(),
+  };
+  return { ops: apres, deplacement };
+};
+
+/** Totaux programmés par catégorie budgétaire C (GE / GT / CP). */
+export const totauxParCategorie = (
+  ops: PspOperation[],
+): Record<PspCategorie, { total: number; nbOperations: number }> => {
+  const result: Record<PspCategorie, { total: number; nbOperations: number }> = {
+    GE: { total: 0, nbOperations: 0 },
+    GT: { total: 0, nbOperations: 0 },
+    CP: { total: 0, nbOperations: 0 },
+  };
+  for (const op of ops) {
+    const cle = result[op.categorie];
+    if (!cle) continue;
+    cle.total += totalOperation(op);
+    cle.nbOperations += 1;
+  }
+  return result;
+};
+
+/** Extrait le code « (d) » et le libellé d'un intitulé corps d'état. */
+export const extraireCorpsEtat = (
+  corps: string,
+): { corps_etat_code: string; corps_etat: string } => {
+  const texte = corps.trim();
+  const m = texte.match(/^\(([^)]*)\)\s*(.*)$/);
+  if (m && m[1] !== undefined) {
+    return {
+      corps_etat_code: `(${m[1]})`,
+      corps_etat: texte,
+    };
+  }
+  return { corps_etat_code: "", corps_etat: texte || "—" };
+};
+
+// ── Comparaison ancienne programmation vs préparation actuelle ──────────────
+
+export type StatutComparaison = "inchangee" | "modifiee" | "deplacee" | "supprimee" | "nouvelle";
+
+export type LigneComparaison = {
+  item: AncienneProgrammationItem;
+  statut: StatutComparaison;
+  montantActuel: number | null;
+  anneeActuelle: number | null;
+};
+
+/** Normalisation de rapprochement (majuscules, sans accents ni ponctuation). */
+const normaliserRapprochement = (v: string): string =>
+  v
+    .toUpperCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^A-Z0-9]+/g, " ")
+    .trim();
+
+/**
+ * Compare l'ancienne programmation à la préparation actuelle (mode lecture).
+ * Statuts : inchangée / modifiée / déplacée / supprimée / nouvelle.
+ * Rapprochement : même TR + nature normalisée (jamais l'adresse Excel).
+ */
+export const comparerProgrammation = (
+  ancienne: AncienneProgrammationItem[],
+  actuelle: PspOperation[],
+): { lignes: LigneComparaison[]; nouvelles: PspOperation[] } => {
+  const actuelleParCle = new Map<string, PspOperation[]>();
+  for (const op of actuelle) {
+    const cle = `${op.tranche}|${normaliserRapprochement(op.nature_travaux)}`;
+    const liste = actuelleParCle.get(cle) ?? [];
+    liste.push(op);
+    actuelleParCle.set(cle, liste);
+  }
+
+  const lignes: LigneComparaison[] = ancienne.map((item) => {
+    const cle = `${item.tranche}|${normaliserRapprochement(item.nature_travaux)}`;
+    const candidats = actuelleParCle.get(cle) ?? [];
+    const op = candidats[0] as PspOperation | undefined;
+    if (!op) {
+      return { item, statut: "supprimee", montantActuel: null, anneeActuelle: null };
+    }
+    const total = totalOperation(op);
+    const memeMontant = Math.round(total) === Math.round(item.montant);
+    const memeAnnee = op.annee === item.annee;
+    const statut: StatutComparaison =
+      memeMontant && memeAnnee ? "inchangee" : memeAnnee ? "modifiee" : "deplacee";
+    return { item, statut, montantActuel: total, anneeActuelle: op.annee };
+  });
+
+  const cleAncienne = new Set(
+    ancienne.map((i) => `${i.tranche}|${normaliserRapprochement(i.nature_travaux)}`),
+  );
+  const nouvelles = actuelle.filter((op) => {
+    const cle = `${op.tranche}|${normaliserRapprochement(op.nature_travaux)}`;
+    return !cleAncienne.has(cle);
+  });
+
+  return { lignes, nouvelles };
+};

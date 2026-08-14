@@ -28,10 +28,10 @@ export default function PspOperationRow({
       <TableCell className="py-2 font-mono text-xs font-semibold">{op.tranche}</TableCell>
       <TableCell className="py-2 text-xs font-medium">{op.charge_clientele}</TableCell>
       <TableCell className="py-2">
-        <PspSecteurBadge secteur={op.secteur} />
+        <PspSecteurBadge categorie={op.categorie} />
       </TableCell>
-      <TableCell className="py-2 font-mono text-[11px] text-muted-foreground">
-        {op.corps_etat_code}
+      <TableCell className="py-2 font-mono text-[11px] font-bold text-foreground">
+        {op.categorie}
       </TableCell>
       <TableCell className="max-w-[220px] py-2">
         <span className="block truncate text-xs" title={op.corps_etat}>

@@ -6,15 +6,21 @@ import {
   PSP_BUDGET_DISPONIBLE_PAR_ANNEE,
   PSP_OPERATIONS,
   ANCIENNE_PROGRAMMATION,
+  ajouterOperationListe,
   budgetDisponibleTotal,
+  comparerProgrammation,
   construireCsvProgrammation,
+  deplacerOperation,
   filtrerOperations,
   grouperParChargéClientele,
   grouperParTranche,
   kpiGlobal,
+  modifierOperationListe,
   montantAnnee,
   statsDevis,
+  supprimerOperationListe,
   totalOperation,
+  totauxParCategorie,
   trierOperationsDetail,
 } from "../src/lib/psp.prep.ts";
 
@@ -38,7 +44,10 @@ assert(
   "≥ 4 chargés clientèle distincts",
   new Set(PSP_OPERATIONS.map((o) => o.charge_clientele)).size >= 4,
 );
-assert("≥ 3 secteurs GE/GT/CP présents", new Set(PSP_OPERATIONS.map((o) => o.secteur)).size === 3);
+assert(
+  "≥ 3 catégories C GE/GT/CP présentes",
+  new Set(PSP_OPERATIONS.map((o) => o.categorie)).size === 3,
+);
 
 const incohérents = PSP_OPERATIONS.filter((o) => totalOperation(o) !== o.budget);
 assert(
@@ -120,16 +129,16 @@ assert(
 // ── 5. Filtres (mode Détail) ───────────────────────────────────────────────
 const filtreVide = {
   q: "",
-  secteur: "",
+  categorie: "",
   tranche: "",
   charge_clientele: "",
   corps_etat: "",
   annee: "",
 };
-const ge = filtrerOperations(PSP_OPERATIONS, { ...filtreVide, secteur: "GE" });
+const ge = filtrerOperations(PSP_OPERATIONS, { ...filtreVide, categorie: "GE" });
 assert(
-  "filtre secteur GE : uniquement des GE",
-  ge.length > 0 && ge.every((o) => o.secteur === "GE"),
+  "filtre catégorie C=GE : uniquement des GE",
+  ge.length > 0 && ge.every((o) => o.categorie === "GE"),
 );
 const tr1976 = filtrerOperations(PSP_OPERATIONS, { ...filtreVide, tranche: "1976" });
 assert(
@@ -199,4 +208,122 @@ const avecRemarque = PSP_OPERATIONS.find((o) => o.remarques !== null);
 assert("au moins une opération avec remarques", Boolean(avecRemarque));
 
 console.log(`\nRésultat : ${passed} PASS, ${failed} FAIL`);
+
+// ══════════════════════════════════════════════════════════════════════════
+// ── V2 — Mutations LOCALES + déplacement + comparaison ──────────────────────
+// ══════════════════════════════════════════════════════════════════════════
+
+// C = catégorie budgétaire GE/GT/CP (jamais un code corps d'état).
+const categoriesValides = PSP_OPERATIONS.every((o) => ["GE", "GT", "CP"].includes(o.categorie));
+assert("C = GE/GT/CP sur toutes les opérations (jamais un code corps d'état)", categoriesValides);
+
+// ── Ajout local ────────────────────────────────────────────────────────────
+const saisieAjout = {
+  tranche: "1976",
+  categorie: "CP",
+  charge_clientele: "ALOTHORE",
+  charge_operation: "HALLEL",
+  corps_etat: "(d) Couvertures",
+  adresse: "32 RUE CORNILLIOT",
+  ville: "THORIGNY-SUR-MARNE",
+  nature_travaux: "Reprise zinguerie",
+  annee: 2028,
+  programme: [0, 35000, 0, 0, 0],
+  remarques: null,
+};
+const avecAjout = ajouterOperationListe(PSP_OPERATIONS, saisieAjout, "test-ajout");
+assert("ajout local : liste + 1", avecAjout.length === PSP_OPERATIONS.length + 1);
+const opAjoutee = avecAjout.find((o) => o.id === "test-ajout");
+assert(
+  "ajout local : budget === total programmé",
+  Boolean(opAjoutee && opAjoutee.budget === 35000 && opAjoutee.annee === 2028),
+);
+assert("ajout local : corps d'état codé « (d) »", opAjoutee?.corps_etat_code === "(d)");
+
+// ── Modification locale ────────────────────────────────────────────────────
+const modifiees = modifierOperationListe(avecAjout, "test-ajout", {
+  programme: { 2027: 15000, 2028: 20000, 2029: 0, 2030: 0, 2031: 0 },
+  nature_travaux: "Reprise zinguerie + gouttières",
+});
+const opModifiee = modifiees.find((o) => o.id === "test-ajout");
+assert(
+  "modification locale : totaux recalculés (budget = 35 000)",
+  Boolean(opModifiee && opModifiee.budget === 35000),
+);
+assert(
+  "modification locale : année 2027 prise en compte",
+  Boolean(opModifiee && opModifiee.programme["2027"] === 15000),
+);
+assert(
+  "modification locale : immuabilité",
+  avecAjout.find((o) => o.id === "test-ajout")?.nature_travaux === "Reprise zinguerie",
+);
+
+// ── Suppression locale ─────────────────────────────────────────────────────
+const apresSuppression = supprimerOperationListe(avecAjout, "test-ajout");
+assert("suppression locale : liste - 1", apresSuppression.length === PSP_OPERATIONS.length);
+
+// ── Déplacement d'année (2027 = 35 000 → 2028) ────────────────────────────
+const avantDepl = modifierOperationListe(avecAjout, "test-ajout", {
+  annee: 2027,
+  programme: { 2027: 35000, 2028: 0, 2029: 0, 2030: 0, 2031: 0 },
+});
+const { ops: apresDepl, deplacement } = deplacerOperation(
+  avantDepl,
+  "test-ajout",
+  2028,
+  "Report glissant",
+);
+const opDeplacee = apresDepl.find((o) => o.id === "test-ajout");
+assert(
+  "déplacement : 2027 = 0, 2028 = 35 000",
+  Boolean(
+    opDeplacee &&
+    opDeplacee.programme["2027"] === 0 &&
+    opDeplacee.programme["2028"] === 35000 &&
+    opDeplacee.annee === 2028,
+  ),
+);
+assert(
+  "déplacement : trace mémoire conservée",
+  Boolean(
+    deplacement &&
+    deplacement.montant === 35000 &&
+    deplacement.anneePrecedente === 2027 &&
+    deplacement.anneeNouvelle === 2028,
+  ),
+);
+assert("déplacement : total inchangé", opDeplacee ? totalOperation(opDeplacee) === 35000 : false);
+const deplacementInchange = deplacerOperation(apresDepl, "test-ajout", 2028, null);
+assert("déplacement : même année → aucun mouvement", deplacementInchange.deplacement === null);
+
+// ── Totaux par catégorie C ─────────────────────────────────────────────────
+const totauxC = totauxParCategorie(PSP_OPERATIONS);
+const sommeC = totauxC.GE.total + totauxC.GT.total + totauxC.CP.total;
+assert("totaux GE/GT/CP : somme = programme total", sommeC === kpi.programme);
+assert(
+  "totaux GE/GT/CP : nb opérations conservé",
+  totauxC.GE.nbOperations + totauxC.GT.nbOperations + totauxC.CP.nbOperations ===
+    PSP_OPERATIONS.length,
+);
+
+// ── Comparaison ancienne vs actuelle ───────────────────────────────────────
+const { lignes: lignesComp, nouvelles } = comparerProgrammation(ANCIENNE_PROGRAMMATION, avecAjout);
+assert(
+  "comparaison : toutes les lignes anciennes ont un statut",
+  lignesComp.length === ANCIENNE_PROGRAMMATION.length,
+);
+assert(
+  "comparaison : 1 nouvelle (l'opération ajoutée)",
+  nouvelles.some((o) => o.id === "test-ajout"),
+);
+const statuts = new Set(lignesComp.map((l) => l.statut));
+assert(
+  "comparaison : statuts ∈ {inchangee, modifiee, deplacee, supprimee}",
+  [...statuts].every((s) => ["inchangee", "modifiee", "deplacee", "supprimee"].includes(s)),
+);
+const ancRef = ANCIENNE_PROGRAMMATION.find((i) => i.id === "anc-001");
+const ligneAnc1 = lignesComp.find((l) => l.item.id === "anc-001");
+assert("comparaison : anc-001 trouvée", Boolean(ancRef && ligneAnc1));
+
 process.exit(failed === 0 ? 0 : 1);

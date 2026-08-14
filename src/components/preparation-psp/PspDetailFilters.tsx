@@ -31,7 +31,7 @@ export default function PspDetailFilters({
   const corps = [...new Set(operations.map((o) => o.corps_etat))].sort();
   const actifs =
     filters.q ||
-    filters.secteur ||
+    filters.categorie ||
     filters.tranche ||
     filters.charge_clientele ||
     filters.corps_etat ||
@@ -49,10 +49,10 @@ export default function PspDetailFilters({
         />
       </div>
       <FiltreSelect
-        value={filters.secteur}
-        placeholder="Secteur"
+        value={filters.categorie}
+        placeholder="C — GE/GT/CP"
         options={["GE", "GT", "CP"]}
-        onValueChange={(v) => onChange({ ...filters, secteur: v === "tous" ? "" : v })}
+        onValueChange={(v) => onChange({ ...filters, categorie: v === "tous" ? "" : v })}
       />
       <FiltreSelect
         value={filters.tranche}

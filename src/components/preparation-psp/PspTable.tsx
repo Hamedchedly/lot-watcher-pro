@@ -37,7 +37,7 @@ type CleGroupe =
 
 const FILTRES_VIDES: FiltresDetail = {
   q: "",
-  secteur: "",
+  categorie: "",
   tranche: "",
   charge_clientele: "",
   corps_etat: "",
@@ -45,14 +45,14 @@ const FILTRES_VIDES: FiltresDetail = {
 };
 
 const filtersActive = (f: FiltresDetail): boolean =>
-  Boolean(f.q || f.secteur || f.tranche || f.charge_clientele || f.corps_etat || f.annee);
+  Boolean(f.q || f.categorie || f.tranche || f.charge_clientele || f.corps_etat || f.annee);
 
 const COLONNES: Array<{ cle: CleTri; label: string; align?: "right" }> = [
   { cle: "annee", label: "Année" },
   { cle: "tranche", label: "Tranche" },
   { cle: "charge_clientele", label: "Chargé clientèle" },
   { cle: "secteur", label: "Secteur" },
-  { cle: "corps_etat", label: "C" },
+  { cle: "secteur", label: "C" },
   { cle: "corps_etat", label: "Corps d'état" },
   { cle: "adresse", label: "Adresse" },
   { cle: "nature_travaux", label: "Nature des travaux" },

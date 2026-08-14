@@ -1,6 +1,8 @@
+import { useMemo } from "react";
 import { Archive, ArrowRightLeft, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -11,22 +13,62 @@ import {
 } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { money0 } from "@/lib/formats";
-import { ANCIENNE_PROGRAMMATION } from "@/lib/psp.prep";
+import {
+  ANCIENNE_PROGRAMMATION,
+  comparerProgrammation,
+  type PspOperation,
+  type StatutComparaison,
+} from "@/lib/psp.prep";
+import { cn } from "@/lib/utils";
 
 const simulé = (action: string) =>
-  toast.info(`${action} — simulation V1, aucune écriture en base.`);
+  toast.info(`${action} — simulation locale, aucune écriture en base.`);
+
+const STATUTS: Record<StatutComparaison, { label: string; className: string }> = {
+  inchangee: {
+    label: "Inchangée",
+    className: "border-emerald-200 bg-emerald-50 text-emerald-700",
+  },
+  modifiee: {
+    label: "Modifiée",
+    className: "border-amber-200 bg-amber-50 text-amber-700",
+  },
+  deplacee: {
+    label: "Déplacée",
+    className: "border-blue-200 bg-blue-50 text-blue-700",
+  },
+  supprimee: {
+    label: "Supprimée",
+    className: "border-red-200 bg-red-50 text-red-600",
+  },
+  nouvelle: {
+    label: "Nouvelle",
+    className: "border-violet-200 bg-violet-50 text-violet-700",
+  },
+};
 
 /**
- * Modal « Ancienne programmation » : affichage simulé des opérations issues de
- * la programmation 2026. Aucune action n'écrit en base (V1).
+ * Modal « Ancienne programmation » : lignes issues de la programmation 2026,
+ * comparées à la préparation actuelle (inchangée / modifiée / déplacée /
+ * supprimée / nouvelle). La source reste le jeu mock tant que le fichier
+ * d'origine n'est pas disponible dans le projet. Aucune action n'écrit en base.
  */
 export default function PspAncienneProgrammation({
   open,
+  operations,
   onClose,
 }: {
   open: boolean;
+  operations: PspOperation[];
   onClose: () => void;
 }) {
+  const { lignes, nouvelles } = useMemo(
+    () => comparerProgrammation(ANCIENNE_PROGRAMMATION, operations),
+    [operations],
+  );
+
+  const totalAncien = ANCIENNE_PROGRAMMATION.reduce((s, l) => s + l.montant, 0);
+
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="w-[min(92vw,680px)] sm:max-w-[680px]">
@@ -36,26 +78,50 @@ export default function PspAncienneProgrammation({
             Ancienne programmation
           </DialogTitle>
           <DialogDescription>
-            Programmation 2026 — lignes non encore reportées. Actions visuelles (V1), aucune
-            écriture en base.
+            Programmation 2026 comparée à la préparation actuelle (lecture seule). Actions locales
+            (V2), aucune écriture en base.
           </DialogDescription>
         </DialogHeader>
 
-        <ScrollArea className="max-h-[55vh] pr-2">
-          <ul className="space-y-2">
-            {ANCIENNE_PROGRAMMATION.map((ligne) => (
-              <li key={ligne.id} className="rounded-lg border bg-surface/60 p-3">
+        <div className="flex flex-wrap gap-1.5">
+          {(Object.keys(STATUTS) as StatutComparaison[]).map((s) => {
+            const compte =
+              s === "nouvelle" ? nouvelles.length : lignes.filter((l) => l.statut === s).length;
+            if (compte === 0) return null;
+            return (
+              <Badge key={s} className={cn("border text-[10px]", STATUTS[s].className)}>
+                {compte} {STATUTS[s].label}
+                {compte > 1 ? "s" : ""}
+              </Badge>
+            );
+          })}
+        </div>
+
+        <ScrollArea className="max-h-[52vh] pr-2">
+          <ul className="mt-2 space-y-2">
+            {lignes.map(({ item, statut, montantActuel, anneeActuelle }) => (
+              <li key={item.id} className="rounded-lg border bg-surface/60 p-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-bold">{ligne.nature_travaux}</p>
+                    <p className="truncate text-sm font-bold">{item.nature_travaux}</p>
                     <p className="truncate text-xs text-muted-foreground">
-                      {ligne.adresse}, {ligne.ville} — Tranche {ligne.tranche}
+                      {item.adresse}, {item.ville} — Tranche {item.tranche}
                     </p>
                   </div>
-                  <p className="shrink-0 text-sm font-black">
-                    <span className="text-muted-foreground">{ligne.annee} → </span>
-                    <span className="tabnum">{money0(ligne.montant)}</span>
-                  </p>
+                  <div className="flex shrink-0 flex-col items-end gap-1">
+                    <Badge className={cn("border text-[9px]", STATUTS[statut].className)}>
+                      {STATUTS[statut].label}
+                    </Badge>
+                    <p className="text-sm font-black">
+                      <span className="text-muted-foreground">{item.annee} → </span>
+                      <span className="tabnum">{money0(item.montant)}</span>
+                    </p>
+                    {statut !== "supprimee" && montantActuel !== null ? (
+                      <p className="tabnum text-[10px] text-muted-foreground">
+                        actuel : {anneeActuelle ?? "—"} · {money0(montantActuel)}
+                      </p>
+                    ) : null}
+                  </div>
                 </div>
                 <div className="mt-2 flex flex-wrap gap-1.5">
                   <Button
@@ -97,13 +163,27 @@ export default function PspAncienneProgrammation({
                 </div>
               </li>
             ))}
+            {nouvelles.length > 0 ? (
+              <li className="rounded-lg border border-violet-200 bg-violet-50/50 p-3">
+                <p className="text-xs font-bold text-violet-700">
+                  {nouvelles.length} nouvelle{nouvelles.length > 1 ? "s" : ""} opération
+                  {nouvelles.length > 1 ? "s" : ""} dans la préparation actuelle
+                </p>
+                <p className="mt-0.5 text-[11px] text-muted-foreground">
+                  {nouvelles
+                    .slice(0, 6)
+                    .map((o) => `${o.tranche} · ${o.nature_travaux}`)
+                    .join(" — ")}
+                  {nouvelles.length > 6 ? "…" : ""}
+                </p>
+              </li>
+            ) : null}
           </ul>
         </ScrollArea>
 
         <div className="flex items-center justify-between gap-2 border-t pt-3">
           <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
-            {ANCIENNE_PROGRAMMATION.length} opération{ANCIENNE_PROGRAMMATION.length > 1 ? "s" : ""}{" "}
-            —{money0(ANCIENNE_PROGRAMMATION.reduce((s, l) => s + l.montant, 0))}
+            {ANCIENNE_PROGRAMMATION.length} lignes — {money0(totalAncien)}
           </p>
           <Button variant="outline" size="sm" onClick={onClose}>
             Fermer
