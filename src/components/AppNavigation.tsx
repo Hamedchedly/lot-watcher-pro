@@ -2,6 +2,7 @@ import { Link } from "@tanstack/react-router";
 import {
   BarChart3,
   Building2,
+  CalendarRange,
   Database,
   Home,
   MapPin,
@@ -59,6 +60,7 @@ export default function AppNavigation() {
           icon={BarChart3}
           search={{ commande: undefined, de: undefined, a: undefined }}
         />
+        <LienNav to="/preparation-psp" label="Préparation PSP" icon={CalendarRange} />
         <LienNav
           to="/fournisseurs"
           label="Sourcing"

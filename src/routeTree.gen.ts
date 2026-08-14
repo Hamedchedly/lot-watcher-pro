@@ -16,6 +16,7 @@ import { Route as FournisseursRouteImport } from './routes/fournisseurs'
 import { Route as ImportRouteImport } from './routes/import'
 import { Route as ImportPspRouteImport } from './routes/import-psp'
 import { Route as ImportTravauxRouteImport } from './routes/import-travaux'
+import { Route as PreparationPspRouteImport } from './routes/preparation-psp'
 import { Route as PspValidationRouteImport } from './routes/psp-validation'
 import { Route as FournisseursIndexRouteImport } from './routes/fournisseurs.index'
 import { Route as FournisseursFournisseurIdRouteImport } from './routes/fournisseurs.$fournisseurId'
@@ -55,6 +56,11 @@ const ImportTravauxRoute = ImportTravauxRouteImport.update({
   path: '/import-travaux',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PreparationPspRoute = PreparationPspRouteImport.update({
+  id: '/preparation-psp',
+  path: '/preparation-psp',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const PspValidationRoute = PspValidationRouteImport.update({
   id: '/psp-validation',
   path: '/psp-validation',
@@ -80,6 +86,7 @@ export interface FileRoutesByFullPath {
   '/import': typeof ImportRoute
   '/import-psp': typeof ImportPspRoute
   '/import-travaux': typeof ImportTravauxRoute
+  '/preparation-psp': typeof PreparationPspRoute
   '/psp-validation': typeof PspValidationRoute
   '/fournisseurs/$fournisseurId': typeof FournisseursFournisseurIdRoute
   '/fournisseurs/': typeof FournisseursIndexRoute
@@ -91,6 +98,7 @@ export interface FileRoutesByTo {
   '/import': typeof ImportRoute
   '/import-psp': typeof ImportPspRoute
   '/import-travaux': typeof ImportTravauxRoute
+  '/preparation-psp': typeof PreparationPspRoute
   '/psp-validation': typeof PspValidationRoute
   '/fournisseurs/$fournisseurId': typeof FournisseursFournisseurIdRoute
   '/fournisseurs': typeof FournisseursIndexRoute
@@ -104,6 +112,7 @@ export interface FileRoutesById {
   '/import': typeof ImportRoute
   '/import-psp': typeof ImportPspRoute
   '/import-travaux': typeof ImportTravauxRoute
+  '/preparation-psp': typeof PreparationPspRoute
   '/psp-validation': typeof PspValidationRoute
   '/fournisseurs/$fournisseurId': typeof FournisseursFournisseurIdRoute
   '/fournisseurs/': typeof FournisseursIndexRoute
@@ -118,6 +127,7 @@ export interface FileRouteTypes {
     | '/import'
     | '/import-psp'
     | '/import-travaux'
+    | '/preparation-psp'
     | '/psp-validation'
     | '/fournisseurs/$fournisseurId'
     | '/fournisseurs/'
@@ -129,6 +139,7 @@ export interface FileRouteTypes {
     | '/import'
     | '/import-psp'
     | '/import-travaux'
+    | '/preparation-psp'
     | '/psp-validation'
     | '/fournisseurs/$fournisseurId'
     | '/fournisseurs'
@@ -141,6 +152,7 @@ export interface FileRouteTypes {
     | '/import'
     | '/import-psp'
     | '/import-travaux'
+    | '/preparation-psp'
     | '/psp-validation'
     | '/fournisseurs/$fournisseurId'
     | '/fournisseurs/'
@@ -154,6 +166,7 @@ export interface RootRouteChildren {
   ImportRoute: typeof ImportRoute
   ImportPspRoute: typeof ImportPspRoute
   ImportTravauxRoute: typeof ImportTravauxRoute
+  PreparationPspRoute: typeof PreparationPspRoute
   PspValidationRoute: typeof PspValidationRoute
 }
 
@@ -208,6 +221,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ImportTravauxRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/preparation-psp': {
+      id: '/preparation-psp'
+      path: '/preparation-psp'
+      fullPath: '/preparation-psp'
+      preLoaderRoute: typeof PreparationPspRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/psp-validation': {
       id: '/psp-validation'
       path: '/psp-validation'
@@ -254,6 +274,7 @@ const rootRouteChildren: RootRouteChildren = {
   ImportRoute: ImportRoute,
   ImportPspRoute: ImportPspRoute,
   ImportTravauxRoute: ImportTravauxRoute,
+  PreparationPspRoute: PreparationPspRoute,
   PspValidationRoute: PspValidationRoute,
 }
 export const routeTree = rootRouteImport
