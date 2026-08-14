@@ -18,6 +18,7 @@ import { Dialog, DialogContent, DialogFooter } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { libelleEntreprise } from "@/lib/fournisseurs";
+import { construireSearchAdresses } from "@/lib/adresses";
 import { money2 } from "@/lib/formats";
 import { getFournisseursPourCommandes } from "@/lib/fournisseurs.functions";
 import {
@@ -139,6 +140,7 @@ function FicheHistoriqueCmd({
                   <Link
                     to="/fournisseurs/$fournisseurId"
                     params={{ fournisseurId: fournisseur.id }}
+                    search={{ cmd: undefined, annee: undefined }}
                     className="text-blue-600 hover:underline"
                   >
                     {fournisseur.nom}
@@ -273,7 +275,8 @@ export default function CommandeFicheDialog({
   fournisseur: fournisseurProp,
 }: {
   open: boolean;
-  commande: CommandeTravauxEnrichie | null;
+  /** Fiche déjà chargée (Dashboard) OU fallback d'affichage — optionnel si `commandeId` est fourni. */
+  commande?: CommandeTravauxEnrichie | null;
   commandeId?: string | null;
   onClose: () => void;
   readOnly?: boolean;
@@ -364,13 +367,7 @@ export default function CommandeFicheDialog({
                 <p className="text-sm font-black text-blue-400">
                   <Link
                     to="/adresses"
-                    search={{
-                      q: "",
-                      ville: undefined,
-                      tranche: commande?.tranche_code || undefined,
-                      rue: undefined,
-                      adresse: undefined,
-                    }}
+                    search={construireSearchAdresses({ tranche: commande?.tranche_code })}
                     className="hover:underline"
                   >
                     {commande?.tranche_code || "—"}
@@ -390,13 +387,7 @@ export default function CommandeFicheDialog({
                     {commande?.lot_code ? (
                       <Link
                         to="/adresses"
-                        search={{
-                          q: commande.lot_code,
-                          ville: undefined,
-                          tranche: undefined,
-                          rue: undefined,
-                          adresse: undefined,
-                        }}
+                        search={construireSearchAdresses({ q: commande.lot_code })}
                         className="hover:underline flex items-center gap-1"
                       >
                         {commande.lot_code} <ChevronRight className="size-3" />
@@ -543,6 +534,7 @@ export default function CommandeFicheDialog({
                         <Link
                           to="/fournisseurs/$fournisseurId"
                           params={{ fournisseurId: fournisseur.id }}
+                          search={{ cmd: undefined, annee: undefined }}
                           className="text-blue-600 hover:underline"
                         >
                           {libelleEntreprise(fournisseur.nom)}

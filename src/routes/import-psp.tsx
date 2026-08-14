@@ -15,6 +15,7 @@ import {
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import PageHeader from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
@@ -199,19 +200,14 @@ function ImportPspPage() {
 
   return (
     <main className="mx-auto max-w-5xl space-y-6 p-4 sm:p-8">
-      <header className="flex items-start justify-between gap-4">
-        <div className="space-y-1">
-          <h1 className="text-2xl font-semibold tracking-tight">Import Historique CMD</h1>
-          <p className="text-sm text-muted-foreground">
-            Importation de l'historique complet des travaux et commandes. Lecture, vérification
-            humaine, puis enregistrement isolé dans les tables psp_*. Aucune écriture avant
-            validation.
-          </p>
-        </div>
+      <PageHeader
+        title="Import Historique CMD"
+        subtitle="Importation de l'historique complet des travaux et commandes. Lecture, vérification humaine, puis enregistrement isolé dans les tables psp_*. Aucune écriture avant validation."
+      >
         <Button asChild variant="outline">
           <Link to="/">Accueil</Link>
         </Button>
-      </header>
+      </PageHeader>
 
       {!parsed ? (
         <div className="rounded-xl border border-dashed bg-surface p-8 text-center">

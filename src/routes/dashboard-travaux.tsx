@@ -106,15 +106,27 @@ import {
 import { getPspDecision, savePspDecision } from "@/lib/psp.validation.functions";
 import { getFournisseursPourCommandes } from "@/lib/fournisseurs.functions";
 import { money0 } from "@/lib/formats";
+import { construireSearchAdresses } from "@/lib/adresses";
 import CommandeFicheDialog, {
   type DecideState,
   type FicheFournisseurInfo,
 } from "@/components/CommandeFicheDialog";
 
 export const Route = createFileRoute("/dashboard-travaux")({
-  validateSearch: (s: Record<string, unknown>) => ({
-    commande: typeof s["commande"] === "string" ? s["commande"] : undefined,
-  }),
+  // `?commande=` porte un NUMÉRO de commande (TanStack JSON-parse → number) ;
+  // `?de=`/`?a=` persistent la plage d'années (exercice) du slider (Phase 6B).
+  validateSearch: (s: Record<string, unknown>) => {
+    const nombre = (v: unknown): number | undefined =>
+      typeof v === "number" || typeof v === "string" ? Number(v) : undefined;
+    return {
+      commande:
+        typeof s["commande"] === "string" || typeof s["commande"] === "number"
+          ? String(s["commande"])
+          : undefined,
+      de: nombre(s["de"]),
+      a: nombre(s["a"]),
+    };
+  },
   head: () => ({
     meta: [
       { title: "Dashboard suivi travaux" },
@@ -378,9 +390,23 @@ function DashboardTravauxPage() {
   // aussi l'alerte « Analyse des Erreurs d'Import » à partir des données réellement rechargées).
 
   // États Filtres
-  // Sélection initiale : exercice courant uniquement ([exercice, exercice]). Le domaine
-  // accessible (sliderYearDomain) reste toutes les années — les deux sont distincts.
-  const [yearRange, setYearRange] = useState<[number, number]>(yearRangeInitial(exercice));
+  // Sélection initiale : exercice courant uniquement ([exercice, exercice]), SAUF si
+  // l'URL porte une plage persistée (`?de=&a=`, Phase 6B). Le domaine accessible
+  // (sliderYearDomain) reste toutes les années — les deux sont distincts.
+  const [yearRange, setYearRange] = useState<[number, number]>([
+    routeSearch.de ?? exercice,
+    routeSearch.a ?? exercice,
+  ]);
+
+  // Phase 6B : persiste la plage d'années (exercice) dans l'URL → partageable et
+  // conservée lors du retour navigateur (ex. depuis /adresses) et de l'ouverture de fiche.
+  useEffect(() => {
+    navigate({
+      replace: true,
+      search: (prev) => ({ ...prev, de: yearRange[0], a: yearRange[1] }),
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [yearRange[0], yearRange[1]]);
   const [includeArchived, setIncludeArchived] = useState(false);
   const [progFilter, setProgFilter] = useState({ prog: true, hors: true });
   const [selectedSectors, setSelectedSectors] = useState<string[]>([...SECTEURS]);
@@ -561,8 +587,14 @@ function DashboardTravauxPage() {
     }
   };
   // Navigation depuis un numéro de commande (param ?commande=) — ouvre la fiche.
+  // La fiche est pilotée par l'URL : retirer le param (bouton retour navigateur)
+  // ferme l'overlay → le retour navigateur est « back-aware ».
   useEffect(() => {
-    if (!commandeParam || allCommandes.length === 0) return;
+    if (!commandeParam) {
+      setSelectedDetail(null);
+      return;
+    }
+    if (allCommandes.length === 0) return;
     const found = allCommandes.find((c) => c.numero_commande === commandeParam);
     if (found) setSelectedDetail(found);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -596,7 +628,8 @@ function DashboardTravauxPage() {
   const closeFiche = () => {
     setSelectedDetail(null);
     setIsEditing(false);
-    if (commandeParam) navigate({ search: { commande: undefined } });
+    // Retire ?commande= en conservant les autres paramètres (de/a).
+    if (commandeParam) navigate({ search: (prev) => ({ ...prev, commande: undefined }) });
   };
 
   const resolveMutation = useMutation({
@@ -1784,7 +1817,17 @@ function DashboardTravauxPage() {
                       <td className="p-4 font-bold text-slate-400">{yearOf(row)}</td>
                       <td className="p-4 font-black text-blue-600 truncate">
                         <button
-                          onClick={() => setSelectedDetail(row)}
+                          onClick={() => {
+                            setSelectedDetail(row);
+                            // Ouvre la fiche VIA l'URL (param ?commande=) en FUSIONNANT avec
+                            // les autres paramètres (de/a) : le bouton retour navigateur
+                            // retirera le param et fermera l'overlay.
+                            if (row.numero_commande) {
+                              navigate({
+                                search: (prev) => ({ ...prev, commande: row.numero_commande }),
+                              });
+                            }
+                          }}
                           className="hover:underline flex items-center gap-1"
                         >
                           {row.numero_commande}
@@ -1794,13 +1837,7 @@ function DashboardTravauxPage() {
                       <td className="p-4 font-black text-slate-700 truncate">
                         <Link
                           to="/adresses"
-                          search={{
-                            q: "",
-                            ville: undefined,
-                            tranche: row.tranche_code || undefined,
-                            rue: undefined,
-                            adresse: undefined,
-                          }}
+                          search={construireSearchAdresses({ tranche: row.tranche_code })}
                           className="hover:underline"
                         >
                           {row.tranche_code || "—"}

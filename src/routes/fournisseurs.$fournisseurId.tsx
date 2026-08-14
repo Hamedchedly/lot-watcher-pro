@@ -98,10 +98,23 @@ import {
   type FournisseurContact,
 } from "@/lib/fournisseurs";
 import CommandeFicheDialog from "@/components/CommandeFicheDialog";
+import { construireSearchAdresses } from "@/lib/adresses";
+import {
+  LISTE_FOURNISSEURS_SEARCH_VIDE,
+  type ListeFournisseursSearch,
+} from "@/routes/fournisseurs.index";
 import type { CommandeTravauxEnrichie } from "@/lib/travaux.dashboard.functions";
 import { formatDateCommandeFr } from "@/lib/psp.validation";
 
 export const Route = createFileRoute("/fournisseurs/$fournisseurId")({
+  // Param `?cmd=<commandeId>` (fiche commande en overlay) et `?annee=` (KPI).
+  validateSearch: (s: Record<string, unknown>) => ({
+    cmd: typeof s["cmd"] === "string" ? s["cmd"] : undefined,
+    annee:
+      typeof s["annee"] === "number" || typeof s["annee"] === "string"
+        ? Number(s["annee"])
+        : undefined,
+  }),
   head: () => ({
     meta: [{ title: "Fiche fournisseur" }],
   }),
@@ -137,8 +150,25 @@ function CarteVillesClient({ villes }: { villes: VilleFournisseur[] }) {
 
 function FournisseurFiche() {
   const { fournisseurId } = Route.useParams();
-  const [annee, setAnnee] = useState<number | null>(null);
+  const routeSearch = Route.useSearch();
+  const navigate = Route.useNavigate();
+  const cmdParam = routeSearch.cmd;
+  // P0-2 : filtres/tri de la liste persistés par /fournisseurs (retour contextuel).
+  const retourListeSearch = useMemo<ListeFournisseursSearch>(() => {
+    try {
+      const raw = sessionStorage.getItem("pat-s11:fournisseurs:liste");
+      if (raw) return { ...LISTE_FOURNISSEURS_SEARCH_VIDE, ...(JSON.parse(raw) as object) };
+    } catch {
+      // stockage indisponible / corrompu : liste vierge.
+    }
+    return LISTE_FOURNISSEURS_SEARCH_VIDE;
+  }, []);
   const [editOpen, setEditOpen] = useState(false);
+  // Année KPI persistée dans l'URL (`?annee=`) : partageable, conservée par le retour
+  // navigateur et les overlays (Phase 6B).
+  const annee = routeSearch.annee ?? null;
+  const changerAnnee = (a: number | null) =>
+    navigate({ search: (prev) => ({ ...prev, annee: a ?? undefined }) });
   const fetchDetail = useServerFn(getFournisseurDetail);
   const toggleFavori = useServerFn(toggleFournisseurFavori);
   const update = useServerFn(updateFournisseur);
@@ -290,6 +320,20 @@ function FournisseurFiche() {
     (a) => a.source !== "travaux_commandes" && a.source !== "psp_import_rows",
   );
   const commandes = (data?.commandes ?? []) as CommandeFournisseur[];
+
+  // Fiche commande pilotée par l'URL (`?cmd=<commandeId>`, back-aware) :
+  //  - le param présent ouvre l'overlay dès que les commandes du fournisseur sont chargées ;
+  //  - retirer le param (bouton retour navigateur) ferme l'overlay.
+  useEffect(() => {
+    if (!cmdParam) {
+      setCommandeOuverte(null);
+      return;
+    }
+    if (commandes.length === 0) return;
+    const found = commandes.find((c) => c.id === cmdParam);
+    if (found) setCommandeOuverte(found);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cmdParam, commandes]);
   const profil = (data?.profil ?? null) as ProfilActivite | null;
   const historique = (data?.historique_annuel ?? []) as {
     annee: number;
@@ -419,14 +463,16 @@ function FournisseurFiche() {
     if (adressePhysique) {
       const segment = adressePhysique.split(",")[0]?.split(" - ")[0]?.trim();
       const rue = segment && segment.length >= 4 ? segment : adressePhysique;
-      return {
-        ville: c.ville ?? undefined,
-        tranche: c.tranche_code ?? undefined,
+      return construireSearchAdresses({
+        ville: c.ville,
+        tranche: c.tranche_code,
         rue,
-      };
+        retour: fournisseurId,
+      });
     }
-    if (c.patrimoine) return { q: c.patrimoine };
-    return { ville: c.ville ?? undefined, tranche: c.tranche_code ?? undefined };
+    if (c.patrimoine)
+      return construireSearchAdresses({ q: c.patrimoine, retour: fournisseurId });
+    return construireSearchAdresses({ ville: c.ville, tranche: c.tranche_code, retour: fournisseurId });
   };
 
   return (
@@ -456,7 +502,11 @@ function FournisseurFiche() {
             </Button>
           ) : null}
           <Button asChild variant="outline">
-            <Link to="/fournisseurs">Retour</Link>
+            {/* Retour contextuel (P0-2) : restaure les filtres/tri de la liste s'ils ont
+                été persistés (sessionStorage) par /fournisseurs — sinon liste vierge. */}
+            <Link to="/fournisseurs" search={retourListeSearch}>
+              Retour
+            </Link>
           </Button>
         </div>
       </header>
@@ -480,7 +530,7 @@ function FournisseurFiche() {
                   variant="outline"
                   className="size-8"
                   disabled={anneePrecedente == null}
-                  onClick={() => anneePrecedente != null && setAnnee(anneePrecedente)}
+                  onClick={() => anneePrecedente != null && changerAnnee(anneePrecedente)}
                   title={
                     anneePrecedente != null
                       ? `Année précédente (${anneePrecedente})`
@@ -493,7 +543,7 @@ function FournisseurFiche() {
                 <div className="w-40">
                   <Select
                     value={anneeSelect != null ? String(anneeSelect) : "all"}
-                    onValueChange={(v) => setAnnee(v === "all" ? null : Number(v))}
+                    onValueChange={(v) => changerAnnee(v === "all" ? null : Number(v))}
                   >
                     <SelectTrigger>
                       <SelectValue placeholder="Année" />
@@ -516,7 +566,7 @@ function FournisseurFiche() {
                   variant="outline"
                   className="size-8"
                   disabled={anneeSuivante == null}
-                  onClick={() => anneeSuivante != null && setAnnee(anneeSuivante)}
+                  onClick={() => anneeSuivante != null && changerAnnee(anneeSuivante)}
                   title={
                     anneeSuivante != null ? `Année suivante (${anneeSuivante})` : "Dernière année"
                   }
@@ -1128,7 +1178,13 @@ function FournisseurFiche() {
                             <TableCell>
                               <button
                                 type="button"
-                                onClick={() => setCommandeOuverte(c)}
+                                onClick={() => {
+                                  setCommandeOuverte(c);
+                                  // Ouvre via l'URL (`?cmd=`) en FUSIONNANT avec les autres
+                                  // paramètres (annee) — back-aware, la fermeture retire cmd.
+                                  if (c.id)
+                                    navigate({ search: (prev) => ({ ...prev, cmd: c.id ?? undefined }) });
+                                }}
                                 className="font-semibold text-primary hover:underline"
                                 title="Ouvrir la fiche commande (sans quitter cette page)"
                               >
@@ -1244,7 +1300,11 @@ function FournisseurFiche() {
         }
         commandeId={commandeOuverte?.id ?? null}
         open={!!commandeOuverte}
-        onClose={() => setCommandeOuverte(null)}
+        onClose={() => {
+          setCommandeOuverte(null);
+          // Fermeture back-aware : retire `?cmd=` en conservant les autres paramètres (annee).
+          if (cmdParam) navigate({ search: (prev) => ({ ...prev, cmd: undefined }) });
+        }}
         readOnly
       />
     </div>

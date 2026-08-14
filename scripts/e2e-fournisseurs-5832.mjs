@@ -106,19 +106,23 @@ try {
       .textContent()
       .then((t) => t ?? "");
   const titreAvant = await titreKpi();
+  const anneeAvant = titreAvant.match(/(\d{4})/)?.[1];
   ok(
     "année par défaut = la plus récente (flèche suivante désactivée)",
     await page.getByRole("button", { name: "Année suivante" }).isDisabled(),
   );
   await page.getByRole("button", { name: "Année précédente" }).click();
+  // Attend que le TITRE des KPI change réellement d'année (refetch terminé).
   await page.waitForFunction(
-    () => {
-      const el = [...document.querySelectorAll("div")].find((x) =>
-        x.textContent?.includes("KPIs — année"),
+    (a) => {
+      const el = [...document.querySelectorAll("h1,h2,h3,h4,div,span,p")].find(
+        (x) => /^KPIs — année \d{4}$/.test((x.textContent ?? "").trim()),
       );
-      return /KPIs — année 20\d\d/.test(el?.textContent ?? "");
+      const t = (el?.textContent ?? "").trim();
+      const m = t.match(/^KPIs — année (\d{4})$/);
+      return m !== null && m[1] !== a;
     },
-    null,
+    anneeAvant,
     { timeout: 15000 },
   );
   const titreAnneePrec = await titreKpi();
@@ -128,13 +132,14 @@ try {
   );
   await page.getByRole("button", { name: "Année suivante" }).click();
   await page.waitForFunction(
-    (t) => {
-      const el = [...document.querySelectorAll("div")].find((x) =>
-        x.textContent?.includes("KPIs — année"),
+    (a) => {
+      const el = [...document.querySelectorAll("h1,h2,h3,h4,div,span,p")].find(
+        (x) => /^KPIs — année \d{4}$/.test((x.textContent ?? "").trim()),
       );
-      return (el?.textContent ?? "").includes(t);
+      const t = (el?.textContent ?? "").trim();
+      return t === `KPIs — année ${a}`;
     },
-    titreAvant,
+    anneeAvant,
     { timeout: 15000 },
   );
   ok("flèche suivante → retour à l'année la plus récente", (await titreKpi()) === titreAvant);
@@ -403,9 +408,12 @@ try {
     timeout: 15000,
   });
   ok("clic Commande # → fiche commande en overlay", true);
+  const pathFicheAvant = new URL(urlFicheAvant).pathname;
   ok(
-    "aucune navigation (URL reste sur /fournisseurs/<id>)",
-    page.url() === urlFicheAvant && /\/fournisseurs\/[0-9a-f-]{36}$/.test(page.url()),
+    "aucune navigation (overlay piloté par ?cmd= : même page fiche fournisseur)",
+    new URL(page.url()).pathname === pathFicheAvant &&
+      /\/fournisseurs\/[0-9a-f-]{36}$/.test(new URL(page.url()).pathname) &&
+      page.url().includes("cmd="),
   );
   await page.waitForFunction(() => document.body.textContent.includes("Descriptif complet"), null, {
     timeout: 15000,
@@ -515,6 +523,36 @@ try {
   });
   ok("fiche patrimoine précise rendue (lots de l'adresse)", true);
 
+  // 9b) PATRIMOINE → COMMANDE : depuis les travaux d'une tranche, « Commande # » ouvre la
+  //     fiche commande en OVERLAY (même composant, readOnly, contexte /adresses conservé).
+  await page.goto(`${BASE}/adresses?ville=CHAUMES-EN-BRIE`, {
+    waitUntil: "networkidle",
+    timeout: 60000,
+  });
+  await page.waitForTimeout(2000);
+  await page.locator("button[title='Voir les travaux de la tranche']").first().click();
+  await page.waitForFunction(() => document.body.textContent.includes("Commande #"), null, {
+    timeout: 15000,
+  });
+  ok("patrimoine → travaux : bouton « Commande # » présent (ancien lien cassé remplacé)", true);
+  await page.locator("button", { hasText: "Commande #" }).first().click();
+  await page.waitForFunction(() => document.body.textContent.includes("Fiche Commande #"), null, {
+    timeout: 15000,
+  });
+  ok(
+    "patrimoine → clic Commande # → fiche commande EN OVERLAY (lecture seule)",
+    (await page.locator("[role='dialog'] button", { hasText: "MODIFIER" }).count()) === 0,
+  );
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
+  await page.waitForFunction(() => !document.body.textContent.includes("Fiche Commande #"), null, {
+    timeout: 10000,
+  });
+  ok(
+    "patrimoine → fiche fermée → contexte /adresses conservé (même URL)",
+    page.url().includes("/adresses"),
+  );
+
   // 10) PARITÉ RÉELLE : ouvrir dans le Dashboard la MÊME commande que celle ouverte
   //     depuis le Fournisseur (5061140, année 2026 → présente dans le journal par défaut)
   //     et comparer sections / données / montants.
@@ -523,7 +561,9 @@ try {
   // Recherche Rapide : isole la commande (le journal est paginé par défaut à 20 lignes).
   await page.locator("input[placeholder*='CMD']").fill(numCommandeFournisseur);
   await page.waitForTimeout(700);
-  const journal = page.locator("table").filter({ has: page.locator("th").getByText("N° Commande") });
+  const journal = page
+    .locator("table")
+    .filter({ has: page.locator("th").getByText("N° Commande") });
   await journal
     .locator("tbody tr")
     .filter({ hasText: numCommandeFournisseur })
@@ -579,6 +619,73 @@ try {
     montantsFournisseur.length > 0 && montantsFournisseur.every((v) => montantsDash.includes(v)),
   );
   await page.getByRole("button", { name: "FERMER LA FICHE" }).click();
+
+  // 11) SCÉNARIO FINAL DE NAVIGATION (Phase 6B) — Accueil → Pilotage → Sourcing →
+  //     recherche fournisseur → fiche → commande overlay → fermer → patrimoine → retour
+  //     → retour liste, en vérifiant la conservation de tous les contextes.
+  await page.goto(`${BASE}/`, { waitUntil: "networkidle", timeout: 60000 });
+  await page.waitForSelector("nav", { timeout: 15000 });
+  await page.getByRole("link", { name: /Pilotage/ }).first().click();
+  await page.waitForURL(/\/dashboard-travaux/, { timeout: 20000 });
+  ok("Accueil → barre globale → Pilotage (dashboard)", page.url().includes("/dashboard-travaux"));
+  await page.getByRole("link", { name: /Sourcing/ }).first().click();
+  await page.waitForURL(/\/fournisseurs($|\?)/, { timeout: 20000 });
+  ok("barre globale → Sourcing (liste fournisseurs)", /\/fournisseurs($|\?)/.test(page.url()));
+  // Recherche fournisseur → filtres persistés dans l'URL (?q=)
+  await page.locator("input[placeholder*='Dupont']").first().fill("5832");
+  await page.waitForTimeout(1500);
+  ok(
+    "recherche fournisseur → ?q=5832 dans l'URL",
+    await page.evaluate(() => decodeURIComponent(window.location.href).includes("5832")),
+  );
+  const ficheLink = page.locator("tbody a[href*='/fournisseurs/']").first();
+  await ficheLink.click();
+  await page.waitForURL(/\/fournisseurs\/[0-9a-f-]{36}$/, { timeout: 20000 });
+  await page.waitForFunction(() => document.body.textContent.includes("COMMANDES"), null, {
+    timeout: 20000,
+  });
+  // Commande en overlay (pilotée par l'URL ?cmd=) puis fermeture (retire cmd, garde annee)
+  const cmdTableNav = page.locator("table").filter({ hasText: "Montant engagé" });
+  const numBtnNav = cmdTableNav
+    .locator("tbody tr")
+    .filter({ hasText: "5061140" })
+    .first()
+    .locator("button[title*='Ouvrir la fiche commande']")
+    .first();
+  await numBtnNav.click();
+  await page.waitForFunction(() => document.body.textContent.includes("Fiche Commande #"), null, {
+    timeout: 15000,
+  });
+  ok("fiche fournisseur → commande overlay (URL ?cmd=)", page.url().includes("cmd="));
+  await page.getByRole("button", { name: "FERMER LA FICHE" }).click();
+  await page.waitForFunction(
+    () => !document.body.textContent.includes("Fiche Commande #"),
+    null,
+    { timeout: 10000 },
+  );
+  ok("commande fermée → overlay refermé, URL sans cmd", !page.url().includes("cmd="));
+  // Patrimoine (overlay/URL ?retour=) ← puis retour explicite vers la fiche
+  const patLinkNav = cmdTableNav
+    .locator("tbody tr")
+    .filter({ hasText: "RUE DU PRESSOIR, THIBOUST SERRIS" })
+    .first()
+    .locator("a[href*='/adresses']")
+    .first();
+  await patLinkNav.click();
+  await page.waitForURL(/\/adresses/, { timeout: 20000 });
+  ok("fiche → patrimoine (URL /adresses?retour= provenance)", page.url().includes("retour="));
+  await page.getByRole("link", { name: "← Fiche fournisseur" }).first().click();
+  await page.waitForURL(/\/fournisseurs\/[0-9a-f-]{36}/, { timeout: 20000 });
+  ok("patrimoine → retour explicite vers la fiche fournisseur", true);
+  // Retour liste → filtres restaurés (sessionStorage) conservés dans l'URL
+  await page.getByRole("link", { name: "Retour" }).click();
+  await page.waitForURL(/\/fournisseurs($|\?)/, { timeout: 20000 });
+  await page.waitForTimeout(1500);
+  ok("fiche → retour liste fournisseur", /\/fournisseurs($|\?)/.test(page.url()));
+  ok(
+    "filtres de recherche conservés au retour liste (?q=)",
+    decodeURIComponent(page.url()).includes("5832"),
+  );
 } finally {
   await browser.close();
 }

@@ -48,7 +48,66 @@ import { formatDateCommandeFr } from "@/lib/psp.validation";
 import EvoCell from "@/components/EvoCell";
 import Labeled from "@/components/Labeled";
 
+/** Search de la liste Fournisseurs (filtres + tri persistés dans l'URL, P0-2). */
+export type ListeFournisseursSearch = {
+  q?: string | undefined;
+  corps?: string[] | undefined;
+  famille?: string | undefined;
+  annee?: number | undefined;
+  profil?: string | undefined;
+  favoris?: boolean | undefined;
+  activite?: string | undefined;
+  triC?: string | undefined;
+  triD?: "asc" | "desc" | undefined;
+  marcheM?: "tous" | "principaux" | undefined;
+  marcheD?: "asc" | "desc" | undefined;
+};
+
+/** Search « vide » réutilisable par les liens vers /fournisseurs. */
+export const LISTE_FOURNISSEURS_SEARCH_VIDE: ListeFournisseursSearch = {
+  q: undefined,
+  corps: undefined,
+  famille: undefined,
+  annee: undefined,
+  profil: undefined,
+  favoris: undefined,
+  activite: undefined,
+  triC: undefined,
+  triD: undefined,
+  marcheM: undefined,
+  marcheD: undefined,
+};
+
+/** Hydrate un search brut TanStack (valeurs JSON-encodées) vers le type de la liste. */
+function validerListeSearch(s: Record<string, unknown>): ListeFournisseursSearch {
+  const str = (v: unknown): string | undefined =>
+    typeof v === "string" || typeof v === "number" ? String(v) : undefined;
+  const dir = (v: unknown): "asc" | "desc" | undefined =>
+    v === "asc" || v === "desc" ? v : undefined;
+  return {
+    q: str(s["q"]),
+    corps: Array.isArray(s["corps"])
+      ? s["corps"].map(String)
+      : str(s["corps"])
+        ? [str(s["corps"]) as string]
+        : undefined,
+    famille: str(s["famille"]),
+    annee:
+      typeof s["annee"] === "number" || typeof s["annee"] === "string"
+        ? Number(s["annee"])
+        : undefined,
+    profil: str(s["profil"]),
+    favoris: s["favoris"] === true || s["favoris"] === "true" ? true : undefined,
+    activite: str(s["activite"]),
+    triC: str(s["triC"]),
+    triD: dir(s["triD"]),
+    marcheM: s["marcheM"] === "principaux" || s["marcheM"] === "tous" ? s["marcheM"] : undefined,
+    marcheD: dir(s["marcheD"]),
+  };
+}
+
 export const Route = createFileRoute("/fournisseurs/")({
+  validateSearch: validerListeSearch,
   head: () => ({
     meta: [
       { title: "Fournisseurs" },
@@ -110,30 +169,59 @@ function trierListe(list: LigneFournisseurListe[], key: string, dir: "asc" | "de
 }
 
 function FournisseursPage() {
-  const [query, setQuery] = useState("");
-  const [corpsEtats, setCorpsEtats] = useState<string[]>([]);
-  const [famille, setFamille] = useState("");
-  const [annee, setAnnee] = useState<number | null>(null);
-  const [profil, setProfil] = useState("");
-  const [favorisOnly, setFavorisOnly] = useState(false);
-  const [activite, setActivite] = useState("");
+  const routeSearch = Route.useSearch();
+  const navigate = Route.useNavigate();
+  // P0-2 : les filtres/tri sont hydratés depuis l'URL (deep-link + retour contextuel).
+  const [query, setQuery] = useState(routeSearch.q ?? "");
+  const [corpsEtats, setCorpsEtats] = useState<string[]>(routeSearch.corps ?? []);
+  const [famille, setFamille] = useState(routeSearch.famille ?? "");
+  const [annee, setAnnee] = useState<number | null>(routeSearch.annee ?? null);
+  const [profil, setProfil] = useState(routeSearch.profil ?? "");
+  const [favorisOnly, setFavorisOnly] = useState(routeSearch.favoris === true);
+  const [activite, setActivite] = useState(routeSearch.activite ?? "");
   const [open, setOpen] = useState(false);
   // Tri : 1er clic = desc, 2e = asc, 3e = retour au tri par défaut (null).
-  const [sort, setSort] = useState<{ key: string; dir: "asc" | "desc" } | null>(null);
+  const [sort, setSort] = useState<{ key: string; dir: "asc" | "desc" } | null>(
+    routeSearch.triC && routeSearch.triD ? { key: routeSearch.triC, dir: routeSearch.triD } : null,
+  );
   // Part de marché : clic sur l'en-tête = bascule principaux / tous (+ tri associé).
   const [marche, setMarche] = useState<{
     mode: "tous" | "principaux";
     sort: "desc" | "asc" | null;
   }>({
-    mode: "tous",
-    sort: null,
+    mode: routeSearch.marcheM ?? "tous",
+    sort: routeSearch.marcheD ?? null,
   });
+
+  // P0-2 : synchronise filtres + tri dans l'URL (replace, sans polluer l'historique) et
+  // dans sessionStorage (utilisé par le bouton « Retour » de la fiche fournisseur).
+  useEffect(() => {
+    const search: ListeFournisseursSearch = {
+      q: query || undefined,
+      corps: corpsEtats.length ? corpsEtats : undefined,
+      famille: famille || undefined,
+      annee: annee ?? undefined,
+      profil: profil || undefined,
+      favoris: favorisOnly || undefined,
+      activite: activite || undefined,
+      triC: sort?.key ?? undefined,
+      triD: sort?.dir ?? undefined,
+      marcheM: marche.mode === "principaux" ? "principaux" : undefined,
+      marcheD: marche.sort ?? undefined,
+    };
+    navigate({ replace: true, search });
+    try {
+      sessionStorage.setItem("pat-s11:fournisseurs:liste", JSON.stringify(search));
+    } catch {
+      // stockage indisponible : le retour contextuel perdra les filtres (non bloquant).
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query, corpsEtats, famille, annee, profil, favorisOnly, activite, sort, marche]);
 
   const fetchList = useServerFn(getFournisseursList);
   const toggleFavori = useServerFn(toggleFournisseurFavori);
   const create = useServerFn(createFournisseur);
   const creerDepuisRef = useServerFn(creerFournisseurDepuisRef);
-  const navigate = useNavigate();
   const queryClient = useQueryClient();
 
   const { data } = useQuery({
@@ -251,6 +339,7 @@ function FournisseursPage() {
       navigate({
         to: "/fournisseurs/$fournisseurId",
         params: { fournisseurId: res.fournisseur_id },
+        search: { cmd: undefined, annee: undefined },
       });
     } else {
       toast.error(res.error ?? "Création impossible.");
@@ -501,6 +590,7 @@ function FournisseursPage() {
                             <Link
                               to="/fournisseurs/$fournisseurId"
                               params={{ fournisseurId: l.id }}
+                              search={{ cmd: undefined, annee: undefined }}
                               className="font-mono text-sm font-semibold text-primary hover:underline"
                             >
                               {l.ref_isis}
@@ -525,6 +615,7 @@ function FournisseursPage() {
                           <Link
                             to="/fournisseurs/$fournisseurId"
                             params={{ fournisseurId: l.id }}
+                            search={{ cmd: undefined, annee: undefined }}
                             className="font-medium text-primary hover:underline"
                           >
                             {libelleEntreprise(l.nom)}
@@ -551,7 +642,7 @@ function FournisseursPage() {
                             {l.derniere_commande_numero ? (
                               <Link
                                 to="/dashboard-travaux"
-                                search={{ commande: l.derniere_commande_numero }}
+                                search={{ commande: l.derniere_commande_numero, de: undefined, a: undefined }}
                                 className="font-semibold text-primary hover:underline"
                               >
                                 #{l.derniere_commande_numero}

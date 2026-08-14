@@ -41,12 +41,15 @@ import {
 } from "@/lib/isis.functions";
 import {
   adressesParTranche as adressesParTrancheLib,
+  determinerLocataireActuel,
   estGarage,
   formatMontantTravaux,
   libelleDateTravail,
   libelleNbCommandesTravaux,
+  nomCompletOccupant,
   normaliserRecherche,
   rechercherPatrimoine,
+  type OccupantActuel,
 } from "@/lib/adresses";
 import { formatDateCommandeFr, extraireWNotes } from "@/lib/psp.validation";
 import {
@@ -56,13 +59,20 @@ import {
 import { getFournisseursPourCommandes } from "@/lib/fournisseurs.functions";
 import { libelleEntreprise } from "@/lib/fournisseurs";
 import type { FicheFournisseurInfo } from "@/components/CommandeFicheDialog";
+import CommandeFicheDialog from "@/components/CommandeFicheDialog";
 
+// `z.coerce.string()` : TanStack Router JSON-parse les query params (« 1426 », « 1234 »)
+// arrivent en number → coerce les convertit en string sans casser le rendu (erreur 500 sinon).
+// `lot` : code patrimoine de la fiche logement ouverte (deep-link back-aware, Phase 7A).
+// `retour` : provenance (ex. fournisseurId) pour afficher un retour contextuel (Phase 6B).
 const searchSchema = z.object({
-  q: z.string().optional(),
-  ville: z.string().optional(),
-  tranche: z.string().optional(),
-  rue: z.string().optional(),
-  adresse: z.string().optional(),
+  q: z.coerce.string().optional(),
+  ville: z.coerce.string().optional(),
+  tranche: z.coerce.string().optional(),
+  rue: z.coerce.string().optional(),
+  adresse: z.coerce.string().optional(),
+  lot: z.coerce.string().optional(),
+  retour: z.coerce.string().optional(),
 });
 
 export const Route = createFileRoute("/adresses")({
@@ -71,7 +81,7 @@ export const Route = createFileRoute("/adresses")({
 });
 
 function AdressesPage() {
-  const { q, ville, tranche, rue, adresse } = Route.useSearch();
+  const { q, ville, tranche, rue, adresse, lot, retour } = Route.useSearch();
   const navigate = Route.useNavigate();
   const fetchAdresses = useServerFn(getAdresses);
   const fetchVilles = useServerFn(getVilles);
@@ -121,9 +131,19 @@ function AdressesPage() {
     return tree;
   }, [visibleLots]);
 
-  const [selectedLot, setSelectedLot] = useState<LotItem | null>(null);
+  // Fiche logement deep-linkée : `?lot=` EST l'état ouvert de la fiche (back-aware, Phase 7A).
+  // Le clic sur un lot ajoute `lot`, la fermeture / le Back le retire — jamais un simple état local.
+  const selectedLot = useMemo(() => {
+    if (!lot) return null;
+    const rows = (data as LotItem[] | undefined) ?? [];
+    return rows.find((l) => l.code_patrimoine === lot) ?? null;
+  }, [data, lot]);
+  const ouvrirFicheLot = (codePatrimoine: string) =>
+    navigate({ search: (prev) => ({ ...prev, lot: codePatrimoine }) });
+  const fermerFicheLot = () => navigate({ search: (prev) => ({ ...prev, lot: undefined }) });
   const [selectedLocataire, setSelectedLocataire] = useState<LotItem | null>(null);
   const [travauxScope, setTravauxScope] = useState<TravauxScope | null>(null);
+  const [commandeFicheId, setCommandeFicheId] = useState<string | null>(null);
 
   // Lignes de chaque niveau hiérarchique avec leurs compteurs.
   const villeRows = useMemo(() => {
@@ -210,6 +230,20 @@ function AdressesPage() {
 
       <main className="mx-auto max-w-7xl flex-1 px-4 py-6 sm:px-6">
         <div className="mb-4 flex items-center gap-2 text-xs text-muted-foreground">
+          {/* Retour contextuel (Phase 6B) : provenance fiche fournisseur via ?retour=. */}
+          {retour ? (
+            <>
+              <Link
+                to="/fournisseurs/$fournisseurId"
+                params={{ fournisseurId: retour }}
+                search={{ cmd: undefined, annee: undefined }}
+                className="font-semibold text-primary hover:underline"
+              >
+                ← Fiche fournisseur
+              </Link>
+              <ChevronRight className="size-3" />
+            </>
+          ) : null}
           <Link to="/adresses" className="hover:text-primary">
             Patrimoine
           </Link>
@@ -611,7 +645,7 @@ function AdressesPage() {
                         >
                           <td className="px-4 py-3 font-medium">
                             <button
-                              onClick={() => setSelectedLot(lot)}
+                              onClick={() => ouvrirFicheLot(lot.code_patrimoine)}
                               className="flex w-full items-center gap-2 text-left text-primary hover:underline"
                             >
                               {lot.code_patrimoine}
@@ -660,9 +694,25 @@ function AdressesPage() {
         )}
       </main>
 
-      <FicheLogement lot={selectedLot} onClose={() => setSelectedLot(null)} />
+      <FicheLogement
+        lot={selectedLot}
+        onClose={fermerFicheLot}
+        onOpenCommande={(id) => setCommandeFicheId(id)}
+        onOpenLocataire={() => setSelectedLocataire(selectedLot)}
+      />
       <FicheLocataire lot={selectedLocataire} onClose={() => setSelectedLocataire(null)} />
-      <TravauxDialog scope={travauxScope} onClose={() => setTravauxScope(null)} />
+      <TravauxDialog
+        scope={travauxScope}
+        onClose={() => setTravauxScope(null)}
+        onOpenCommande={(id) => setCommandeFicheId(id)}
+      />
+      {/* Fiche commande en overlay depuis le patrimoine (même composant que le Dashboard) */}
+      <CommandeFicheDialog
+        open={!!commandeFicheId}
+        commandeId={commandeFicheId}
+        onClose={() => setCommandeFicheId(null)}
+        readOnly
+      />
     </div>
   );
 }
@@ -679,7 +729,30 @@ function typeLotLabel(type: string | null) {
   return labels[type ?? ""] ?? type ?? "—";
 }
 
-function FicheLogement({ lot, onClose }: { lot: LotItem | null; onClose: () => void }) {
+function FicheLogement({
+  lot,
+  onClose,
+  onOpenCommande,
+  onOpenLocataire,
+}: {
+  lot: LotItem | null;
+  onClose: () => void;
+  onOpenCommande: (commandeId: string | null) => void;
+  onOpenLocataire: () => void;
+}) {
+  const fetchOccupants = useServerFn(getOccupants);
+  const { data: occupants } = useQuery({
+    queryKey: ["occupants", lot?.code_patrimoine],
+    queryFn: () => fetchOccupants({ data: { lotCode: lot!.code_patrimoine } }),
+    enabled: !!lot,
+  });
+  // Locataire actuel : UNIQUE règle de référence (determinerLocataireActuel),
+  // source de vérité = table `occupants` (jamais lots.locataire_nom).
+  const locataireActuel = useMemo(
+    () => determinerLocataireActuel((occupants as OccupantActuel[] | undefined) ?? []),
+    [occupants],
+  );
+
   return (
     <Dialog open={!!lot} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-hidden flex flex-col p-0">
@@ -694,6 +767,32 @@ function FicheLogement({ lot, onClose }: { lot: LotItem | null; onClose: () => v
                   Lot {lot.code_patrimoine} · Tranche {lot.tranche_code}
                 </DialogDescription>
               </DialogHeader>
+
+              {/* Locataire actuel — nom cliquable vers FicheLocataire (Phase 7A). */}
+              <div className="mt-4 rounded-lg border bg-muted/40 p-3">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                  Locataire actuel
+                </p>
+                {locataireActuel ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={onOpenLocataire}
+                      className="mt-1 flex items-center gap-2 text-left text-sm font-semibold text-primary hover:underline"
+                    >
+                      <User className="size-4" />
+                      {nomCompletOccupant(locataireActuel)}
+                    </button>
+                    {locataireActuel.date_entree ? (
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        Entré le {formatDate(locataireActuel.date_entree)}
+                      </p>
+                    ) : null}
+                  </>
+                ) : (
+                  <p className="mt-1 text-sm text-muted-foreground">Aucun locataire actuel</p>
+                )}
+              </div>
 
               <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
                 <Info label="Adresse" value={lot.adresse} />
@@ -737,6 +836,7 @@ function FicheLogement({ lot, onClose }: { lot: LotItem | null; onClose: () => v
                           lotCode: lot.code_patrimoine,
                           trancheCode: lot.tranche_code,
                         }}
+                        onOpenCommande={onOpenCommande}
                       />
                     </TabsContent>
                     <TabsContent value="tranche" className="m-0">
@@ -746,6 +846,7 @@ function FicheLogement({ lot, onClose }: { lot: LotItem | null; onClose: () => v
                           label: `Tranche ${lot.tranche_code}`,
                           trancheCode: lot.tranche_code,
                         }}
+                        onOpenCommande={onOpenCommande}
                       />
                     </TabsContent>
                   </div>
@@ -767,6 +868,12 @@ function FicheLocataire({ lot, onClose }: { lot: LotItem | null; onClose: () => 
     queryFn: () => fetchOccupants({ data: { lotCode: lot!.code_patrimoine } }),
     enabled: !!lot,
   });
+  // Même règle que FicheLogement : locataire actuel = date_entree la plus récente
+  // (determinerLocataireActuel). Aucun affichage basé sur lots.locataire_nom.
+  const locataireActuel = useMemo(
+    () => determinerLocataireActuel((occupants as OccupantActuel[] | undefined) ?? []),
+    [occupants],
+  );
 
   return (
     <Dialog open={!!lot} onOpenChange={(o) => !o && onClose()}>
@@ -775,7 +882,8 @@ function FicheLocataire({ lot, onClose }: { lot: LotItem | null; onClose: () => 
           <>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
-                <User className="size-4 text-primary" /> {lot.locataire_nom}
+                <User className="size-4 text-primary" />
+                {locataireActuel ? nomCompletOccupant(locataireActuel) : "Aucun locataire actuel"}
               </DialogTitle>
               <DialogDescription>
                 Lot {lot.code_patrimoine} · Tranche {lot.tranche_code}
@@ -793,7 +901,10 @@ function FicheLocataire({ lot, onClose }: { lot: LotItem | null; onClose: () => 
                 value={lot.locataire_email}
                 icon={<Mail className="size-3.5" />}
               />
-              <Info label="Date d'entrée" value={formatDate(lot.date_entree)} />
+              <Info
+                label="Date d'entrée"
+                value={formatDate(locataireActuel?.date_entree ?? lot.date_entree)}
+              />
               <Info label="Type de lot" value={typeLotLabel(lot.type_lot)} />
               <Info label="Adresse" value={`${lot.adresse ?? "—"}`} />
               <Info label="Ville" value={`${lot.code_postal ?? ""} ${lot.ville ?? ""}`.trim()} />
@@ -811,9 +922,7 @@ function FicheLocataire({ lot, onClose }: { lot: LotItem | null; onClose: () => 
                 <ul className="divide-y rounded-lg border">
                   {occupants.map((o, i) => (
                     <li key={i} className="flex items-center justify-between gap-2 p-2 text-sm">
-                      <span className="truncate">
-                        {[o.prenom, o.nom].filter(Boolean).join(" ") || "—"}
-                      </span>
+                      <span className="truncate">{nomCompletOccupant(o as OccupantActuel)}</span>
                       <span className="shrink-0 text-xs text-muted-foreground">
                         Entré le {formatDate(o.date_entree)}
                       </span>
@@ -852,7 +961,15 @@ type TravailRow = {
   is_commande?: boolean;
 };
 
-function TravauxDialog({ scope, onClose }: { scope: TravauxScope | null; onClose: () => void }) {
+function TravauxDialog({
+  scope,
+  onClose,
+  onOpenCommande,
+}: {
+  scope: TravauxScope | null;
+  onClose: () => void;
+  onOpenCommande: (commandeId: string | null) => void;
+}) {
   return (
     <Dialog open={!!scope} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
@@ -865,7 +982,7 @@ function TravauxDialog({ scope, onClose }: { scope: TravauxScope | null; onClose
               <DialogDescription>{scope.label}</DialogDescription>
             </DialogHeader>
             <div className="mt-4">
-              <TravauxList scope={scope} />
+              <TravauxList scope={scope} onOpenCommande={onOpenCommande} />
             </div>
           </>
         )}
@@ -874,7 +991,13 @@ function TravauxDialog({ scope, onClose }: { scope: TravauxScope | null; onClose
   );
 }
 
-function TravauxList({ scope }: { scope: TravauxScope }) {
+function TravauxList({
+  scope,
+  onOpenCommande,
+}: {
+  scope: TravauxScope;
+  onOpenCommande: (commandeId: string | null) => void;
+}) {
   const fetchTravaux = useServerFn(getTravaux);
   const fetchEnrich = useServerFn(getPspEnrichissementCommandes);
   const { data, isLoading, isError } = useQuery({
@@ -1042,13 +1165,14 @@ function TravauxList({ scope }: { scope: TravauxScope }) {
                         <div className="space-y-1 rounded-lg border border-indigo-100 bg-indigo-50/40 p-2 text-xs">
                           {numero ? (
                             <p>
-                              <Link
-                                to="/dashboard-travaux"
-                                search={{ commande: numero }}
+                              <button
+                                type="button"
+                                onClick={() => onOpenCommande(travail.id ?? null)}
                                 className="font-bold text-primary hover:underline"
+                                title="Ouvrir la fiche commande (overlay, sans quitter cette page)"
                               >
                                 Commande #{numero}
-                              </Link>
+                              </button>
                             </p>
                           ) : null}
                           {fiche ? (
@@ -1058,6 +1182,7 @@ function TravauxList({ scope }: { scope: TravauxScope }) {
                                 <Link
                                   to="/fournisseurs/$fournisseurId"
                                   params={{ fournisseurId: fiche.id }}
+                                  search={{ cmd: undefined, annee: undefined }}
                                   className="text-primary hover:underline"
                                 >
                                   {libelleEntreprise(fiche.nom)}
