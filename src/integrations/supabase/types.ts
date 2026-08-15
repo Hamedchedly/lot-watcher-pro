@@ -706,6 +706,44 @@ export type Database = {
           },
         ];
       };
+      psp_enveloppes: {
+        Row: {
+          annee: number;
+          categorie: string;
+          created_at: string;
+          id: string;
+          montant: number;
+          programmation_id: string;
+          updated_at: string;
+        };
+        Insert: {
+          annee: number;
+          categorie: string;
+          created_at?: string;
+          id?: string;
+          montant?: number;
+          programmation_id: string;
+          updated_at?: string;
+        };
+        Update: {
+          annee?: number;
+          categorie?: string;
+          created_at?: string;
+          id?: string;
+          montant?: number;
+          programmation_id?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "psp_enveloppes_programmation_id_fkey";
+            columns: ["programmation_id"];
+            isOneToOne: false;
+            referencedRelation: "psp_programmations";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       psp_feedback: {
         Row: {
           cible_id: string;
@@ -940,6 +978,64 @@ export type Database = {
           },
         ];
       };
+      psp_ligne_patrimoine: {
+        Row: {
+          created_at: string;
+          id: string;
+          lot_id: string | null;
+          niveau: string;
+          numero: string | null;
+          psp_ligne_id: string;
+          rue: string | null;
+          tranche_code: string;
+          updated_at: string;
+        };
+        Insert: {
+          created_at?: string;
+          id?: string;
+          lot_id?: string | null;
+          niveau: string;
+          numero?: string | null;
+          psp_ligne_id: string;
+          rue?: string | null;
+          tranche_code: string;
+          updated_at?: string;
+        };
+        Update: {
+          created_at?: string;
+          id?: string;
+          lot_id?: string | null;
+          niveau?: string;
+          numero?: string | null;
+          psp_ligne_id?: string;
+          rue?: string | null;
+          tranche_code?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "psp_ligne_patrimoine_lot_id_fkey";
+            columns: ["lot_id"];
+            isOneToOne: false;
+            referencedRelation: "lots";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "psp_ligne_patrimoine_psp_ligne_id_fkey";
+            columns: ["psp_ligne_id"];
+            isOneToOne: false;
+            referencedRelation: "psp_lignes";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "psp_ligne_patrimoine_tranche_code_fkey";
+            columns: ["tranche_code"];
+            isOneToOne: false;
+            referencedRelation: "tranches";
+            referencedColumns: ["code"];
+          },
+        ];
+      };
       psp_lignes: {
         Row: {
           categorie: string;
@@ -950,9 +1046,11 @@ export type Database = {
           ligne_budget: string | null;
           nature_travaux: string | null;
           origine: string;
+          priorite: string;
           programmation_id: string;
           programme: Json;
           remarques: string | null;
+          statut: string;
           tranche_code: string;
           updated_at: string;
         };
@@ -965,9 +1063,11 @@ export type Database = {
           ligne_budget?: string | null;
           nature_travaux?: string | null;
           origine?: string;
+          priorite?: string;
           programmation_id: string;
           programme: Json;
           remarques?: string | null;
+          statut?: string;
           tranche_code: string;
           updated_at?: string;
         };
@@ -980,9 +1080,11 @@ export type Database = {
           ligne_budget?: string | null;
           nature_travaux?: string | null;
           origine?: string;
+          priorite?: string;
           programmation_id?: string;
           programme?: Json;
           remarques?: string | null;
+          statut?: string;
           tranche_code?: string;
           updated_at?: string;
         };

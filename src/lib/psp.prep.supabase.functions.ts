@@ -49,6 +49,26 @@ export type PspBrouillonComplet = {
   reports: Array<Record<string, unknown>>;
   decisions: Array<Record<string, unknown>>;
   links: Array<Record<string, unknown>>;
+  perimetres: PspPerimetrePersist[];
+  enveloppes: PspEnveloppePersist[];
+};
+
+export type PspPerimetrePersist = {
+  id: string;
+  psp_ligne_id: string;
+  tranche_code: string;
+  niveau: "tranche" | "rue" | "adresse" | "lot";
+  rue: string | null;
+  numero: string | null;
+  lot_id: string | null;
+};
+
+export type PspEnveloppePersist = {
+  id: string;
+  programmation_id: string;
+  annee: number;
+  categorie: "GE" | "GT" | "CP";
+  montant: number;
 };
 
 const ligneInput = z.object({
@@ -156,7 +176,16 @@ export const getPspBrouillon = createServerFn({ method: "POST" })
     // Aucun brouillon : on NE crée PAS automatiquement (V6.2 — l'utilisateur
     // déclenche explicitement la création via createPspProgrammation).
     if (!programmation) {
-      return { programmation: null, lignes: [], devis: [], reports: [], decisions: [], links: [] };
+      return {
+        programmation: null,
+        lignes: [],
+        devis: [],
+        reports: [],
+        decisions: [],
+        links: [],
+        perimetres: [],
+        enveloppes: [],
+      };
     }
 
     const pid = programmation.id;
@@ -185,6 +214,11 @@ export const getPspBrouillon = createServerFn({ method: "POST" })
     const links = ids.length
       ? ((await db.from("psp_command_links").select("*").in("psp_ligne_id", ids)).data ?? [])
       : [];
+    const perimetres = ids.length
+      ? ((await db.from("psp_ligne_patrimoine").select("*").in("psp_ligne_id", ids)).data ?? [])
+      : [];
+    const enveloppes =
+      (await db.from("psp_enveloppes").select("*").eq("programmation_id", pid)).data ?? [];
 
     return {
       programmation: {
@@ -201,6 +235,8 @@ export const getPspBrouillon = createServerFn({ method: "POST" })
       reports,
       decisions,
       links,
+      perimetres: (perimetres ?? []) as PspPerimetrePersist[],
+      enveloppes: (enveloppes ?? []) as PspEnveloppePersist[],
     };
   });
 
@@ -378,6 +414,208 @@ export const deletePspDevis = createServerFn({ method: "POST" })
     const { error } = await db.from("psp_devis").delete().eq("id", data.id);
     if (error) throw new Error(`Suppression du devis : ${error.message}`);
     return { ok: true as const };
+  });
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// V7 — PÉRIMÈTRE PATRIMOINE, ENVELOPPES, STATUT/PRIORITÉ, RECHERCHE
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const perimetresInput = z.object({
+  pspLigneId: z.string().uuid(),
+  trancheCode: z.string().min(1),
+  perimetres: z
+    .array(
+      z.object({
+        niveau: z.enum(["tranche", "rue", "adresse", "lot"]),
+        rue: z.string().nullish(),
+        numero: z.string().nullish(),
+        lotId: z.string().uuid().nullish(),
+      }),
+    )
+    .min(1),
+});
+
+const enveloppesInput = z.object({
+  programmationId: z.string().uuid(),
+  enveloppes: z
+    .array(
+      z.object({
+        annee: z.number().int().min(2000).max(2100),
+        categorie: z.enum(["GE", "GT", "CP"]),
+        montant: z.number().min(0),
+      }),
+    )
+    .min(1),
+});
+
+const statutPrioriteInput = z.object({
+  id: z.string().uuid(),
+  statut: z.enum(["a_definir", "attente_agence", "attente_confirmation"]).optional(),
+  priorite: z.enum(["prioritaire", "normale", "non_prioritaire"]).optional(),
+});
+
+const rechercheTranchesInput = z.object({ q: z.string().max(20).default("") });
+
+/**
+ * Remplace le périmètre patrimonial d'une ligne (suppression des lignes
+ * existantes puis insertion du nouvel ensemble — multi-lots autorisés, tous dans
+ * la même tranche). Le gel (programmation figée) bloque la suppression en base.
+ */
+export const createPspPerimetres = createServerFn({ method: "POST" })
+  .validator((d: unknown) => perimetresInput.parse(d))
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
+    const db = supabaseAdmin as any;
+    const del = await db.from("psp_ligne_patrimoine").delete().eq("psp_ligne_id", data.pspLigneId);
+    if (del.error) throw new Error(`Mise à jour du périmètre : ${del.error.message}`);
+    const rows = data.perimetres.map((p) => ({
+      psp_ligne_id: data.pspLigneId,
+      tranche_code: data.trancheCode,
+      niveau: p.niveau,
+      rue: p.rue ?? null,
+      numero: p.numero ?? null,
+      lot_id: p.lotId ?? null,
+    }));
+    const { data: inserted, error } = await db
+      .from("psp_ligne_patrimoine")
+      .insert(rows)
+      .select("*");
+    if (error) throw new Error(`Enregistrement du périmètre : ${error.message}`);
+    return (inserted ?? []) as PspPerimetrePersist[];
+  });
+
+/** Lit le périmètre patrimonial d'une ligne. */
+export const getPspPerimetres = createServerFn({ method: "POST" })
+  .validator((d: unknown) => z.object({ pspLigneId: z.string().uuid() }).parse(d))
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
+    const db = supabaseAdmin as any;
+    const { data: rows, error } = await db
+      .from("psp_ligne_patrimoine")
+      .select("*")
+      .eq("psp_ligne_id", data.pspLigneId);
+    if (error) throw new Error(`Lecture du périmètre : ${error.message}`);
+    return (rows ?? []) as PspPerimetrePersist[];
+  });
+
+/** Enveloppes GE/GT/CP d'une programmation. */
+export const getPspEnveloppes = createServerFn({ method: "POST" })
+  .validator((d: unknown) => z.object({ programmationId: z.string().uuid() }).parse(d))
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
+    const db = supabaseAdmin as any;
+    const { data: rows, error } = await db
+      .from("psp_enveloppes")
+      .select("*")
+      .eq("programmation_id", data.programmationId)
+      .order("annee")
+      .order("categorie");
+    if (error) throw new Error(`Lecture des enveloppes : ${error.message}`);
+    return (rows ?? []) as PspEnveloppePersist[];
+  });
+
+/** Enregistre les enveloppes (upsert sur UNIQUE(programmation_id, annee, categorie)). */
+export const savePspEnveloppes = createServerFn({ method: "POST" })
+  .validator((d: unknown) => enveloppesInput.parse(d))
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
+    const db = supabaseAdmin as any;
+    const rows = data.enveloppes.map((e) => ({
+      programmation_id: data.programmationId,
+      annee: e.annee,
+      categorie: e.categorie,
+      montant: e.montant,
+    }));
+    const { data: saved, error } = await db
+      .from("psp_enveloppes")
+      .upsert(rows, { onConflict: "programmation_id,annee,categorie" })
+      .select("*");
+    if (error) throw new Error(`Enregistrement des enveloppes : ${error.message}`);
+    return (saved ?? []) as PspEnveloppePersist[];
+  });
+
+/** Met à jour statut et/ou priorité d'une ligne (check contraintes en base). */
+export const updatePspLigneStatutPriorite = createServerFn({ method: "POST" })
+  .validator((d: unknown) => statutPrioriteInput.parse(d))
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
+    const db = supabaseAdmin as any;
+    const patch: Record<string, string> = {};
+    if (data.statut) patch["statut"] = data.statut;
+    if (data.priorite) patch["priorite"] = data.priorite;
+    const { data: ligne, error } = await db
+      .from("psp_lignes")
+      .update(patch)
+      .eq("id", data.id)
+      .select("id, statut, priorite")
+      .single();
+    if (error) throw new Error(`Mise à jour statut/priorité : ${error.message}`);
+    return ligne;
+  });
+
+/** Recherche progressive de tranches (code/libellé/localité) — réutilisée par l'UI. */
+export const rechercherTranches = createServerFn({ method: "POST" })
+  .validator((d: unknown) => rechercheTranchesInput.parse(d))
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
+    const db = supabaseAdmin as any;
+    const q = data.q.trim();
+    let query = db
+      .from("tranches")
+      .select("code, libelle, localite, sous_secteur, nb_logements")
+      .eq("actif", true);
+    if (q) {
+      query = query.or(`code.ilike.${q}%,libelle.ilike.%${q}%,localite.ilike.%${q}%`);
+    }
+    const { data: rows, error } = await query.order("code").limit(20);
+    if (error) throw new Error(`Recherche de tranches : ${error.message}`);
+    return rows ?? [];
+  });
+
+/** Liste des corps d'état connus (DISTINCT travaux_commandes.corps_etat) — suggestions. */
+export const getCorpsEtats = createServerFn({ method: "POST" })
+  .validator((d: unknown) => z.object({ q: z.string().max(40).default("") }).parse(d))
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
+    const db = supabaseAdmin as any;
+    const { data: rows, error } = await db
+      .from("travaux_commandes")
+      .select("corps_etat")
+      .not("corps_etat", "is", null)
+      .limit(500);
+    if (error) throw new Error(`Lecture des corps d'état : ${error.message}`);
+    const set = new Set<string>();
+    for (const r of rows ?? []) {
+      const v = String(r["corps_etat"] ?? "").trim();
+      if (v) set.add(v);
+    }
+    const q = data.q.trim().toLowerCase();
+    const liste = [...set].sort((a, b) => a.localeCompare(b));
+    return q ? liste.filter((c) => c.toLowerCase().includes(q)).slice(0, 20) : liste.slice(0, 40);
+  });
+
+/** Recherche progressive de lots (ER / locataire / adresse) — réutilise le moteur ciblé. */
+export const rechercherLotsV7 = createServerFn({ method: "POST" })
+  .validator((d: unknown) =>
+    z.object({ q: z.string().max(40).default(""), tranche: z.string().optional() }).parse(d),
+  )
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
+    const db = supabaseAdmin as any;
+    let query = db
+      .from("lots")
+      .select("id, code_patrimoine, tranche_code, adresse, ville, locataire_nom")
+      .eq("actif", true);
+    const q = data.q.trim();
+    if (q) {
+      query = query.or(
+        `code_patrimoine.ilike.%${q}%,adresse.ilike.%${q}%,locataire_nom.ilike.%${q}%`,
+      );
+    }
+    if (data.tranche) query = query.eq("tranche_code", data.tranche);
+    const { data: rows, error } = await query.order("code_patrimoine").limit(25);
+    if (error) throw new Error(`Recherche de lots : ${error.message}`);
+    return rows ?? [];
   });
 
 /** Crée un report source → cible (la ligne cible porte origine='report'). */

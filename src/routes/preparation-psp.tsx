@@ -6,6 +6,8 @@ import { AlertTriangle, FlaskConical, Plus } from "lucide-react";
 import { toast } from "sonner";
 
 import PspAncienneProgrammation from "@/components/preparation-psp/PspAncienneProgrammation";
+import PspCockpitV7, { type EnveloppeMap } from "@/components/preparation-psp/PspCockpitV7";
+import PspEnveloppesDialog from "@/components/preparation-psp/PspEnveloppesDialog";
 import PspGroupingSelector, {
   type ModeAffichage,
 } from "@/components/preparation-psp/PspGroupingSelector";
@@ -13,6 +15,7 @@ import PspHeader from "@/components/preparation-psp/PspHeader";
 import PspKpi from "@/components/preparation-psp/PspKpi";
 import PspOperationDetail from "@/components/preparation-psp/PspOperationDetail";
 import PspOperationForm from "@/components/preparation-psp/PspOperationForm";
+import PspQuickAddRow from "@/components/preparation-psp/PspQuickAddRow";
 import PspRevueReports from "@/components/preparation-psp/PspRevueReports";
 import PspTable from "@/components/preparation-psp/PspTable";
 import { Button } from "@/components/ui/button";
@@ -69,6 +72,7 @@ import {
   createPspProgrammation,
   deletePspLigne,
   getPspBrouillon,
+  savePspEnveloppes,
   updatePspLigne,
   type PspLignePersist,
 } from "@/lib/psp.prep.supabase.functions";
@@ -97,6 +101,13 @@ function PreparationPspPage() {
   const [formOuvert, setFormOuvert] = useState(false);
   const [formMode, setFormMode] = useState<"ajout" | "modification">("ajout");
   const [formOperation, setFormOperation] = useState<PspOperation | null>(null);
+
+  // ── V7 : filtre annuel cumulatif, enveloppes, saisie directe ──
+  const [anneesFiltre, setAnneesFiltre] = useState<PspAnnee[]>([]);
+  const [anneeActive, setAnneeActive] = useState<PspAnnee>(2027);
+  const [enveloppes, setEnveloppes] = useState<EnveloppeMap>({});
+  const [quickAddOuvert, setQuickAddOuvert] = useState(false);
+  const [enveloppesDialogOuvert, setEnveloppesDialogOuvert] = useState(false);
 
   // Source des opérations : mock V1 par défaut, fichier esquisse 2027 si chargé.
   const [source, setSource] = useState<{ type: "mock" | "fichier"; fichier?: string }>({
@@ -137,6 +148,11 @@ function PreparationPspPage() {
       statut: brouillon.programmation.statut,
       version: brouillon.programmation.version,
     });
+    const env: EnveloppeMap = {};
+    for (const e of brouillon.enveloppes ?? []) {
+      env[`${e.annee}|${e.categorie}`] = e.montant;
+    }
+    setEnveloppes(env);
     const devisParLigne = new Map<string, Array<Record<string, unknown>>>();
     for (const d of brouillon.devis ?? []) {
       const id = String(d["psp_ligne_id"] ?? "");
@@ -380,6 +396,50 @@ function PreparationPspPage() {
     () => operations.find((o) => o.id === selectedOpId) ?? null,
     [operations, selectedOpId],
   );
+
+  // ── V7 : filtre annuel CUMULATIF (visuel uniquement — ne modifie jamais la
+  // programmation ni la base). Opération visible si une année sélectionnée est programmée.
+  const operationsFiltrees = useMemo(() => {
+    if (anneesFiltre.length === 0) return operations;
+    const set = new Set(anneesFiltre.map(String));
+    return operations.filter((o) =>
+      PSP_ANNEES.some((a) => set.has(String(a)) && (o.programme?.[String(a)] ?? 0) > 0),
+    );
+  }, [operations, anneesFiltre]);
+
+  const toggleAnnee = (a: PspAnnee) => {
+    setAnneesFiltre((prev) => (prev.includes(a) ? prev.filter((x) => x !== a) : [...prev, a]));
+    setAnneeActive(a);
+  };
+
+  const saveEnveloppesFn = useServerFn(savePspEnveloppes);
+  const handleSaveEnveloppes = async (map: EnveloppeMap) => {
+    if (!programmation?.id) {
+      toast.error("Brouillon non chargé.");
+      return;
+    }
+    const rows = Object.entries(map).map(([cle, montant]) => {
+      const [annee, categorie] = cle.split("|");
+      return { annee: Number(annee), categorie: categorie as "GE" | "GT" | "CP", montant };
+    });
+    try {
+      await saveEnveloppesFn({
+        data: { programmationId: programmation.id, enveloppes: rows },
+      });
+      setEnveloppes(map);
+      toast.success("Enveloppes enregistrées dans Supabase.");
+    } catch (e) {
+      toast.error(`Enregistrement impossible : ${(e as Error).message}`);
+    }
+  };
+
+  const ouvrirQuickAdd = () => {
+    if (figee) {
+      toast.error("Programmation figée : saisie impossible.");
+      return;
+    }
+    setQuickAddOuvert(true);
+  };
 
   const sourceLabel =
     source.type === "fichier" && source.fichier
@@ -626,11 +686,44 @@ function PreparationPspPage() {
         ) : (
           <>
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <PspGroupingSelector mode={mode} onChange={setMode} />
+              <div className="flex flex-wrap items-center gap-2">
+                <PspGroupingSelector mode={mode} onChange={setMode} />
+                <Button
+                  variant={quickAddOuvert ? "default" : "outline"}
+                  size="sm"
+                  onClick={ouvrirQuickAdd}
+                  title="Ajout rapide : recherche patrimoine + corps d'état → catégorie automatique"
+                >
+                  <Plus className="size-3.5" />
+                  Saisie directe
+                </Button>
+              </div>
               <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
                 Source : {sourceLabel} · {operations.length} opérations · BUDGET_SOURCE = MOCK
               </p>
             </div>
+
+            {quickAddOuvert && programmation?.id ? (
+              <PspQuickAddRow
+                programmationId={programmation.id}
+                reference={reference}
+                onSaved={() => {
+                  setQuickAddOuvert(false);
+                  void queryClient.invalidateQueries({ queryKey: ["psp-brouillon-supabase"] });
+                }}
+                onCancel={() => setQuickAddOuvert(false)}
+              />
+            ) : null}
+
+            <PspCockpitV7
+              operations={operations}
+              anneesFiltre={anneesFiltre}
+              anneeActive={anneeActive}
+              onToggleAnnee={toggleAnnee}
+              enveloppes={enveloppes}
+              onOuvrirEnveloppes={() => setEnveloppesDialogOuvert(true)}
+              figee={figee}
+            />
 
             {mode === "reports" ? (
               <PspRevueReports
@@ -650,7 +743,7 @@ function PreparationPspPage() {
             ) : (
               <PspTable
                 mode={mode}
-                operations={operations}
+                operations={operationsFiltrees}
                 filters={filters}
                 onFiltersChange={setFilters}
                 onOpenOperation={(op) => setSelectedOpId(op.id)}
@@ -667,6 +760,13 @@ function PreparationPspPage() {
         onModifier={ouvrirModification}
         onDeplacer={handleDeplacer}
         onSupprimer={handleSupprimer}
+      />
+
+      <PspEnveloppesDialog
+        open={enveloppesDialogOuvert}
+        onClose={() => setEnveloppesDialogOuvert(false)}
+        enveloppes={enveloppes}
+        onSave={handleSaveEnveloppes}
       />
 
       <PspOperationForm
