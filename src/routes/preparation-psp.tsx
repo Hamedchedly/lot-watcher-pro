@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { AlertTriangle, FlaskConical } from "lucide-react";
+import { AlertTriangle, FlaskConical, Plus } from "lucide-react";
 import { toast } from "sonner";
 
 import PspAncienneProgrammation from "@/components/preparation-psp/PspAncienneProgrammation";
@@ -66,6 +66,7 @@ import {
 import { getTravauxDashboard } from "@/lib/travaux.dashboard.functions";
 import {
   createPspLigne,
+  createPspProgrammation,
   deletePspLigne,
   getPspBrouillon,
   updatePspLigne,
@@ -103,13 +104,15 @@ function PreparationPspPage() {
   });
   const [operations, setOperations] = useState<PspOperation[]>(() => PSP_OPERATIONS);
   const [deplacements, setDeplacements] = useState<DeplacementMemo[]>([]);
+  const [reference, setReference] = useState<ReferencePatrimoine | null>(null);
 
-  // ── Persistance Supabase V6 : brouillon actif (créé automatiquement si absent) ──
+  // ── Persistance Supabase V6.2 : brouillon actif (jamais créé automatiquement) ──
   const [programmation, setProgrammation] = useState<{
     id: string;
     statut: string;
     version: number;
   } | null>(null);
+  const queryClient = useQueryClient();
   const fetchBrouillon = useServerFn(getPspBrouillon);
   const { data: brouillon, isFetching: brouillonChargement } = useQuery({
     queryKey: ["psp-brouillon-supabase"],
@@ -118,10 +121,17 @@ function PreparationPspPage() {
     retry: 1,
   });
   const figee = programmation?.statut === "figee";
+  const aucuneProgrammation = !!brouillon && !brouillon.programmation && !brouillonChargement;
 
   // Au chargement : la source de vérité est le brouillon Supabase (lignes réelles).
+  // Aucun brouillon → état vide explicite (pas de mock silencieux, V6.2).
   useEffect(() => {
     if (!brouillon) return;
+    if (!brouillon.programmation) {
+      setProgrammation(null);
+      setOperations([]);
+      return;
+    }
     setProgrammation({
       id: brouillon.programmation.id,
       statut: brouillon.programmation.statut,
@@ -158,8 +168,9 @@ function PreparationPspPage() {
       ancienne_annee: null,
       ancien_montant: null,
     }));
-    setOperations(ops);
-  }, [brouillon]);
+    // Enrichissement patrimoine réel (tranches/lots/commandes) — jamais copié en base.
+    setOperations(reference ? enrichirOperationsAvecReference(ops, reference) : ops);
+  }, [brouillon, reference]);
 
   // Référence réelle PAT S11 (lecture seule, ~3 requêtes, aucune écriture).
   const fetchReference = useServerFn(getPspReferencePatrimoine);
@@ -173,7 +184,6 @@ function PreparationPspPage() {
     staleTime: 1000 * 60 * 60,
     retry: 1,
   });
-  const [reference, setReference] = useState<ReferencePatrimoine | null>(null);
 
   // Enrichit une seule fois la base d'opérations avec la référence réelle
   // (CC / adresse / ville / sous-secteur alignés sur les vraies données).
@@ -376,9 +386,11 @@ function PreparationPspPage() {
       ? source.fichier
       : brouillonChargement
         ? "brouillon Supabase (chargement…)"
-        : figee
-          ? `brouillon Supabase v${programmation?.version ?? "?"} — GELÉ (figée)`
-          : `brouillon Supabase v${programmation?.version ?? "?"}`;
+        : aucuneProgrammation
+          ? "aucune programmation PSP"
+          : figee
+            ? `brouillon Supabase v${programmation?.version ?? "?"} — GELÉ (figée)`
+            : `brouillon Supabase v${programmation?.version ?? "?"}`;
   const referenceResume = refBrute
     ? `référence réelle : ${refBrute.tranches.length} tranches · ${refBrute.lots.length} lots · ${refBrute.commandes.length} commandes`
     : refChargement
@@ -425,6 +437,18 @@ function PreparationPspPage() {
   const createLigneFn = useServerFn(createPspLigne);
   const updateLigneFn = useServerFn(updatePspLigne);
   const deleteLigneFn = useServerFn(deletePspLigne);
+  const createProgFn = useServerFn(createPspProgrammation);
+
+  /** Crée la préparation 2027-2031 (officielle, brouillon, v1) puis recharge. */
+  const handleCreerPreparation = async () => {
+    try {
+      await createProgFn();
+      await queryClient.invalidateQueries({ queryKey: ["psp-brouillon-supabase"] });
+      toast.success("Préparation PSP 2027-2031 créée (brouillon v1).");
+    } catch (e) {
+      toast.error(`Création impossible : ${(e as Error).message}`);
+    }
+  };
 
   const handleAjouter = async (saisie: SaisieOperation) => {
     if (figee || !programmation?.id) {
@@ -534,6 +558,7 @@ function PreparationPspPage() {
       toast.error("Programmation figée : suppression impossible.");
       return;
     }
+    if (!window.confirm("Supprimer cette opération du brouillon ?")) return;
     setOperations((prev) => supprimerOperationListe(prev, id));
     try {
       await deleteLigneFn({ data: { id } });
@@ -586,36 +611,52 @@ function PreparationPspPage() {
       <main className="mx-auto max-w-[2200px] space-y-4 px-4 pt-4 sm:px-6">
         <PspKpi operations={operations} exercice={exercice} />
 
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <PspGroupingSelector mode={mode} onChange={setMode} />
-          <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
-            Source : {sourceLabel} · {operations.length} opérations · BUDGET_SOURCE = MOCK
-          </p>
-        </div>
-
-        {mode === "reports" ? (
-          <PspRevueReports
-            programmees={programmees2026}
-            suivi={suivi}
-            exercice={2027}
-            sourceFichiers={suivi2026Disponible}
-            modifications={modifications}
-            confirmees={confirmees}
-            decisions={decisions}
-            onReporter={handleReporter}
-            onAnnuler={handleAnnuler}
-            onConserver={handleConserver}
-            onReevaluer={handleReevaluer}
-            onConfirmerModification={handleConfirmerModification}
-          />
+        {aucuneProgrammation ? (
+          <div className="rounded-xl border border-dashed p-10 text-center">
+            <p className="text-lg font-black">Aucune programmation PSP enregistrée.</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Créez la préparation pluriannuelle 2027-2031 (officielle, brouillon v1) pour commencer
+              la saisie des opérations.
+            </p>
+            <Button className="mt-4" onClick={() => void handleCreerPreparation()}>
+              <Plus className="size-4" />
+              Créer la préparation 2027-2031
+            </Button>
+          </div>
         ) : (
-          <PspTable
-            mode={mode}
-            operations={operations}
-            filters={filters}
-            onFiltersChange={setFilters}
-            onOpenOperation={(op) => setSelectedOpId(op.id)}
-          />
+          <>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <PspGroupingSelector mode={mode} onChange={setMode} />
+              <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+                Source : {sourceLabel} · {operations.length} opérations · BUDGET_SOURCE = MOCK
+              </p>
+            </div>
+
+            {mode === "reports" ? (
+              <PspRevueReports
+                programmees={programmees2026}
+                suivi={suivi}
+                exercice={2027}
+                sourceFichiers={suivi2026Disponible}
+                modifications={modifications}
+                confirmees={confirmees}
+                decisions={decisions}
+                onReporter={handleReporter}
+                onAnnuler={handleAnnuler}
+                onConserver={handleConserver}
+                onReevaluer={handleReevaluer}
+                onConfirmerModification={handleConfirmerModification}
+              />
+            ) : (
+              <PspTable
+                mode={mode}
+                operations={operations}
+                filters={filters}
+                onFiltersChange={setFilters}
+                onOpenOperation={(op) => setSelectedOpId(op.id)}
+              />
+            )}
+          </>
         )}
       </main>
 

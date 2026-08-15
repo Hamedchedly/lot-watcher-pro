@@ -43,7 +43,7 @@ export type PspBrouillonComplet = {
     type: string;
     statut: string;
     remarques: string | null;
-  };
+  } | null;
   lignes: PspLignePersist[];
   devis: Array<Record<string, unknown>>;
   reports: Array<Record<string, unknown>>;
@@ -151,23 +151,12 @@ export const getPspBrouillon = createServerFn({ method: "POST" })
       .order("version", { ascending: false })
       .limit(1);
     if (error) throw new Error(`Lecture du brouillon : ${error.message}`);
-    let programmation = prog?.[0] ?? null;
+    const programmation = prog?.[0] ?? null;
 
+    // Aucun brouillon : on NE crée PAS automatiquement (V6.2 — l'utilisateur
+    // déclenche explicitement la création via createPspProgrammation).
     if (!programmation) {
-      const { data: created, error: e2 } = await db
-        .from("psp_programmations")
-        .insert({
-          annee_debut: 2027,
-          annee_fin: 2031,
-          version: 1,
-          type: "officielle",
-          statut: "brouillon",
-          remarques: "Brouillon V6 créé automatiquement",
-        })
-        .select("*")
-        .single();
-      if (e2) throw new Error(`Création du brouillon : ${e2.message}`);
-      programmation = created;
+      return { programmation: null, lignes: [], devis: [], reports: [], decisions: [], links: [] };
     }
 
     const pid = programmation.id;
@@ -213,6 +202,42 @@ export const getPspBrouillon = createServerFn({ method: "POST" })
       decisions,
       links,
     };
+  });
+
+/**
+ * Crée la préparation PSP 2027-2031 (officielle, brouillon, version 1).
+ * Idempotent côté UI : si un brouillon existe déjà, on le retourne.
+ */
+export const createPspProgrammation = createServerFn({ method: "POST" })
+  .validator((d: unknown) => d as undefined)
+  .handler(async ({ data: _d }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
+    const db = supabaseAdmin as any;
+
+    const { data: prog, error } = await db
+      .from("psp_programmations")
+      .select("*")
+      .eq("type", "officielle")
+      .eq("statut", "brouillon")
+      .order("version", { ascending: false })
+      .limit(1);
+    if (error) throw new Error(`Lecture du brouillon : ${error.message}`);
+    if (prog?.[0]) return prog[0];
+
+    const { data: created, error: e2 } = await db
+      .from("psp_programmations")
+      .insert({
+        annee_debut: 2027,
+        annee_fin: 2031,
+        version: 1,
+        type: "officielle",
+        statut: "brouillon",
+        remarques: "Préparation PSP 2027-2031",
+      })
+      .select("*")
+      .single();
+    if (e2) throw new Error(`Création de la préparation : ${e2.message}`);
+    return created;
   });
 
 /** Crée une ligne dans le brouillon (INSERT psp_lignes). */
