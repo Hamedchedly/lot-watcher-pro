@@ -1,67 +1,340 @@
-import type { ReactNode } from "react";
-import { Building2, TrendingDown, TrendingUp } from "lucide-react";
+import { useState, type ReactNode } from "react";
+import { Building2, Check, Pencil, Plus, Trash2, TrendingDown, TrendingUp, X } from "lucide-react";
 
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { money0 } from "@/lib/formats";
-import { PSP_ANNEES, statsDevis, totalOperation, type PspOperation } from "@/lib/psp.prep";
+import {
+  PSP_ANNEES,
+  statsDevis,
+  totalOperation,
+  type PspDevis,
+  type PspOperation,
+} from "@/lib/psp.prep";
+import { DEVIS_STATUT_LABELS } from "@/lib/psp.prep.v7";
 import { cn } from "@/lib/utils";
 
+export type DevisEdit = {
+  entreprise?: string;
+  dateDevis?: string | null;
+  montant?: number;
+  statut?: string | null;
+  commentaire?: string | null;
+};
+
 /**
- * Bloc « Devis » de la fiche opération :
- * liste des devis (mock), min / moyenne / max, puis Budget programmé,
- * Estimation devis et Écart. Tous les montants sont calculés, jamais saisis.
+ * Bloc « Devis » de la fiche opération (V7.1) — CONSULTABLE, AJOUTABLE,
+ * MODIFIABLE via psp_devis (réutilise createPspDevis / updatePspDevis /
+ * deletePspDevis). Le montant du devis alimente l'estimation (calculée, jamais
+ * stockée). Badge « Devis reçu ? » : ☑ dès qu'un devis est enregistré.
  */
-export default function PspDevisPanel({ operation }: { operation: PspOperation }) {
+export default function PspDevisPanel({
+  operation,
+  onAdd,
+  onUpdate,
+  onDelete,
+  figee,
+}: {
+  operation: PspOperation;
+  onAdd: (d: DevisEdit) => Promise<void>;
+  onUpdate: (id: string, d: DevisEdit) => Promise<void>;
+  onDelete: (id: string) => Promise<void>;
+  figee: boolean;
+}) {
+  const [ajoutOuvert, setAjoutOuvert] = useState(false);
+  const [editionId, setEditionId] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const [entre, setEntre] = useState("");
+  const [date, setDate] = useState("");
+  const [montant, setMontant] = useState("");
+  const [statut, setStatut] = useState("recu");
+  const [commentaire, setCommentaire] = useState("");
+
   const stats = statsDevis(operation.devis);
   const budget = totalOperation(operation);
   const estimation = stats?.moyenne ?? null;
   const ecart = estimation !== null ? budget - estimation : null;
 
+  const reinitFormulaire = () => {
+    setEntre("");
+    setDate("");
+    setMontant("");
+    setStatut("recu");
+    setCommentaire("");
+  };
+
+  const ajouter = async () => {
+    if (!entre.trim() || figee) return;
+    setBusy(true);
+    try {
+      await onAdd({
+        entreprise: entre.trim(),
+        dateDevis: date || null,
+        montant: Number(montant) || 0,
+        statut,
+        commentaire: commentaire.trim() || null,
+      });
+      reinitFormulaire();
+      setAjoutOuvert(false);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const sauver = async (d: PspDevis) => {
+    if (!d.id || figee) return;
+    setBusy(true);
+    try {
+      await onUpdate(d.id, {
+        entreprise: d.entreprise,
+        dateDevis: d.date_devis ?? null,
+        montant: d.montant,
+        statut: d.statut ?? null,
+        commentaire: d.commentaire ?? null,
+      });
+      setEditionId(null);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const devisRecu = operation.devis.some(
+    (d) => d.statut && d.statut !== "a_demander" && d.statut !== "annule",
+  );
+
   return (
     <div className="rounded-lg border bg-surface/60 p-3">
-      <p className="flex items-center gap-1.5 text-xs font-black uppercase tracking-widest text-muted-foreground">
-        <Building2 className="size-3.5" />
-        Devis
-      </p>
+      <div className="flex items-center justify-between gap-2">
+        <p className="flex items-center gap-1.5 text-xs font-black uppercase tracking-widest text-muted-foreground">
+          <Building2 className="size-3.5" />
+          Devis
+        </p>
+        <Badge
+          className={cn(
+            "font-bold",
+            devisRecu
+              ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+              : "border-border bg-muted text-muted-foreground",
+          )}
+        >
+          {devisRecu ? "☑ Devis reçu" : "☐ Non"}
+        </Badge>
+      </div>
 
       {operation.devis.length === 0 ? (
         <p className="mt-2 text-xs text-muted-foreground">
-          Aucun devis renseigné pour cette opération (V1 — à connecter).
+          Aucun devis renseigné pour cette opération.
         </p>
       ) : (
-        <>
-          <ul className="mt-2 space-y-1">
-            {[...operation.devis]
-              .sort((a, b) => a.montant - b.montant)
-              .map((d, i) => (
-                <li
-                  key={`${d.entreprise}-${i}`}
-                  className="flex items-center justify-between rounded-md border bg-card px-2.5 py-1.5"
-                >
-                  <span className="flex items-center gap-2 text-xs font-medium">
-                    <span
-                      className={cn(
-                        "flex size-5 items-center justify-center rounded font-mono text-[9px] font-black",
-                        i === 0
-                          ? "bg-emerald-100 text-emerald-700"
-                          : i === operation.devis.length - 1
-                            ? "bg-orange-100 text-orange-700"
-                            : "bg-muted text-muted-foreground",
-                      )}
+        <ul className="mt-2 space-y-1.5">
+          {operation.devis.map((d) => (
+            <li
+              key={d.id ?? `${d.entreprise}-${d.montant}`}
+              className="rounded-md border bg-card p-2"
+            >
+              {editionId === d.id ? (
+                <div className="space-y-1.5">
+                  <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+                    <Input
+                      defaultValue={d.entreprise}
+                      onChange={(e) => (d.entreprise = e.target.value)}
+                      placeholder="Entreprise"
+                      className="h-7 text-xs"
+                    />
+                    <Input
+                      type="date"
+                      defaultValue={d.date_devis ?? ""}
+                      onChange={(e) => (d.date_devis = e.target.value || null)}
+                      className="h-7 text-xs"
+                    />
+                    <Input
+                      type="number"
+                      min={0}
+                      defaultValue={d.montant || ""}
+                      onChange={(e) => (d.montant = Number(e.target.value) || 0)}
+                      placeholder="Montant"
+                      className="h-7 text-xs"
+                    />
+                    <Select value={d.statut ?? "recu"} onValueChange={(v) => (d.statut = v)}>
+                      <SelectTrigger className="h-7 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {Object.entries(DEVIS_STATUT_LABELS).map(([v, l]) => (
+                          <SelectItem key={v} value={v}>
+                            {l}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <Input
+                    defaultValue={d.commentaire ?? ""}
+                    onChange={(e) => (d.commentaire = e.target.value || null)}
+                    placeholder="Commentaire"
+                    className="h-7 text-xs"
+                  />
+                  <div className="flex items-center gap-1">
+                    <Button
+                      size="sm"
+                      className="h-7"
+                      disabled={busy}
+                      onClick={() => void sauver(d)}
                     >
-                      {i + 1}
-                    </span>
-                    {d.entreprise}
-                    {d.remarque ? (
+                      <Check className="size-3" /> Enregistrer
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7"
+                      onClick={() => setEditionId(null)}
+                    >
+                      <X className="size-3" /> Annuler
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex flex-wrap items-center justify-between gap-1">
+                  <span className="flex flex-wrap items-center gap-1.5 text-xs font-medium">
+                    <span className="font-black">{d.entreprise}</span>
+                    {d.date_devis ? (
+                      <span className="text-muted-foreground">
+                        {new Date(d.date_devis).toLocaleDateString("fr-FR")}
+                      </span>
+                    ) : null}
+                    {d.statut ? (
+                      <span className="text-[10px] text-muted-foreground">
+                        {DEVIS_STATUT_LABELS[d.statut] ?? d.statut}
+                      </span>
+                    ) : null}
+                    {d.commentaire ? (
                       <span className="text-[10px] font-normal text-muted-foreground">
-                        — {d.remarque}
+                        — {d.commentaire}
                       </span>
                     ) : null}
                   </span>
-                  <span className="tabnum text-xs font-bold">{money0(d.montant)}</span>
-                </li>
-              ))}
-          </ul>
+                  <span className="flex items-center gap-1">
+                    <span className="tabnum text-xs font-bold">{money0(d.montant)}</span>
+                    {!figee ? (
+                      <>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="size-6 text-muted-foreground hover:text-primary"
+                          title="Modifier"
+                          onClick={() => setEditionId(d.id ?? null)}
+                        >
+                          <Pencil className="size-3" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="size-6 text-muted-foreground hover:text-destructive"
+                          title="Supprimer"
+                          onClick={() => d.id && void onDelete(d.id)}
+                        >
+                          <Trash2 className="size-3" />
+                        </Button>
+                      </>
+                    ) : null}
+                  </span>
+                </div>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
 
+      {!figee ? (
+        <div className="mt-2">
+          {ajoutOuvert ? (
+            <div className="space-y-1.5 rounded-md border bg-card p-2">
+              <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+                <Input
+                  value={entre}
+                  onChange={(e) => setEntre(e.target.value)}
+                  placeholder="Entreprise *"
+                  className="h-7 text-xs"
+                />
+                <Input
+                  type="date"
+                  value={date}
+                  onChange={(e) => setDate(e.target.value)}
+                  className="h-7 text-xs"
+                />
+                <Input
+                  type="number"
+                  min={0}
+                  value={montant}
+                  onChange={(e) => setMontant(e.target.value)}
+                  placeholder="Montant (€)"
+                  className="h-7 text-xs"
+                />
+                <Select value={statut} onValueChange={setStatut}>
+                  <SelectTrigger className="h-7 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {Object.entries(DEVIS_STATUT_LABELS).map(([v, l]) => (
+                      <SelectItem key={v} value={v}>
+                        {l}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <Input
+                value={commentaire}
+                onChange={(e) => setCommentaire(e.target.value)}
+                placeholder="Commentaire"
+                className="h-7 text-xs"
+              />
+              <div className="flex items-center gap-1">
+                <Button
+                  size="sm"
+                  className="h-7"
+                  disabled={busy || !entre.trim()}
+                  onClick={() => void ajouter()}
+                >
+                  <Plus className="size-3" /> Ajouter
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7"
+                  onClick={() => {
+                    setAjoutOuvert(false);
+                    reinitFormulaire();
+                  }}
+                >
+                  Annuler
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 text-xs"
+              onClick={() => setAjoutOuvert(true)}
+            >
+              <Plus className="size-3" /> Ajouter un devis
+            </Button>
+          )}
+        </div>
+      ) : null}
+
+      {operation.devis.length > 0 ? (
+        <>
           <div className="mt-2 grid grid-cols-3 gap-2">
             <MiniStat
               icone={<TrendingDown className="size-3" />}
@@ -101,11 +374,11 @@ export default function PspDevisPanel({ operation }: { operation: PspOperation }
             </div>
           </div>
         </>
-      )}
+      ) : null}
 
       <p className="mt-2 text-[10px] text-muted-foreground">
         Programmation couverte : {PSP_ANNEES[0] ?? 2027} →{" "}
-        {PSP_ANNEES[PSP_ANNEES.length - 1] ?? 2031} — devis mock V1.
+        {PSP_ANNEES[PSP_ANNEES.length - 1] ?? 2031} — devis persistés dans psp_devis.
       </p>
     </div>
   );

@@ -4,6 +4,7 @@ import { ArrowDown, ArrowUp, ChevronsUpDown } from "lucide-react";
 import PspDetailFilters from "@/components/preparation-psp/PspDetailFilters";
 import PspGroupRow from "@/components/preparation-psp/PspGroupRow";
 import PspOperationRow from "@/components/preparation-psp/PspOperationRow";
+import PspQuickAddRow from "@/components/preparation-psp/PspQuickAddRow";
 import type { ModeAffichage } from "@/components/preparation-psp/PspGroupingSelector";
 import {
   Table,
@@ -29,6 +30,8 @@ import {
   type SousGroupeCharge,
   type SousGroupeTranche,
 } from "@/lib/psp.prep";
+import type { LotInfo, PerimetreLigne } from "@/lib/psp.prep.v7";
+import type { ReferencePatrimoine } from "@/lib/psp.prep.data";
 import { cn } from "@/lib/utils";
 
 /** Clés de groupe pour l'état déplié/replié. */
@@ -47,26 +50,35 @@ const FILTRES_VIDES: FiltresDetail = {
 const filtersActive = (f: FiltresDetail): boolean =>
   Boolean(f.q || f.categorie || f.tranche || f.charge_clientele || f.corps_etat || f.annee);
 
-const COLONNES: Array<{ cle: CleTri; label: string; align?: "right" }> = [
-  { cle: "annee", label: "Année" },
-  { cle: "tranche", label: "Tranche" },
-  { cle: "charge_clientele", label: "Chargé clientèle" },
-  { cle: "secteur", label: "Secteur" },
-  { cle: "secteur", label: "C" },
+/** Colonnes descriptives (avant les années) : TR CC Adresse Corps C Nature. */
+const NB_COLS_DESCRIPTIVES = 6;
+/** Colonnes après Total : Devis, Statut, Priorité, Actions. */
+const NB_COLS_TRAILING = 4;
+
+const COLONNES: Array<{ cle: CleTri | null; label: string; align?: "right" }> = [
+  { cle: "tranche", label: "TR" },
+  { cle: "charge_clientele", label: "CC" },
+  { cle: "adresse", label: "Adresse / périmètre" },
   { cle: "corps_etat", label: "Corps d'état" },
-  { cle: "adresse", label: "Adresse" },
-  { cle: "nature_travaux", label: "Nature des travaux" },
+  { cle: "secteur", label: "C" },
+  { cle: "nature_travaux", label: "Nature travaux" },
   ...PSP_ANNEES.map((a) => ({
     cle: String(a) as CleTri,
     label: String(a),
     align: "right" as const,
   })),
   { cle: "total", label: "Total", align: "right" as const },
+  { cle: null, label: "Devis" },
+  { cle: "statut", label: "Statut" },
+  { cle: "priorite", label: "Priorité" },
+  { cle: null, label: "Actions" },
 ];
 
 /**
  * Tableau principal du module. Les totaux des groupes et du pied de tableau
- * sont TOUJOURS calculés à partir des opérations (jamais saisis).
+ * sont TOUJOURS calculés à partir des opérations (jamais saisis). Le mode
+ * « Détail » (aucun regroupement) est le mode PAR DÉFAUT ; les en-têtes sont
+ * triables par clic. La ligne de saisie directe est TOUJOURS affichée en bas.
  */
 export default function PspTable({
   mode,
@@ -74,12 +86,28 @@ export default function PspTable({
   filters,
   onFiltersChange,
   onOpenOperation,
+  onModifier,
+  onSupprimer,
+  perimetresParLigne,
+  lotsParId,
+  quickAdd,
+  figee,
 }: {
   mode: ModeAffichage;
   operations: PspOperation[];
   filters: FiltresDetail;
   onFiltersChange: (f: FiltresDetail) => void;
   onOpenOperation: (op: PspOperation) => void;
+  onModifier: (op: PspOperation) => void;
+  onSupprimer: (id: string) => void;
+  perimetresParLigne: Map<string, PerimetreLigne[]>;
+  lotsParId: Map<string, LotInfo>;
+  quickAdd: {
+    programmationId: string;
+    reference: ReferencePatrimoine | null;
+    onSaved: () => void;
+  } | null;
+  figee: boolean;
 }) {
   const [expanded, setExpanded] = useState<Set<CleGroupe>>(new Set());
   const [tri, setTri] = useState<{ cle: CleTri; asc: boolean } | null>(null);
@@ -120,7 +148,7 @@ export default function PspTable({
   const changerTri = (cle: CleTri) => {
     setTri((prev) => {
       if (prev?.cle === cle) return { cle, asc: !prev.asc };
-      const numerique = cle === "annee" || cle === "total" || PSP_ANNEES.map(String).includes(cle);
+      const numerique = cle === "total" || PSP_ANNEES.map(String).includes(cle);
       return { cle, asc: !numerique };
     });
   };
@@ -129,8 +157,8 @@ export default function PspTable({
     <div className="overflow-hidden rounded-xl border bg-card shadow-panel">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-surface/50 px-3 py-2">
         <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
-          {mode === "tranche" && "Regroupement par tranche → chargé de clientèle"}
-          {mode === "charge" && "Regroupement par chargé de clientèle → tranche"}
+          {mode === "tranche" && "Regroupement par tranche → chargé de clientèle (optionnel)"}
+          {mode === "charge" && "Regroupement par chargé de clientèle → tranche (optionnel)"}
           {mode === "detail" && `Détail — ${triees.length} opérations`}
         </p>
         {mode === "detail" && filtersActive(filters) ? (
@@ -160,13 +188,17 @@ export default function PspTable({
                   className={cn(
                     "sticky top-0 z-10 whitespace-nowrap bg-muted/95 text-[10px] font-black uppercase tracking-widest",
                     col.align === "right" && "text-right",
-                    mode === "detail" && "cursor-pointer select-none hover:text-foreground",
+                    mode === "detail" &&
+                      col.cle &&
+                      "cursor-pointer select-none hover:text-foreground",
                   )}
-                  onClick={mode === "detail" ? () => changerTri(col.cle) : undefined}
+                  onClick={
+                    mode === "detail" && col.cle ? () => changerTri(col.cle as CleTri) : undefined
+                  }
                 >
                   <span className="inline-flex items-center gap-1">
                     {col.label}
-                    {mode === "detail" ? (
+                    {mode === "detail" && col.cle ? (
                       tri?.cle === col.cle ? (
                         tri.asc ? (
                           <ArrowUp className="size-3" />
@@ -185,7 +217,17 @@ export default function PspTable({
 
           <TableBody>
             {mode === "detail"
-              ? triees.map((op) => <PspOperationRow key={op.id} op={op} onOpen={onOpenOperation} />)
+              ? triees.map((op) => (
+                  <PspOperationRow
+                    key={op.id}
+                    op={op}
+                    perimetres={perimetresParLigne.get(op.id) ?? []}
+                    lotsParId={lotsParId}
+                    onOpen={onOpenOperation}
+                    onModifier={onModifier}
+                    onSupprimer={onSupprimer}
+                  />
+                ))
               : null}
 
             {mode === "tranche"
@@ -198,6 +240,10 @@ export default function PspTable({
                     expanded={expanded}
                     basculer={basculer}
                     onOpenOperation={onOpenOperation}
+                    onModifier={onModifier}
+                    onSupprimer={onSupprimer}
+                    perimetresParLigne={perimetresParLigne}
+                    lotsParId={lotsParId}
                   />
                 ))
               : null}
@@ -212,15 +258,37 @@ export default function PspTable({
                     expanded={expanded}
                     basculer={basculer}
                     onOpenOperation={onOpenOperation}
+                    onModifier={onModifier}
+                    onSupprimer={onSupprimer}
+                    perimetresParLigne={perimetresParLigne}
+                    lotsParId={lotsParId}
                   />
                 ))
               : null}
+
+            {/* Ligne de saisie directe — TOUJOURS en bas du tableau */}
+            {quickAdd ? (
+              <TableRow className="bg-primary/5 hover:bg-primary/5">
+                <TableCell
+                  colSpan={nbColonnes}
+                  className="px-2 py-2"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <PspQuickAddRow
+                    programmationId={quickAdd.programmationId}
+                    reference={quickAdd.reference}
+                    onSaved={quickAdd.onSaved}
+                    figee={figee}
+                  />
+                </TableCell>
+              </TableRow>
+            ) : null}
           </TableBody>
 
           {mode === "detail" ? (
             <TableFooter>
               <TableRow>
-                <TableCell colSpan={8} className="py-2 text-xs font-bold">
+                <TableCell colSpan={NB_COLS_DESCRIPTIVES} className="py-2 text-xs font-bold">
                   Total — {triees.length} opération{triees.length > 1 ? "s" : ""}
                 </TableCell>
                 {PSP_ANNEES.map((annee) => (
@@ -237,6 +305,7 @@ export default function PspTable({
                     {money0(totauxDetail.total)}
                   </span>
                 </TableCell>
+                <TableCell colSpan={NB_COLS_TRAILING} className="py-2" />
               </TableRow>
             </TableFooter>
           ) : null}
@@ -246,6 +315,14 @@ export default function PspTable({
   );
 }
 
+type PropsOpLigne = {
+  onOpenOperation: (op: PspOperation) => void;
+  onModifier: (op: PspOperation) => void;
+  onSupprimer: (id: string) => void;
+  perimetresParLigne: Map<string, PerimetreLigne[]>;
+  lotsParId: Map<string, LotInfo>;
+};
+
 /** Fragments JSX du mode « Par tranche » : groupe racine + sous-groupes + opérations. */
 function FragmentsTranche({
   tranche,
@@ -253,15 +330,14 @@ function FragmentsTranche({
   stats,
   expanded,
   basculer,
-  onOpenOperation,
+  ...ligne
 }: {
   tranche: string;
   charges: SousGroupeCharge[];
   stats: { nbOperations: number; parAnnee: Record<string, number>; total: number };
   expanded: Set<CleGroupe>;
   basculer: (cle: CleGroupe) => void;
-  onOpenOperation: (op: PspOperation) => void;
-}) {
+} & PropsOpLigne) {
   const cle1: CleGroupe = `t1:${tranche}`;
   const ouvert1 = expanded.has(cle1);
   return (
@@ -287,7 +363,7 @@ function FragmentsTranche({
                 expanded={ouvert2}
                 basculer={basculer}
                 operations={c.operations}
-                onOpenOperation={onOpenOperation}
+                {...ligne}
               />
             );
           })
@@ -303,15 +379,14 @@ function FragmentsChargé({
   stats,
   expanded,
   basculer,
-  onOpenOperation,
+  ...ligne
 }: {
   charge: string;
   tranches: SousGroupeTranche[];
   stats: { nbOperations: number; parAnnee: Record<string, number>; total: number };
   expanded: Set<CleGroupe>;
   basculer: (cle: CleGroupe) => void;
-  onOpenOperation: (op: PspOperation) => void;
-}) {
+} & PropsOpLigne) {
   const cle1: CleGroupe = `c1:${charge}`;
   const ouvert1 = expanded.has(cle1);
   return (
@@ -337,7 +412,7 @@ function FragmentsChargé({
                 expanded={ouvert2}
                 basculer={basculer}
                 operations={t.operations}
-                onOpenOperation={onOpenOperation}
+                {...ligne}
               />
             );
           })
@@ -356,6 +431,10 @@ function FragmentSousGroupe({
   basculer,
   operations,
   onOpenOperation,
+  onModifier,
+  onSupprimer,
+  perimetresParLigne,
+  lotsParId,
 }: {
   cle: CleGroupe;
   hint: string;
@@ -364,8 +443,7 @@ function FragmentSousGroupe({
   expanded: boolean;
   basculer: (cle: CleGroupe) => void;
   operations: PspOperation[];
-  onOpenOperation: (op: PspOperation) => void;
-}) {
+} & PropsOpLigne) {
   return (
     <>
       <PspGroupRow
@@ -377,8 +455,20 @@ function FragmentSousGroupe({
         onToggle={() => basculer(cle)}
       />
       {expanded
-        ? operations.map((op) => <PspOperationRow key={op.id} op={op} onOpen={onOpenOperation} />)
+        ? operations.map((op) => (
+            <PspOperationRow
+              key={op.id}
+              op={op}
+              perimetres={perimetresParLigne.get(op.id) ?? []}
+              lotsParId={lotsParId}
+              onOpen={onOpenOperation}
+              onModifier={onModifier}
+              onSupprimer={onSupprimer}
+            />
+          ))
         : null}
     </>
   );
 }
+
+const nbColonnes = COLONNES.length;

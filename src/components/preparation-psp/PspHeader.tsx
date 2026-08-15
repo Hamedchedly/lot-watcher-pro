@@ -1,49 +1,28 @@
 import { useRef } from "react";
-import {
-  CalendarRange,
-  Download,
-  FlaskConical,
-  History,
-  Plus,
-  ScanSearch,
-  Upload,
-} from "lucide-react";
+import { CalendarRange, Download, FlaskConical, History, ScanSearch, Upload } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { PSP_ANNEES } from "@/lib/psp.prep";
 
 /**
  * En-tête du module « Préparation PSP » :
- * titre, sous-titre, sélecteur d'exercice, badge « Brouillon », badge de
- * source de données (mock / esquisse fichier / référence réelle), et actions.
- * Le chargement de l'esquisse 2027 est LOCAL (aucune écriture en base).
+ * titre, sous-titre, badge « Brouillon », badge de source de données
+ * (mock / esquisse fichier / référence réelle), et actions.
+ * Le sélecteur d'exercice vit dans la répartition annuelle (filtre unique) ;
+ * le chargement de l'esquisse 2027 est LOCAL (aucune écriture en base).
  */
 export default function PspHeader({
-  exercice,
-  onExerciceChange,
   onAncienneProgrammation,
   onAnalyser,
   onSimulation,
-  onAjouterOperation,
   onExporter,
   onChargerEsquisse,
   sourceLabel,
   referenceResume,
 }: {
-  exercice: number;
-  onExerciceChange: (annee: number) => void;
   onAncienneProgrammation: () => void;
   onAnalyser: () => void;
   onSimulation: () => void;
-  onAjouterOperation: () => void;
   onExporter: () => void;
   onChargerEsquisse: (file: File) => void;
   sourceLabel: string;
@@ -83,24 +62,6 @@ export default function PspHeader({
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <div className="flex items-center gap-2 rounded-lg border bg-background px-2.5 py-1">
-              <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
-                Exercice
-              </span>
-              <Select value={String(exercice)} onValueChange={(v) => onExerciceChange(Number(v))}>
-                <SelectTrigger className="h-8 w-[90px] border-0 bg-transparent px-0 font-black shadow-none">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {PSP_ANNEES.map((a) => (
-                    <SelectItem key={a} value={String(a)}>
-                      {a}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
             <input
               ref={fichierRef}
               type="file"
@@ -132,10 +93,6 @@ export default function PspHeader({
             <Button variant="outline" size="sm" onClick={onSimulation}>
               <FlaskConical className="size-3.5" />
               Simulation
-            </Button>
-            <Button size="sm" onClick={onAjouterOperation}>
-              <Plus className="size-3.5" />
-              Ajouter une opération
             </Button>
             <Button variant="outline" size="sm" onClick={onExporter}>
               <Download className="size-3.5" />

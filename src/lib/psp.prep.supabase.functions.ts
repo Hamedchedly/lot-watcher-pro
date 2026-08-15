@@ -18,6 +18,8 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
+import { lotsDeAdresse, numerosDeRue, ruesDeTranche } from "./psp.prep.v7.ts";
+
 export type PspLignePersist = {
   id: string;
   programmation_id: string;
@@ -29,6 +31,8 @@ export type PspLignePersist = {
   programme: Record<string, number>;
   ligne_budget: string | null;
   remarques: string | null;
+  statut: string;
+  priorite: string;
   origine: string;
   created_at: string;
   updated_at: string;
@@ -81,6 +85,11 @@ const ligneInput = z.object({
   programme: z.record(z.string(), z.number()),
   ligneBudget: z.string().nullish(),
   remarques: z.string().nullish(),
+  statut: z
+    .enum(["a_definir", "attente_agence", "attente_confirmation"])
+    .optional()
+    .default("a_definir"),
+  priorite: z.enum(["prioritaire", "normale", "non_prioritaire"]).optional().default("normale"),
   origine: z.enum(["preparation", "report", "esquisse", "suivi"]).default("preparation"),
 });
 type LigneInput = z.infer<typeof ligneInput>;
@@ -95,6 +104,8 @@ const patchLigne = z.object({
   programme: z.record(z.string(), z.number()),
   ligneBudget: z.string().nullish(),
   remarques: z.string().nullish(),
+  statut: z.enum(["a_definir", "attente_agence", "attente_confirmation"]).optional(),
+  priorite: z.enum(["prioritaire", "normale", "non_prioritaire"]).optional(),
 });
 
 const idSchema = z.object({ id: z.string().uuid() });
@@ -294,6 +305,8 @@ export const createPspLigne = createServerFn({ method: "POST" })
         programme: data.programme,
         ligne_budget: data.ligneBudget ?? null,
         remarques: data.remarques ?? null,
+        statut: data.statut,
+        priorite: data.priorite,
         origine: data.origine,
       })
       .select("*")
@@ -319,6 +332,8 @@ export const updatePspLigne = createServerFn({ method: "POST" })
         programme: data.programme,
         ligne_budget: data.ligneBudget ?? null,
         remarques: data.remarques ?? null,
+        statut: data.statut,
+        priorite: data.priorite,
       })
       .eq("id", data.id)
       .select("*")
@@ -616,6 +631,69 @@ export const rechercherLotsV7 = createServerFn({ method: "POST" })
     const { data: rows, error } = await query.order("code_patrimoine").limit(25);
     if (error) throw new Error(`Recherche de lots : ${error.message}`);
     return rows ?? [];
+  });
+
+/** Rues distinctes d'une tranche (réutilise `rueDe` — hiérarchie TR → rues → numéros). */
+export const rechercherRuesTranche = createServerFn({ method: "POST" })
+  .validator((d: unknown) =>
+    z.object({ tranche: z.string().min(1), q: z.string().max(40).default("") }).parse(d),
+  )
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
+    const db = supabaseAdmin as any;
+    const { data: rows, error } = await db
+      .from("lots")
+      .select("adresse, ville")
+      .eq("tranche_code", data.tranche)
+      .eq("actif", true)
+      .limit(600);
+    if (error) throw new Error(`Lecture des rues : ${error.message}`);
+    return ruesDeTranche(
+      (rows ?? []) as Array<{ adresse: string | null; ville: string | null }>,
+      data.q,
+    );
+  });
+
+/** Numéros/entrées disponibles d'une rue dans une tranche. */
+export const rechercherNumerosRue = createServerFn({ method: "POST" })
+  .validator((d: unknown) =>
+    z.object({ tranche: z.string().min(1), rue: z.string().min(1) }).parse(d),
+  )
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
+    const db = supabaseAdmin as any;
+    const { data: rows, error } = await db
+      .from("lots")
+      .select("adresse, ville")
+      .eq("tranche_code", data.tranche)
+      .eq("actif", true)
+      .limit(600);
+    if (error) throw new Error(`Lecture des numéros : ${error.message}`);
+    return numerosDeRue(
+      (rows ?? []) as Array<{ adresse: string | null; ville: string | null }>,
+      data.rue,
+    );
+  });
+
+/** Lots d'une entrée précise (« 12 RUE CORNILLIOT ») dans une tranche — multi-sélection. */
+export const rechercherLotsAdresse = createServerFn({ method: "POST" })
+  .validator((d: unknown) =>
+    z.object({ tranche: z.string().min(1), adresse: z.string().min(1) }).parse(d),
+  )
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
+    const db = supabaseAdmin as any;
+    const { data: rows, error } = await db
+      .from("lots")
+      .select("id, code_patrimoine, tranche_code, adresse, ville, locataire_nom")
+      .eq("tranche_code", data.tranche)
+      .eq("actif", true)
+      .limit(600);
+    if (error) throw new Error(`Lecture des lots de l'adresse : ${error.message}`);
+    return lotsDeAdresse(
+      (rows ?? []) as Array<{ id: string; code_patrimoine: string; adresse: string | null }>,
+      data.adresse,
+    );
   });
 
 /** Crée un report source → cible (la ligne cible porte origine='report'). */

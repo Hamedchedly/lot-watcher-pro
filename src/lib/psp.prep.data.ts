@@ -41,6 +41,8 @@ export type TrancheRaw = {
 };
 
 export type LotRaw = {
+  id?: string;
+  code_patrimoine?: string | null;
   tranche_code: string | null;
   adresse: string | null;
   ville: string | null;

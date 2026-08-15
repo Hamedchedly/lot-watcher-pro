@@ -46,7 +46,11 @@ export const getPspReferencePatrimoine = createServerFn({ method: "GET" }).handl
 
     const lots: LotRaw[] = [];
     for (let from = 0; ; from += PAGE) {
-      const { data, error } = await chargerPage("lots", "tranche_code, adresse, ville", from);
+      const { data, error } = await chargerPage(
+        "lots",
+        "id, code_patrimoine, tranche_code, adresse, ville",
+        from,
+      );
       if (error) throw new Error(`Lecture des lots : ${error.message}`);
       const page = (data ?? []) as LotRaw[];
       lots.push(...page);

@@ -39,7 +39,7 @@ export default function PspGroupRow({
       )}
       onClick={onToggle}
     >
-      <TableCell colSpan={8} className="py-2">
+      <TableCell colSpan={6} className="py-2">
         <div
           className={cn(
             "flex items-center gap-2",
@@ -90,6 +90,7 @@ export default function PspGroupRow({
       <TableCell className="py-2 text-right">
         <span className="tabnum text-xs font-black text-foreground">{money0(stats.total)}</span>
       </TableCell>
+      <TableCell colSpan={4} className="py-2" />
     </TableRow>
   );
 }

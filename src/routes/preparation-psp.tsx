@@ -6,7 +6,6 @@ import { AlertTriangle, FlaskConical, Plus } from "lucide-react";
 import { toast } from "sonner";
 
 import PspAncienneProgrammation from "@/components/preparation-psp/PspAncienneProgrammation";
-import PspCockpitV7, { type EnveloppeMap } from "@/components/preparation-psp/PspCockpitV7";
 import PspEnveloppesDialog from "@/components/preparation-psp/PspEnveloppesDialog";
 import PspGroupingSelector, {
   type ModeAffichage,
@@ -15,7 +14,7 @@ import PspHeader from "@/components/preparation-psp/PspHeader";
 import PspKpi from "@/components/preparation-psp/PspKpi";
 import PspOperationDetail from "@/components/preparation-psp/PspOperationDetail";
 import PspOperationForm from "@/components/preparation-psp/PspOperationForm";
-import PspQuickAddRow from "@/components/preparation-psp/PspQuickAddRow";
+import type { DevisEdit } from "@/components/preparation-psp/PspDevisPanel";
 import PspRevueReports from "@/components/preparation-psp/PspRevueReports";
 import PspTable from "@/components/preparation-psp/PspTable";
 import { Button } from "@/components/ui/button";
@@ -68,14 +67,20 @@ import {
 } from "@/lib/psp.prep.suivi";
 import { getTravauxDashboard } from "@/lib/travaux.dashboard.functions";
 import {
+  createPspDevis,
   createPspLigne,
   createPspProgrammation,
+  deletePspDevis,
   deletePspLigne,
   getPspBrouillon,
   savePspEnveloppes,
+  updatePspDevis,
   updatePspLigne,
+  updatePspLigneStatutPriorite,
   type PspLignePersist,
+  type PspPerimetrePersist,
 } from "@/lib/psp.prep.supabase.functions";
+import { type EnveloppeMap, type LotInfo, type PerimetreLigne } from "@/lib/psp.prep.v7";
 
 export const Route = createFileRoute("/preparation-psp")({
   head: () => ({
@@ -92,8 +97,7 @@ export const Route = createFileRoute("/preparation-psp")({
 });
 
 function PreparationPspPage() {
-  const [exercice, setExercice] = useState(2027);
-  const [mode, setMode] = useState<ModeAffichage>("tranche");
+  const [mode, setMode] = useState<ModeAffichage>("detail");
   const [filters, setFilters] = useState<FiltresDetail>(FILTRES_VIDES);
   const [selectedOpId, setSelectedOpId] = useState<string | null>(null);
   const [ancienneOuverte, setAncienneOuverte] = useState(false);
@@ -102,12 +106,14 @@ function PreparationPspPage() {
   const [formMode, setFormMode] = useState<"ajout" | "modification">("ajout");
   const [formOperation, setFormOperation] = useState<PspOperation | null>(null);
 
-  // ── V7 : filtre annuel cumulatif, enveloppes, saisie directe ──
+  // ── V7.1 : filtre annuel cumulatif (répartition cliquable), enveloppes ──
   const [anneesFiltre, setAnneesFiltre] = useState<PspAnnee[]>([]);
-  const [anneeActive, setAnneeActive] = useState<PspAnnee>(2027);
   const [enveloppes, setEnveloppes] = useState<EnveloppeMap>({});
-  const [quickAddOuvert, setQuickAddOuvert] = useState(false);
   const [enveloppesDialogOuvert, setEnveloppesDialogOuvert] = useState(false);
+  const [perimetresParLigne, setPerimetresParLigne] = useState<Map<string, PerimetreLigne[]>>(
+    new Map(),
+  );
+  const [lotsParId, setLotsParId] = useState<Map<string, LotInfo>>(new Map());
 
   // Source des opérations : mock V1 par défaut, fichier esquisse 2027 si chargé.
   const [source, setSource] = useState<{ type: "mock" | "fichier"; fichier?: string }>({
@@ -159,6 +165,17 @@ function PreparationPspPage() {
       if (!id) continue;
       devisParLigne.set(id, [...(devisParLigne.get(id) ?? []), d]);
     }
+    // Périmètres par ligne (affichage de l'adresse réelle dans le tableau).
+    const perimetres = new Map<string, PerimetreLigne[]>();
+    for (const p of brouillon.perimetres ?? []) {
+      const cle = p.psp_ligne_id;
+      if (!cle) continue;
+      perimetres.set(cle, [
+        ...(perimetres.get(cle) ?? []),
+        { niveau: p.niveau, rue: p.rue, numero: p.numero, lot_id: p.lot_id },
+      ]);
+    }
+    setPerimetresParLigne(perimetres);
     const ops: PspOperation[] = (brouillon.lignes ?? []).map((l: PspLignePersist) => ({
       id: l.id,
       annee: 2027 as PspAnnee,
@@ -176,11 +193,17 @@ function PreparationPspPage() {
       programme: l.programme ?? {},
       remarques: l.remarques,
       devis: (devisParLigne.get(l.id) ?? []).map((d) => ({
+        id: String(d["id"] ?? ""),
         entreprise: String(d["entreprise"] ?? ""),
         montant: Number(d["montant"] ?? 0),
+        date_devis: (d["date_devis"] as string | null) ?? null,
+        statut: String(d["statut"] ?? ""),
         remarque: (d["commentaire"] as string | null) ?? null,
+        commentaire: (d["commentaire"] as string | null) ?? null,
       })),
       reportee: l.origine === "report",
+      statut: l.statut,
+      priorite: l.priorite,
       ancienne_annee: null,
       ancien_montant: null,
     }));
@@ -207,6 +230,17 @@ function PreparationPspPage() {
     if (!refBrute) return;
     const ref = construireReferencePatrimoine(refBrute.tranches, refBrute.lots, refBrute.commandes);
     setReference(ref);
+    // Index id → lot pour le libellé de périmètre (affichage — jamais copié).
+    const lots: Map<string, LotInfo> = new Map();
+    for (const l of refBrute.lots) {
+      if (!l.id) continue;
+      lots.set(l.id, {
+        code_patrimoine: l.code_patrimoine ?? null,
+        adresse: l.adresse,
+        ville: l.ville,
+      });
+    }
+    setLotsParId(lots);
     setOperations((prev) => enrichirOperationsAvecReference(prev, ref));
   }, [refBrute]);
 
@@ -409,7 +443,6 @@ function PreparationPspPage() {
 
   const toggleAnnee = (a: PspAnnee) => {
     setAnneesFiltre((prev) => (prev.includes(a) ? prev.filter((x) => x !== a) : [...prev, a]));
-    setAnneeActive(a);
   };
 
   const saveEnveloppesFn = useServerFn(savePspEnveloppes);
@@ -431,14 +464,6 @@ function PreparationPspPage() {
     } catch (e) {
       toast.error(`Enregistrement impossible : ${(e as Error).message}`);
     }
-  };
-
-  const ouvrirQuickAdd = () => {
-    if (figee) {
-      toast.error("Programmation figée : saisie impossible.");
-      return;
-    }
-    setQuickAddOuvert(true);
   };
 
   const sourceLabel =
@@ -474,16 +499,6 @@ function PreparationPspPage() {
   const analyser = () =>
     toast.info("Analyse — simulation V2. Le moteur d'analyse sera connecté à Supabase plus tard.");
 
-  const ouvrirAjout = () => {
-    if (figee) {
-      toast.error("Programmation figée : ajout d'opération impossible.");
-      return;
-    }
-    setFormMode("ajout");
-    setFormOperation(null);
-    setFormOuvert(true);
-  };
-
   const ouvrirModification = (op: PspOperation) => {
     if (figee) {
       toast.error("Programmation figée : modification impossible.");
@@ -498,6 +513,10 @@ function PreparationPspPage() {
   const updateLigneFn = useServerFn(updatePspLigne);
   const deleteLigneFn = useServerFn(deletePspLigne);
   const createProgFn = useServerFn(createPspProgrammation);
+  const statutPrioriteFn = useServerFn(updatePspLigneStatutPriorite);
+  const createDevisFn = useServerFn(createPspDevis);
+  const updateDevisFn = useServerFn(updatePspDevis);
+  const deleteDevisFn = useServerFn(deletePspDevis);
 
   /** Crée la préparation 2027-2031 (officielle, brouillon, v1) puis recharge. */
   const handleCreerPreparation = async () => {
@@ -508,6 +527,113 @@ function PreparationPspPage() {
     } catch (e) {
       toast.error(`Création impossible : ${(e as Error).message}`);
     }
+  };
+
+  /** Statut / priorité : persistés dans psp_lignes (badges + sélecteurs). */
+  const handleStatutPriorite = async (
+    id: string,
+    patch: { statut?: string; priorite?: string },
+  ) => {
+    if (figee) {
+      toast.error("Programmation figée : modification impossible.");
+      return;
+    }
+    setOperations((prev) => prev.map((o) => (o.id === id ? { ...o, ...patch } : o)));
+    try {
+      await statutPrioriteFn({ data: { id, ...patch } });
+    } catch (e) {
+      toast.error(`Statut / priorité non persisté : ${(e as Error).message}`);
+    }
+  };
+
+  const majDevisOperation = (id: string, devis: PspOperation["devis"]) => {
+    setOperations((prev) => prev.map((o) => (o.id === id ? { ...o, devis } : o)));
+  };
+
+  const handleDevisAdd = async (ligneId: string, d: DevisEdit) => {
+    if (figee || !programmation?.id) return;
+    const devis = await createDevisFn({
+      data: {
+        pspLigneId: ligneId,
+        entreprise: d.entreprise ?? "",
+        dateDevis: d.dateDevis ?? null,
+        montant: d.montant ?? 0,
+        statut: (d.statut ?? "recu") as "recu",
+        commentaire: d.commentaire ?? null,
+        documentReference: null,
+      },
+    });
+    const ligne = operations.find((o) => o.id === ligneId);
+    const list = ligne?.devis ?? [];
+    majDevisOperation(ligneId, [
+      ...list,
+      {
+        id: String(devis["id"] ?? ""),
+        entreprise: String(devis["entreprise"] ?? ""),
+        montant: Number(devis["montant"] ?? 0),
+        date_devis: (devis["date_devis"] as string | null) ?? null,
+        statut: String(devis["statut"] ?? ""),
+        remarque: (devis["commentaire"] as string | null) ?? null,
+        commentaire: (devis["commentaire"] as string | null) ?? null,
+      },
+    ]);
+    toast.success("Devis ajouté et persisté (psp_devis).");
+  };
+
+  const handleDevisUpdate = async (id: string, d: DevisEdit) => {
+    if (figee) return;
+    await updateDevisFn({
+      data: {
+        id,
+        entreprise: d.entreprise,
+        dateDevis: d.dateDevis,
+        montant: d.montant,
+        statut: (d.statut ?? undefined) as
+          | "a_demander"
+          | "demande_envoyee"
+          | "recu"
+          | "a_analyser"
+          | "retenu"
+          | "non_retenu"
+          | "expire"
+          | "annule"
+          | undefined,
+        commentaire: d.commentaire,
+      },
+    });
+    setOperations((prev) =>
+      prev.map((o) => ({
+        ...o,
+        devis: o.devis.map((dv) =>
+          dv.id === id
+            ? {
+                ...dv,
+                entreprise: d.entreprise ?? dv.entreprise,
+                montant: d.montant ?? dv.montant,
+                date_devis: d.dateDevis ?? dv.date_devis ?? null,
+                statut: d.statut ?? dv.statut ?? "",
+                commentaire: d.commentaire ?? dv.commentaire ?? null,
+                remarque: d.commentaire ?? dv.remarque ?? null,
+              }
+            : dv,
+        ),
+      })),
+    );
+    toast.success("Devis modifié et persisté.");
+  };
+
+  const handleDevisDelete = async (id: string) => {
+    if (figee) return;
+    await deleteDevisFn({ data: { id } });
+    setOperations((prev) =>
+      prev.map((o) => ({ ...o, devis: o.devis.filter((dv) => dv.id !== id) })),
+    );
+    toast.success("Devis supprimé (psp_devis).");
+  };
+
+  /** Après une saisie directe : recharger le brouillon (lignes + périmètres). */
+  const handleQuickSaved = () => {
+    void queryClient.invalidateQueries({ queryKey: ["psp-brouillon-supabase"] });
   };
 
   const handleAjouter = async (saisie: SaisieOperation) => {
@@ -656,12 +782,9 @@ function PreparationPspPage() {
   return (
     <div className="min-h-screen bg-background pb-12 text-foreground">
       <PspHeader
-        exercice={exercice}
-        onExerciceChange={setExercice}
         onAncienneProgrammation={() => setAncienneOuverte(true)}
         onAnalyser={analyser}
         onSimulation={() => setSimulationOuverte(true)}
-        onAjouterOperation={ouvrirAjout}
         onExporter={exporter}
         onChargerEsquisse={handleChargerEsquisse}
         sourceLabel={sourceLabel}
@@ -669,7 +792,14 @@ function PreparationPspPage() {
       />
 
       <main className="mx-auto max-w-[2200px] space-y-4 px-4 pt-4 sm:px-6">
-        <PspKpi operations={operations} exercice={exercice} />
+        <PspKpi
+          operations={operations}
+          anneesFiltre={anneesFiltre}
+          onToggleAnnee={toggleAnnee}
+          enveloppes={enveloppes}
+          onOuvrirEnveloppes={() => setEnveloppesDialogOuvert(true)}
+          figee={figee}
+        />
 
         {aucuneProgrammation ? (
           <div className="rounded-xl border border-dashed p-10 text-center">
@@ -686,44 +816,11 @@ function PreparationPspPage() {
         ) : (
           <>
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex flex-wrap items-center gap-2">
-                <PspGroupingSelector mode={mode} onChange={setMode} />
-                <Button
-                  variant={quickAddOuvert ? "default" : "outline"}
-                  size="sm"
-                  onClick={ouvrirQuickAdd}
-                  title="Ajout rapide : recherche patrimoine + corps d'état → catégorie automatique"
-                >
-                  <Plus className="size-3.5" />
-                  Saisie directe
-                </Button>
-              </div>
+              <PspGroupingSelector mode={mode} onChange={setMode} />
               <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
                 Source : {sourceLabel} · {operations.length} opérations · BUDGET_SOURCE = MOCK
               </p>
             </div>
-
-            {quickAddOuvert && programmation?.id ? (
-              <PspQuickAddRow
-                programmationId={programmation.id}
-                reference={reference}
-                onSaved={() => {
-                  setQuickAddOuvert(false);
-                  void queryClient.invalidateQueries({ queryKey: ["psp-brouillon-supabase"] });
-                }}
-                onCancel={() => setQuickAddOuvert(false)}
-              />
-            ) : null}
-
-            <PspCockpitV7
-              operations={operations}
-              anneesFiltre={anneesFiltre}
-              anneeActive={anneeActive}
-              onToggleAnnee={toggleAnnee}
-              enveloppes={enveloppes}
-              onOuvrirEnveloppes={() => setEnveloppesDialogOuvert(true)}
-              figee={figee}
-            />
 
             {mode === "reports" ? (
               <PspRevueReports
@@ -747,6 +844,20 @@ function PreparationPspPage() {
                 filters={filters}
                 onFiltersChange={setFilters}
                 onOpenOperation={(op) => setSelectedOpId(op.id)}
+                onModifier={ouvrirModification}
+                onSupprimer={handleSupprimer}
+                perimetresParLigne={perimetresParLigne}
+                lotsParId={lotsParId}
+                quickAdd={
+                  programmation?.id
+                    ? {
+                        programmationId: programmation.id,
+                        reference,
+                        onSaved: handleQuickSaved,
+                      }
+                    : null
+                }
+                figee={figee}
               />
             )}
           </>
@@ -756,10 +867,14 @@ function PreparationPspPage() {
       <PspOperationDetail
         operation={selectedOp}
         deplacements={deplacements}
+        figee={figee}
         onClose={() => setSelectedOpId(null)}
         onModifier={ouvrirModification}
         onDeplacer={handleDeplacer}
         onSupprimer={handleSupprimer}
+        onDevisAdd={handleDevisAdd}
+        onDevisUpdate={handleDevisUpdate}
+        onDevisDelete={handleDevisDelete}
       />
 
       <PspEnveloppesDialog

@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { PSP_ANNEES, type PspAnnee } from "@/lib/psp.prep";
-import type { EnveloppeMap } from "@/components/preparation-psp/PspCockpitV7";
+import type { EnveloppeMap } from "@/lib/psp.prep.v7";
 
 const CATEGORIES = ["GE", "GT", "CP"] as const;
 

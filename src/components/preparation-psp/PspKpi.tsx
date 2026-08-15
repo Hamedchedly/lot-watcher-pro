@@ -1,8 +1,9 @@
 import type { ReactNode } from "react";
-import { BarChart3, Coins, Layers, PiggyBank, Scale } from "lucide-react";
+import { BarChart3, Coins, Layers, PiggyBank, Scale, Settings2, TriangleAlert } from "lucide-react";
 
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import PspSecteurBadge from "@/components/preparation-psp/PspSecteurBadge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { money0 } from "@/lib/formats";
 import {
   BUDGET_SOURCE,
@@ -10,26 +11,51 @@ import {
   PSP_BUDGET_DISPONIBLE_PAR_ANNEE,
   kpiGlobal,
   totauxParCategorie,
+  type PspAnnee,
   type PspCategorie,
   type PspOperation,
 } from "@/lib/psp.prep";
+import { calculEnveloppe, type EnveloppeMap } from "@/lib/psp.prep.v7";
 import { cn } from "@/lib/utils";
+
+const CATEGORIES = ["GE", "GT", "CP"] as const;
 
 /**
  * KPI du module : Budget disponible, Budget programmé, Écart disponible,
- * Nombre d'opérations — puis la répartition par année (2027 → 2031) et par
- * catégorie budgétaire C (GE / GT / CP). Tous les montants sont calculés à
- * partir des opérations (jamais saisis).
+ * Nombre d'opérations — puis UNE SEULE zone « Répartition par année »
+ * (2027 → 2031), cliquable (filtre cumulatif — ne modifie jamais la
+ * programmation), qui intègre le détail GE / GT / CP : montant programmé /
+ * enveloppe, pourcentage et barre d'avancement (dépassement en rouge).
+ * L'enveloppe reste saisie via « Gérer les enveloppes » (BUDGET_SOURCE = MOCK).
  */
 export default function PspKpi({
   operations,
-  exercice,
+  anneesFiltre,
+  onToggleAnnee,
+  enveloppes,
+  onOuvrirEnveloppes,
+  figee,
 }: {
   operations: PspOperation[];
-  exercice: number;
+  anneesFiltre: PspAnnee[];
+  onToggleAnnee: (a: PspAnnee) => void;
+  enveloppes: EnveloppeMap;
+  onOuvrirEnveloppes: () => void;
+  figee: boolean;
 }) {
   const kpi = kpiGlobal(operations);
   const totauxC = totauxParCategorie(operations);
+
+  // Programmé par année × catégorie — toujours calculé, jamais stocké.
+  const programmePar: Record<string, number> = {};
+  for (const op of operations) {
+    for (const a of PSP_ANNEES) {
+      const v = op.programme?.[String(a)] ?? 0;
+      if (v > 0) {
+        programmePar[`${a}|${op.categorie}`] = (programmePar[`${a}|${op.categorie}`] ?? 0) + v;
+      }
+    }
+  }
 
   return (
     <section className="space-y-4">
@@ -66,65 +92,140 @@ export default function PspKpi({
 
       <Card className="shadow-panel">
         <CardHeader className="pb-2">
-          <CardTitle className="flex items-center gap-2 text-sm font-semibold">
-            <BarChart3 className="size-4 text-muted-foreground" />
-            Répartition par année
+          <CardTitle className="flex flex-wrap items-center justify-between gap-2 text-sm font-semibold">
+            <span className="flex items-center gap-2">
+              <BarChart3 className="size-4 text-muted-foreground" />
+              Répartition par année
+            </span>
+            <Button variant="outline" size="sm" onClick={onOuvrirEnveloppes} disabled={figee}>
+              <Settings2 className="size-3.5" />
+              Gérer les enveloppes
+            </Button>
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5">
             {PSP_ANNEES.map((annee) => {
+              const actif = anneesFiltre.includes(annee);
               const programme = kpi.parAnnee[String(annee)] ?? 0;
-              const disponible = PSP_BUDGET_DISPONIBLE_PAR_ANNEE[String(annee)] ?? 0;
+              const envAnnee = CATEGORIES.reduce(
+                (s, c) => s + (enveloppes[`${annee}|${c}`] ?? 0),
+                0,
+              );
+              const disponible =
+                envAnnee > 0 ? envAnnee : (PSP_BUDGET_DISPONIBLE_PAR_ANNEE[String(annee)] ?? 0);
               const ecart = disponible - programme;
-              const taux = disponible > 0 ? Math.min(100, (programme / disponible) * 100) : 0;
-              const actif = annee === exercice;
               return (
                 <div
                   key={annee}
                   className={cn(
                     "rounded-lg border bg-surface/60 p-3 transition-colors",
-                    actif && "border-primary/40 bg-primary/5 ring-1 ring-primary/20",
+                    actif && "border-primary/60 bg-primary/5 ring-2 ring-primary/25",
                   )}
                 >
-                  <div className="flex items-center justify-between">
-                    <span
-                      className={cn(
-                        "font-mono text-sm font-black tabular-nums",
-                        actif ? "text-primary" : "text-foreground",
-                      )}
-                    >
-                      {annee}
-                    </span>
-                    {actif ? (
-                      <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-widest text-primary">
-                        Exercice
-                      </span>
-                    ) : null}
-                  </div>
-                  <p className="tabnum mt-2 text-sm font-bold">{money0(programme)}</p>
-                  <p className="text-xs text-muted-foreground">programmé</p>
-                  <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-border">
-                    <div
-                      className="h-full rounded-full bg-primary/70 transition-all"
-                      style={{ width: `${taux}%` }}
-                    />
-                  </div>
-                  <p
+                  <button
+                    type="button"
+                    onClick={() => onToggleAnnee(annee)}
                     className={cn(
-                      "tabnum mt-2 text-xs font-semibold",
-                      ecart >= 0 ? "text-emerald-600" : "text-destructive",
+                      "flex w-full items-center justify-between gap-2 rounded-md px-2 py-1 text-left",
+                      actif
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-card ring-1 ring-border hover:bg-accent",
                     )}
+                    title={
+                      actif
+                        ? `Désélectionner ${annee} (filtre cumulatif)`
+                        : `Sélectionner ${annee} — les opérations programmées en ${annee} sont affichées`
+                    }
                   >
-                    {money0(ecart)}
-                  </p>
-                  <p className="text-[10px] text-muted-foreground">
-                    écart sur {money0(disponible)}
-                  </p>
+                    <span className="font-mono text-sm font-black">{annee}</span>
+                    <span className="text-[10px] font-bold opacity-80">
+                      {actif ? "✓ ON" : "filtrer"}
+                    </span>
+                  </button>
+
+                  <div className="mt-2 space-y-1 text-xs">
+                    <p className="flex items-center justify-between">
+                      <span className="text-muted-foreground">Budget disponible</span>
+                      <span className="tabnum font-bold">{money0(disponible)}</span>
+                    </p>
+                    <p className="flex items-center justify-between">
+                      <span className="text-muted-foreground">Programmé</span>
+                      <span className="tabnum font-bold">{money0(programme)}</span>
+                    </p>
+                    <p className="flex items-center justify-between">
+                      <span className="text-muted-foreground">Restant / écart</span>
+                      <span
+                        className={cn(
+                          "tabnum font-black",
+                          ecart >= 0 ? "text-emerald-600" : "text-destructive",
+                        )}
+                      >
+                        {money0(ecart)}
+                      </span>
+                    </p>
+                  </div>
+
+                  <div className="mt-2 space-y-1.5 border-t border-dashed pt-2">
+                    {CATEGORIES.map((cat) => {
+                      const enveloppe = enveloppes[`${annee}|${cat}`] ?? 0;
+                      const prog = programmePar[`${annee}|${cat}`] ?? 0;
+                      const calc = calculEnveloppe(enveloppe, prog);
+                      const pct = calc.pourcentage == null ? null : Math.min(1, calc.pourcentage);
+                      return (
+                        <div key={cat}>
+                          <div className="flex items-center justify-between gap-2 text-[10px]">
+                            <span className="flex items-center gap-1">
+                              <PspSecteurBadge categorie={cat} />
+                              {enveloppe > 0 ? (
+                                <span className="font-mono tabnum text-muted-foreground">
+                                  {money0(prog)} / {money0(enveloppe)}
+                                </span>
+                              ) : (
+                                <span className="text-muted-foreground/70">
+                                  enveloppe à définir
+                                </span>
+                              )}
+                            </span>
+                            <span
+                              className={cn(
+                                "tabnum font-black",
+                                calc.depassement ? "text-destructive" : "text-primary",
+                              )}
+                            >
+                              {calc.pourcentage == null
+                                ? "—"
+                                : `${Math.round(calc.pourcentage * 100)} %`}
+                            </span>
+                          </div>
+                          <div className="mt-0.5 h-1.5 overflow-hidden rounded-full bg-border">
+                            <div
+                              className={cn(
+                                "h-full rounded-full",
+                                calc.depassement ? "bg-destructive" : "bg-primary/70",
+                              )}
+                              style={{ width: `${Math.max(2, (pct ?? 0) * 100)}%` }}
+                            />
+                          </div>
+                          {calc.depassement ? (
+                            <p className="mt-0.5 flex items-center gap-0.5 text-[9px] font-bold text-destructive">
+                              <TriangleAlert className="size-2.5" />
+                              Dépassement {money0(-calc.restant)}
+                            </p>
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               );
             })}
           </div>
+          <p className="mt-2 text-[10px] text-muted-foreground">
+            Cliquez sur une année pour filtrer le tableau (cumulatif, désélectionnable) · les
+            enveloppes GE/GT/CP sont des données de préparation — BUDGET_SOURCE = MOCK tant que la
+            dotation officielle n'est pas définie.
+          </p>
         </CardContent>
       </Card>
 

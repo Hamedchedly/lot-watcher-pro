@@ -51,11 +51,18 @@ export const PSP_BUDGET_DISPONIBLE_PAR_ANNEE: Record<string, number> = {
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
-/** Devis d'une opération (mock V1/V2 : entreprise + montant). */
+/** Devis d'une opération — structuré (V6+ : psp_devis), entreprise + montant + références. */
 export type PspDevis = {
+  /** Identifiant Supabase (psp_devis.id) — présent dès lors que le devis est persisté. */
+  id?: string;
   entreprise: string;
   montant: number;
+  date_devis?: string | null;
+  /** Statut structuré devis (psp_devis.statut). */
+  statut?: string;
   remarque: string | null;
+  /** Commentaire libre (psp_devis.commentaire). */
+  commentaire?: string | null;
 };
 
 /**
@@ -87,6 +94,10 @@ export type PspOperation = {
   reportee: boolean;
   ancienne_annee: number | null;
   ancien_montant: number | null;
+  /** Statut structuré (psp_lignes.statut) : a_definir | attente_agence | attente_confirmation. */
+  statut?: string;
+  /** Priorité (psp_lignes.priorite) : prioritaire | normale | non_prioritaire. */
+  priorite?: string;
 };
 
 /** Ligne de l'ancienne programmation (modal « Ancienne programmation »). */
@@ -323,6 +334,8 @@ export type CleTri =
   | "corps_etat"
   | "adresse"
   | "nature_travaux"
+  | "statut"
+  | "priorite"
   | "2027"
   | "2028"
   | "2029"
@@ -340,6 +353,8 @@ export const valeurTriOperation = (op: PspOperation, cle: CleTri): string | numb
   if (cle === "corps_etat") return op.corps_etat;
   if (cle === "adresse") return op.adresse;
   if (cle === "nature_travaux") return op.nature_travaux;
+  if (cle === "statut") return op.statut ?? "a_definir";
+  if (cle === "priorite") return op.priorite ?? "normale";
   return montantAnnee(op, cle);
 };
 

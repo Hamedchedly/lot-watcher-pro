@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowRight, FileText, History, MapPin, Pencil, Trash2 } from "lucide-react";
 
-import PspDevisPanel from "@/components/preparation-psp/PspDevisPanel";
+import PspDevisPanel, { type DevisEdit } from "@/components/preparation-psp/PspDevisPanel";
 import PspSecteurBadge from "@/components/preparation-psp/PspSecteurBadge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -31,27 +31,36 @@ import {
   type PspAnnee,
   type PspOperation,
 } from "@/lib/psp.prep";
+import { PRIORITE_LABELS, STATUT_LABELS } from "@/lib/psp.prep.v7";
+import { cn } from "@/lib/utils";
 
 /**
  * Fiche opération (panneau latéral style Dialog) : tous les champs métier,
- * la programmation 2027-2031, le bloc Devis (mock), le déplacement d'année et
- * la mémoire locale des mouvements. Modifier / Déplacer / Supprimer restent
- * LOCAUX — aucune écriture Supabase.
+ * la programmation 2027-2031, le statut / la priorité, le bloc Devis (éditable
+ * via psp_devis), le déplacement d'année et la mémoire locale des mouvements.
  */
 export default function PspOperationDetail({
   operation,
   deplacements,
+  figee,
   onClose,
   onModifier,
   onDeplacer,
   onSupprimer,
+  onDevisAdd,
+  onDevisUpdate,
+  onDevisDelete,
 }: {
   operation: PspOperation | null;
   deplacements: DeplacementMemo[];
+  figee: boolean;
   onClose: () => void;
   onModifier: (op: PspOperation) => void;
   onDeplacer: (id: string, cible: PspAnnee, motif: string | null) => void;
   onSupprimer: (id: string) => void;
+  onDevisAdd: (ligneId: string, d: DevisEdit) => Promise<void>;
+  onDevisUpdate: (id: string, d: DevisEdit) => Promise<void>;
+  onDevisDelete: (id: string) => Promise<void>;
 }) {
   const devisRef = useRef<HTMLDivElement>(null);
   const mouvementsRef = useRef<HTMLDivElement>(null);
@@ -113,6 +122,28 @@ export default function PspOperationDetail({
               <Champ label="Sous-secteur" valeur={operation.sous_secteur ?? "—"} />
               <Champ label="Budget" valeur={money0(operation.budget)} accent />
               <Champ label="Corps d'état" valeur={operation.corps_etat} large />
+              <div className="rounded-lg border bg-surface/60 p-2.5">
+                <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+                  Statut
+                </p>
+                <p className="mt-0.5">
+                  <Badge className={cn("font-bold", statutStyle(operation.statut ?? "a_definir"))}>
+                    {STATUT_LABELS[operation.statut ?? "a_definir"] ?? operation.statut}
+                  </Badge>
+                </p>
+              </div>
+              <div className="rounded-lg border bg-surface/60 p-2.5">
+                <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+                  Priorité
+                </p>
+                <p className="mt-0.5">
+                  <Badge
+                    className={cn("font-bold", prioriteStyle(operation.priorite ?? "normale"))}
+                  >
+                    {PRIORITE_LABELS[operation.priorite ?? "normale"] ?? operation.priorite}
+                  </Badge>
+                </p>
+              </div>
             </div>
 
             <div className="mt-3 rounded-lg border bg-surface/60 p-2.5">
@@ -233,7 +264,13 @@ export default function PspOperationDetail({
             ) : null}
 
             <div ref={devisRef} className="mt-3">
-              <PspDevisPanel operation={operation} />
+              <PspDevisPanel
+                operation={operation}
+                figee={figee}
+                onAdd={(d) => onDevisAdd(operation.id, d)}
+                onUpdate={onDevisUpdate}
+                onDelete={onDevisDelete}
+              />
             </div>
 
             <DialogFooter className="mt-4 flex-col-reverse gap-2 sm:flex-row sm:justify-start">
@@ -316,3 +353,17 @@ function Champ({
     </div>
   );
 }
+
+const statutStyle = (s: string): string =>
+  ({
+    a_definir: "border-amber-200 bg-amber-50 text-amber-800",
+    attente_agence: "border-blue-200 bg-blue-50 text-blue-800",
+    attente_confirmation: "border-violet-200 bg-violet-50 text-violet-800",
+  })[s] ?? "border-border bg-muted text-muted-foreground";
+
+const prioriteStyle = (p: string): string =>
+  ({
+    prioritaire: "border-red-200 bg-red-50 text-red-800",
+    normale: "border-slate-200 bg-slate-100 text-slate-700",
+    non_prioritaire: "border-border bg-muted text-muted-foreground",
+  })[p] ?? "border-border bg-muted text-muted-foreground";

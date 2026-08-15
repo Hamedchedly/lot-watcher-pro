@@ -9,7 +9,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { FILTRES_VIDES, PSP_ANNEES, type FiltresDetail, type PspOperation } from "@/lib/psp.prep";
+import { FILTRES_VIDES, type FiltresDetail, type PspOperation } from "@/lib/psp.prep";
 
 /**
  * Barre de filtres du mode Détail :
@@ -71,12 +71,6 @@ export default function PspDetailFilters({
         placeholder="Corps d'état"
         options={corps}
         onValueChange={(v) => onChange({ ...filters, corps_etat: v === "tous" ? "" : v })}
-      />
-      <FiltreSelect
-        value={filters.annee}
-        placeholder="Année"
-        options={PSP_ANNEES.map(String)}
-        onValueChange={(v) => onChange({ ...filters, annee: v === "tous" ? "" : v })}
       />
       <Button
         variant="ghost"
