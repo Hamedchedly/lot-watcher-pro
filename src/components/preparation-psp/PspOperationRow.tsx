@@ -50,7 +50,7 @@ export default function PspOperationRow({
           </span>
           {op.reportee ? (
             <Badge className="shrink-0 border-amber-200 bg-amber-50 px-1.5 py-0 text-[9px] font-black text-amber-700">
-              REPORTÉ
+              REPORTÉ{op.ancienne_annee ? ` DE ${op.ancienne_annee}` : ""}
             </Badge>
           ) : null}
         </span>

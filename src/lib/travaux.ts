@@ -36,7 +36,24 @@ export type CommandeTravaux = {
   ligne?: number;
 };
 
-export type TravauxParseIssue = { line: number; message: string; numero_commande: string | null };
+export type TravauxParseIssue = {
+  line: number;
+  message: string;
+  numero_commande: string | null;
+  /** Identité de la ligne (ajoutée pour la revue des reports PSP : une ligne de
+   *  suivi sans commande reste identifiable par TR + C + ligne budgétaire). */
+  tranche_code?: string | null;
+  nature_analytique?: string | null;
+  ligne_budget?: string | null;
+  descriptif?: string | null;
+  budget?: number | null;
+  adresse?: string | null;
+  charge_clientele?: string | null;
+  etat_commande?: string | null;
+  etat_travaux?: string | null;
+  engage?: number | null;
+  paye?: number | null;
+};
 export type ParsedTravaux = {
   commandes: CommandeTravaux[];
   lignes: number;
@@ -161,10 +178,24 @@ export function parseTravauxWorkbook(data: ArrayBuffer): ParsedTravaux {
 
     const numero = text(raw["numero_commande"]);
     if (!numero) {
+      // Ligne de suivi SANS commande : le moteur existant la détecte ici.
+      // On porte l'identité de la ligne (TR, C, LB, nature, budget) pour que le
+      // préparateur PSP puisse l'arbitrer sans re-parser le fichier.
       erreurs.push({
         line: index + 1,
         message: "Numéro de commande manquant",
         numero_commande: null,
+        tranche_code: text(raw["tranche_code"]),
+        nature_analytique: text(raw["nature_analytique"]),
+        ligne_budget: text(raw["ligne_budget"]),
+        descriptif: text(raw["descriptif"]),
+        budget: number(raw["budget"]),
+        adresse: text(raw["adresse"]),
+        charge_clientele: text(raw["charge_clientele"]),
+        etat_commande: text(raw["etat_commande"]),
+        etat_travaux: text(raw["etat_travaux"]),
+        engage: number(raw["engage"]),
+        paye: number(raw["paye"]),
       });
       continue;
     }
@@ -284,11 +315,15 @@ export type TravailComparable = Record<string, string | number | boolean | null>
  * Utilisé pour la comparaison de versions et l'historique (avant / après).
  */
 export const travauxComparable = (row: Record<string, unknown>): TravailComparable =>
-  Object.fromEntries(TRAVAUX_FIELDS.map((field) => [field, row[field] ?? null])) as TravailComparable;
+  Object.fromEntries(
+    TRAVAUX_FIELDS.map((field) => [field, row[field] ?? null]),
+  ) as TravailComparable;
 
 /** Deux versions d'une commande sont-elles strictement identiques (champs métier) ? */
-export const travauxIdentiques = (a: Record<string, unknown>, b: Record<string, unknown>): boolean =>
-  JSON.stringify(travauxComparable(a)) === JSON.stringify(travauxComparable(b));
+export const travauxIdentiques = (
+  a: Record<string, unknown>,
+  b: Record<string, unknown>,
+): boolean => JSON.stringify(travauxComparable(a)) === JSON.stringify(travauxComparable(b));
 
 /**
  * Domaine d'années pour le slider du Dashboard.
@@ -345,9 +380,7 @@ export const champsDifferents = (
   apres: Record<string, unknown> | null | undefined,
 ): string[] => {
   const keys = new Set([...Object.keys(avant ?? {}), ...Object.keys(apres ?? {})]);
-  return [...keys].filter(
-    (key) => JSON.stringify(avant?.[key]) !== JSON.stringify(apres?.[key]),
-  );
+  return [...keys].filter((key) => JSON.stringify(avant?.[key]) !== JSON.stringify(apres?.[key]));
 };
 
 /**
@@ -672,9 +705,10 @@ export const getAlertesCommande = (row: Record<string, unknown>): string[] => {
     (typeof etatCommande === "number" && Number.isFinite(etatCommande)) ||
     (typeof etatCommande === "string" && estNumeriqueStrict(etatCommande));
   if (etatCommandeNumerique) {
-    const valeur =
-      typeof etatCommande === "number" ? etatCommande : Number(etatCommande.trim());
-    alertes.push(`❌ État commande incohérent : valeur numérique « ${formatNombreAlerte(valeur)} »`);
+    const valeur = typeof etatCommande === "number" ? etatCommande : Number(etatCommande.trim());
+    alertes.push(
+      `❌ État commande incohérent : valeur numérique « ${formatNombreAlerte(valeur)} »`,
+    );
   }
 
   // 3. etat_travaux ressemblant à une date DD.MM.YYYY (ce champ est censé contenir un état).

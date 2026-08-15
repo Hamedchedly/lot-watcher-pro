@@ -47,7 +47,7 @@ import {
   parseEsquisse2027Workbook,
   type ReferencePatrimoine,
 } from "@/lib/psp.prep.data";
-import { getPspReferencePatrimoine } from "@/lib/psp.prep.data.functions";
+import { getPspFichiers2026, getPspReferencePatrimoine } from "@/lib/psp.prep.data.functions";
 import {
   HISTORIQUE_MODIFICATIONS_MOCK,
   PSP_PROGRAMMATION_2026,
@@ -55,8 +55,10 @@ import {
   cleModification,
   detecterModificationsLigne,
   extraireConfirmationsHistorique,
-  ligneSuiviDepuisCommande,
+  ligneSuiviDepuisRaw,
+  type CategorieSuivi,
   type LigneArbitrage,
+  type LigneProgrammee,
   type LigneSuivi,
   type ModificationSuivi,
 } from "@/lib/psp.prep.suivi";
@@ -118,26 +120,62 @@ function PreparationPspPage() {
   }, [refBrute]);
 
   // ── Revue des reports : consomme les RÉSULTATS du moteur d'import annuel ──
-  // (getTravauxDashboard est la lecture agrégée existante du suivi : commandes,
-  // historique des modifications, imports — aucune nouvelle lecture parallèle).
-  const fetchDashboard = useServerFn(getTravauxDashboard);
-  const { data: dash } = useQuery({
-    queryKey: ["psp-suivi-annuel"],
-    queryFn: () => fetchDashboard(),
+  // (V4 : les VRAIS fichiers 2026 sont traités par le moteur existant —
+  //  `parseTravauxWorkbook` pour le suivi, `parseProgrammationWorkbook` pour la
+  //  programmation. Repli sur les mocks si les fichiers sont absents.)
+  const fetchFichiers2026 = useServerFn(getPspFichiers2026);
+  const { data: fichiers2026 } = useQuery({
+    queryKey: ["psp-fichiers-2026"],
+    queryFn: () => fetchFichiers2026(),
     staleTime: 1000 * 60 * 60,
     retry: 1,
   });
 
   /** Lignes du suivi de l'exercice N-1 (2026), ou mock si indisponibles. */
   const suivi = useMemo<LigneSuivi[]>(() => {
-    if (dash) {
-      const cmds = dash.commandes.filter((c) => c.annee_exercice === 2026);
-      if (cmds.length > 0) return cmds.map((c) => ligneSuiviDepuisCommande(c));
+    if (fichiers2026?.disponible) {
+      const lignes = [
+        ...fichiers2026.suivi.commandes.map((c) =>
+          ligneSuiviDepuisRaw(c as unknown as Record<string, unknown>),
+        ),
+        ...fichiers2026.suivi.erreurs.map((e) =>
+          ligneSuiviDepuisRaw(e as unknown as Record<string, unknown>),
+        ),
+      ];
+      if (lignes.length > 0) return lignes;
     }
     return SUIVI_2026_MOCK;
-  }, [dash]);
+  }, [fichiers2026]);
 
-  /** Historique des conflits/modifications produit par le moteur d'import. */
+  /** Programmation 2026 réelle (feuille « Prog 2026 »), ou mock. */
+  const programmees2026 = useMemo<LigneProgrammee[]>(() => {
+    if (fichiers2026?.disponible && fichiers2026.programmation.lignes.length > 0) {
+      return fichiers2026.programmation.lignes
+        .filter((l) => (l.programme["2026"] ?? 0) > 0)
+        .map((l) => ({
+          tranche: l.tranche,
+          categorie: (l.categorie ?? "GT") as CategorieSuivi,
+          nature_travaux: l.nature_travaux,
+          montant: l.programme["2026"] ?? 0,
+          annee: 2026,
+          ligne_budget: l.ligne_budget,
+        }));
+    }
+    return PSP_PROGRAMMATION_2026;
+  }, [fichiers2026]);
+
+  const suivi2026Disponible = fichiers2026?.disponible === true;
+
+  /** Historique des conflits/modifications produit par le moteur d'import
+   *  (lecture réelle Supabase via getTravauxDashboard ; mock en repli). */
+  const fetchDashboard = useServerFn(getTravauxDashboard);
+  const { data: dash } = useQuery({
+    queryKey: ["psp-suivi-historique"],
+    queryFn: () => fetchDashboard(),
+    staleTime: 1000 * 60 * 60,
+    retry: 1,
+  });
+
   const historique = useMemo(() => {
     if (dash && dash.historique.length > 0) {
       return dash.historique
@@ -197,7 +235,17 @@ function PreparationPspPage() {
       remarques: `Report de ${ligne.annee_initiale} (programmation ${ligne.annee_initiale} non engagée)`,
     };
     const id = `report-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
-    setOperations((prev) => ajouterOperationListe(prev, saisie, id));
+    setOperations((prev) => {
+      const liste = ajouterOperationListe(prev, saisie, id);
+      const op = liste[liste.length - 1];
+      if (op) {
+        // Conserver l'information d'origine : reporté de N → badge « REPORTÉ DE 2026 ».
+        op.reportee = true;
+        op.ancienne_annee = ligne.annee_initiale;
+        op.ancien_montant = ligne.montant_programme;
+      }
+      return liste;
+    });
     setDecisions((prev) =>
       new Map(prev).set(`${ligne.tranche}|${ligne.categorie}`, `Report ${anneeCible}`),
     );
@@ -374,9 +422,10 @@ function PreparationPspPage() {
 
         {mode === "reports" ? (
           <PspRevueReports
-            programmees={PSP_PROGRAMMATION_2026}
+            programmees={programmees2026}
             suivi={suivi}
             exercice={2027}
+            sourceFichiers={suivi2026Disponible}
             modifications={modifications}
             confirmees={confirmees}
             decisions={decisions}

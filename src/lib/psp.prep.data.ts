@@ -178,11 +178,34 @@ export const enrichirOperationsAvecReference = (
   });
 };
 
-// ── Esquisse PSP 2027 (source de préparation, fichier Excel) ────────────────
+// ── Programmation pluriannuelle (source de préparation, fichier Excel) ──────
 
 export type ResultatEsquisse = {
   operations: PspOperation[];
   lignes: number;
+  erreurs: string[];
+  source: string;
+};
+
+/** Ligne d'un fichier de programmation pluriannuelle (ex. « Prog 2026 »). */
+export type LigneProgrammation = {
+  ligne: number;
+  tranche: string;
+  categorie: PspCategorie | null;
+  corps_etat: string;
+  nature_travaux: string;
+  ligne_budget: string | null;
+  charge_operation: string | null;
+  adresse: string | null;
+  ville: string | null;
+  remarques: string | null;
+  /** Montants par année — clé = année numérique (ex. "2026", "2027"…). */
+  programme: Record<string, number>;
+};
+
+export type ResultatProgrammation = {
+  lignes: LigneProgrammation[];
+  annees: number[];
   erreurs: string[];
   source: string;
 };
@@ -215,90 +238,155 @@ const normaliserCategorie = (v: unknown): PspCategorie | null => {
 };
 
 /**
- * Parse le fichier « esquisse de programmation 2027 » dans le modèle
- * `PspOperation` — SANS rien stocker en base. Colonnes attendues :
- * TR · Arl/sect · ADRESSE · Ville · C · CORPS D'ETAT · NATURE TRAVAUX ·
- * 2027…2031 · Remarques · devis si existant.
- * C = catégorie budgétaire (GE/GT/CP) — jamais le code corps d'état.
+ * Parse un fichier de programmation pluriannuelle (ex. « Prog_Secteur 11_2026 »)
+ * dans un modèle générique — SANS rien stocker en base.
+ *
+ * Format réel des fichiers Secteur 11 :
+ *   TR · Arl/sect · ADRESSE · Ville · C · CORPS D'ETAT · Ch. Op. ·
+ *   Ligne budgétaire · NATURE TRAVAUX · Remarques · <années numériques> …
+ *
+ * Détection robuste :
+ *  - la ligne d'en-tête est recherchée (cellule « TR ») — le fichier réel
+ *    contient une ligne de synthèse AU-DESSUS de l'en-tête ;
+ *  - les colonnes années sont les en-têtes numériques à 4 chiffres
+ *    (« 2026.old » et libellés texte sont ignorés) ;
+ *  - C = catégorie budgétaire (GE/GT/CP) — jamais le code corps d'état.
+ */
+export const parseProgrammationWorkbook = (
+  data: ArrayBuffer,
+  opts: { nom?: string; feuille?: string | number } = {},
+): ResultatProgrammation => {
+  const classeur = XLSX.read(data, { type: "array" });
+  const source = opts.nom ?? "programmation";
+
+  // Sélection de la feuille : nom/index explicite, sinon première feuille dont
+  // l'en-tête contient « TR » (le fichier réel contient « Prog 2025 » + « Prog 2026 »).
+  let feuilleNom: string | undefined;
+  if (typeof opts.feuille === "string") {
+    feuilleNom = classeur.SheetNames.includes(opts.feuille) ? opts.feuille : undefined;
+  } else if (typeof opts.feuille === "number") {
+    feuilleNom = classeur.SheetNames[opts.feuille];
+  } else {
+    feuilleNom = classeur.SheetNames.find((n) => {
+      const s = classeur.Sheets[n];
+      if (!s) return false;
+      const m = XLSX.utils.sheet_to_json<unknown[]>(s, { header: 1, defval: "" });
+      return m.some((row) => row.some((cell) => normaliserEnTete(cell) === "tr"));
+    });
+  }
+  const feuille = feuilleNom ? classeur.Sheets[feuilleNom] : undefined;
+  if (!feuille) {
+    return {
+      lignes: [],
+      annees: [],
+      erreurs: [
+        opts.feuille
+          ? `Feuille « ${opts.feuille} » introuvable.`
+          : "Aucune feuille avec en-tête « TR ».",
+      ],
+      source,
+    };
+  }
+  const matrix = XLSX.utils.sheet_to_json<unknown[]>(feuille, { header: 1, defval: "" });
+
+  const headerIndex = matrix.findIndex((row) =>
+    row.some((cell) => normaliserEnTete(cell) === "tr"),
+  );
+  if (headerIndex < 0) {
+    return { lignes: [], annees: [], erreurs: ["Colonne « TR » introuvable."], source };
+  }
+  const header = matrix[headerIndex] ?? [];
+
+  const colonnes = new Map<string, number>();
+  header.forEach((cell, i) => {
+    const n = normaliserEnTete(cell);
+    if (n) colonnes.set(n, i);
+  });
+  const col = (nom: string): number => colonnes.get(nom) ?? -1;
+
+  const annees = [...colonnes.keys()]
+    .filter((n) => /^\d{4}$/.test(n))
+    .map(Number)
+    .sort((a, b) => a - b);
+
+  const lignes: LigneProgrammation[] = [];
+  const erreurs: string[] = [];
+  for (let i = headerIndex + 1; i < matrix.length; i += 1) {
+    const row = matrix[i] ?? [];
+    if (row.every((cell) => String(cell ?? "").trim() === "")) continue;
+    const tranche = String(row[col("tr")] ?? "").trim();
+    if (!tranche) continue;
+
+    const categorie = normaliserCategorie(row[col("c")]);
+    if (!categorie) {
+      erreurs.push(
+        `Ligne ${i + 1} : C invalide (« ${String(row[col("c")] ?? "")} ») — attendu GE/GT/CP.`,
+      );
+    }
+
+    const programme: Record<string, number> = {};
+    for (const annee of annees) {
+      programme[String(annee)] = numerique(row[col(String(annee))]);
+    }
+
+    lignes.push({
+      ligne: i + 1,
+      tranche,
+      categorie,
+      corps_etat: String(row[col("corps d etat")] ?? "").trim() || "—",
+      nature_travaux: String(row[col("nature travaux")] ?? "").trim() || "Opération sans nature",
+      ligne_budget:
+        colonnes.has("ligne budget") && String(row[col("ligne budget")] ?? "").trim() !== ""
+          ? String(row[col("ligne budget")] ?? "").trim()
+          : null,
+      charge_operation:
+        colonnes.has("ch op") && String(row[col("ch op")] ?? "").trim() !== ""
+          ? String(row[col("ch op")] ?? "").trim()
+          : null,
+      adresse: String(row[col("adresse")] ?? "").trim() || null,
+      ville: String(row[col("ville")] ?? "").trim() || null,
+      remarques:
+        colonnes.has("remarques") && String(row[col("remarques")] ?? "").trim() !== ""
+          ? String(row[col("remarques")] ?? "").trim()
+          : null,
+      programme,
+    });
+  }
+
+  return { lignes, annees, erreurs, source };
+};
+
+/**
+ * Wrapper compatible V2 : convertit le fichier « esquisse 2027 » (années
+ * 2027-2031) en `PspOperation[]` pour le brouillon courant.
  */
 export const parseEsquisse2027Workbook = (
   data: ArrayBuffer,
   fileName = "esquisse-psp-2027.xlsx",
 ): ResultatEsquisse => {
-  const classeur = XLSX.read(data, { type: "array" });
-  const feuille = classeur.Sheets[classeur.SheetNames[0] ?? ""];
-  const erreurs: string[] = [];
-  if (!feuille) {
-    return {
-      operations: [],
-      lignes: 0,
-      erreurs: ["Aucune feuille lisible dans le fichier."],
-      source: fileName,
-    };
-  }
-  const lignes = XLSX.utils.sheet_to_json<Record<string, unknown>>(feuille, { defval: "" });
-
-  // Résolution des colonnes par en-tête normalisé.
-  const enTetes = Object.keys(lignes[0] ?? {});
-  const index = (noms: string[]): string | null => {
-    for (const nom of noms) {
-      const trouve = enTetes.find((e) => normaliserEnTete(e) === nom);
-      if (trouve) return trouve;
-    }
-    return null;
-  };
-  const colTranche = index(["tr", "tranche"]);
-  const colC = index(["c"]);
-  const colCorps = index(["corps d etat", "corps etat"]);
-  const colNature = index(["nature travaux", "nature des travaux"]);
-  const colAdresse = index(["adresse"]);
-  const colVille = index(["ville"]);
-  const colRemarques = index(["remarques", "remarque"]);
-
-  const operations: PspOperation[] = [];
-  lignes.forEach((row, i) => {
-    const numero = i + 2; // ligne Excel (1 = en-tête)
-    const tranche = String(row[colTranche ?? ""] ?? "").trim();
-    if (!tranche) return; // ligne vide
-
-    const categorie = normaliserCategorie(row[colC ?? ""]);
-    if (!categorie) {
-      erreurs.push(
-        `Ligne ${numero} : C invalide (« ${String(row[colC ?? ""])} ») — attendu GE/GT/CP.`,
-      );
-    }
-
-    const programme = PSP_ANNEES.map((a) => {
-      const cle = String(a);
-      const col = enTetes.find((e) => normaliserEnTete(e) === cle);
-      return col ? numerique(row[col]) : 0;
-    });
-
-    const premier = PSP_ANNEES.findIndex(
-      (a, i2) => programme[i2] !== undefined && (programme[i2] ?? 0) > 0,
-    );
+  const r = parseProgrammationWorkbook(data, { nom: fileName });
+  const operations = r.lignes.map((l, i) => {
+    const programme = PSP_ANNEES.map((a) => l.programme[String(a)] ?? 0);
+    const premier = PSP_ANNEES.findIndex((a, i2) => (programme[i2] ?? 0) > 0);
     const annee: PspAnnee = premier >= 0 ? (PSP_ANNEES[premier] ?? 2027) : 2027;
-
-    const operation = creerOperation(
+    return creerOperation(
       {
-        tranche,
-        categorie: categorie ?? "GT",
+        tranche: l.tranche,
+        categorie: l.categorie ?? "GT",
         charge_clientele: "",
-        charge_operation: "",
-        corps_etat: String(row[colCorps ?? ""] ?? "").trim() || "—",
-        adresse: String(row[colAdresse ?? ""] ?? "").trim(),
-        ville: String(row[colVille ?? ""] ?? "").trim(),
-        nature_travaux: String(row[colNature ?? ""] ?? "").trim() || "Opération sans nature",
+        charge_operation: l.charge_operation ?? "",
+        corps_etat: l.corps_etat,
+        adresse: l.adresse ?? "",
+        ville: l.ville ?? "",
+        nature_travaux: l.nature_travaux,
         annee,
         programme,
-        remarques: colRemarques ? String(row[colRemarques] ?? "").trim() || null : null,
+        remarques: l.remarques,
       },
-      `esq-${String(numero).padStart(4, "0")}`,
+      `esq-${String(i + 1).padStart(4, "0")}`,
     );
-    operations.push(operation);
   });
-
-  return { operations, lignes: operations.length, erreurs, source: fileName };
+  return { operations, lignes: operations.length, erreurs: r.erreurs, source: fileName };
 };
 
 /** Total programmé d'une liste (rappel pratique pour la comparaison). */

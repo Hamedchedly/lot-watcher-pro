@@ -27,6 +27,8 @@ export type LigneProgrammee = {
   nature_travaux: string;
   montant: number;
   annee: number;
+  /** Ligne budgétaire si déjà connue (sinon acquise au premier import du suivi). */
+  ligne_budget?: string | null;
 };
 
 /** Ligne du SUIVI ANNUEL constaté (issue du moteur d'import / travaux_commandes). */
@@ -34,6 +36,7 @@ export type LigneSuivi = {
   id: string;
   tranche: string;
   categorie: CategorieSuivi;
+  charge_clientele: string | null;
   ligne_budget: string | null;
   nature_travaux: string | null;
   numero_commande: string | null;
@@ -85,6 +88,7 @@ export type LigneArbitrage = {
   montant_programme: number;
   annee_initiale: number;
   commande: string | null;
+  charge_clientele: string | null;
   etat: string;
   statut: StatutArbitrage;
   ligne_suivi: LigneSuivi | null;
@@ -228,11 +232,12 @@ export const analyserLignesReport = (
     return {
       tranche: p.tranche,
       categorie: p.categorie,
-      ligne_budget: ligne?.ligne_budget ?? null,
+      ligne_budget: ligne?.ligne_budget ?? p.ligne_budget ?? null,
       nature_travaux: p.nature_travaux,
       montant_programme: p.montant,
       annee_initiale: p.annee,
       commande: ligne?.numero_commande ?? null,
+      charge_clientele: ligne?.charge_clientele ?? null,
       etat,
       statut,
       ligne_suivi: ligne,
@@ -251,6 +256,7 @@ export const analyserLignesReport = (
       montant_programme: s.budget ?? 0,
       annee_initiale: s.annee_exercice ?? exercice,
       commande: s.numero_commande,
+      charge_clientele: s.charge_clientele,
       etat: etatMetier(s, exercice),
       statut: "hors_programmation",
       ligne_suivi: s,
@@ -260,31 +266,98 @@ export const analyserLignesReport = (
   return lignes;
 };
 
-/** Résumé des comptes de la vue « à arbitrer ». */
+/** Résumé des comptes de la vue « à arbitrer » (KPI §13). */
 export const resumeArbitrage = (lignes: LigneArbitrage[]) => {
   const compte = (s: StatutArbitrage) => lignes.filter((l) => l.statut === s).length;
+  const sansCommande = compte("non_engagee");
+  const pasRealisees = compte("pas_realisee");
   return {
     programmees: lignes.filter((l) => l.statut !== "hors_programmation").length,
-    sansCommande: compte("non_engagee"),
-    commandeNonTerminee: compte("commande_non_terminee"),
     terminees: compte("terminee"),
-    pasRealisees: compte("pas_realisee"),
+    avecCommande: lignes.filter(
+      (l) => l.statut !== "hors_programmation" && l.commande != null && String(l.commande) !== "",
+    ).length,
+    sansCommande,
+    commandeNonTerminee: compte("commande_non_terminee"),
+    pasRealisees,
+    aReporter: sansCommande + pasRealisees,
     horsProgrammation: compte("hors_programmation"),
   };
 };
 
+/** Filtres de la revue des reports (§12). */
+export type FiltresRevue = {
+  categorie: string;
+  tranche: string;
+  charge_clientele: string;
+  etat: string;
+  commande: "toutes" | "avec" | "sans";
+};
+
+export const FILTRES_REVUE_VIDES: FiltresRevue = {
+  categorie: "",
+  tranche: "",
+  charge_clientele: "",
+  etat: "",
+  commande: "toutes",
+};
+
+/** Applique les filtres de la revue (pur). */
+export const filtrerLignesArbitrage = (
+  lignes: LigneArbitrage[],
+  filtres: FiltresRevue,
+): LigneArbitrage[] =>
+  lignes.filter((l) => {
+    if (filtres.categorie && l.categorie !== filtres.categorie) return false;
+    if (filtres.tranche && l.tranche !== filtres.tranche) return false;
+    if (filtres.charge_clientele && (l.charge_clientele ?? "") !== filtres.charge_clientele)
+      return false;
+    if (filtres.etat && l.etat !== filtres.etat) return false;
+    if (filtres.commande === "avec" && !l.commande) return false;
+    if (filtres.commande === "sans" && l.commande) return false;
+    return true;
+  });
+
 // ── Mapping depuis les données réelles du moteur d'import ───────────────────
 
 /**
- * Convertit une commande du suivi (`travaux_commandes`, tel que renvoyé par
- * `getTravauxDashboard`) en ligne de suivi exploitable par la revue des reports.
+ * Convertit une ligne de suivi BRUTE (issue du moteur d'import `parseTravauxWorkbook`
+ * — commandes ET erreurs « sans commande » — ou de `getTravauxDashboard`) en
+ * `LigneSuivi` exploitable par la revue des reports.
  * Le « C » du suivi est la nature analytique (GE/GT/CP) ; la ligne budgétaire
  * est `ligne_budget` (rattachée par la comptabilité au premier import).
  */
+export const ligneSuiviDepuisRaw = (row: Record<string, unknown>): LigneSuivi => {
+  const cat = row["nature_analytique"];
+  const categorie: CategorieSuivi = cat === "GE" || cat === "GT" || cat === "CP" ? cat : "GT";
+  const texte = (v: unknown): string | null =>
+    v === null || v === undefined || String(v).trim() === "" ? null : String(v).trim();
+  const nombre = (v: unknown): number | null =>
+    typeof v === "number" && Number.isFinite(v) ? v : null;
+  return {
+    id: String(row["id"] ?? row["line"] ?? "ligne"),
+    tranche: texte(row["tranche_code"]) ?? "",
+    categorie,
+    charge_clientele: texte(row["charge_clientele"]),
+    ligne_budget: texte(row["ligne_budget"]),
+    nature_travaux: texte(row["descriptif"]),
+    numero_commande: texte(row["numero_commande"]),
+    fournisseur: texte(row["fournisseur"]),
+    budget: nombre(row["budget"]),
+    engage: nombre(row["engage"]),
+    paye: nombre(row["paye"]),
+    etat_travaux: texte(row["etat_travaux"]),
+    etat_commande: texte(row["etat_commande"]),
+    annee_exercice: nombre(row["annee_exercice"]),
+  };
+};
+
+/** Variante typée pour les commandes `travaux_commandes` (getTravauxDashboard). */
 export const ligneSuiviDepuisCommande = (cmd: {
   id: string;
   tranche_code: string | null;
   nature_analytique: string | null;
+  charge_clientele: string | null;
   ligne_budget: string | null;
   descriptif: string | null;
   numero_commande: string | null;
@@ -295,29 +368,7 @@ export const ligneSuiviDepuisCommande = (cmd: {
   etat_travaux: string | null;
   etat_commande: string | null;
   annee_exercice: number | null;
-}): LigneSuivi => {
-  const categorie: CategorieSuivi =
-    cmd.nature_analytique === "GE" ||
-    cmd.nature_analytique === "GT" ||
-    cmd.nature_analytique === "CP"
-      ? cmd.nature_analytique
-      : "GT";
-  return {
-    id: cmd.id,
-    tranche: cmd.tranche_code ?? "",
-    categorie,
-    ligne_budget: cmd.ligne_budget,
-    nature_travaux: cmd.descriptif,
-    numero_commande: cmd.numero_commande,
-    fournisseur: cmd.fournisseur,
-    budget: cmd.budget,
-    engage: cmd.engage,
-    paye: cmd.paye,
-    etat_travaux: cmd.etat_travaux,
-    etat_commande: cmd.etat_commande,
-    annee_exercice: cmd.annee_exercice,
-  };
-};
+}): LigneSuivi => ligneSuiviDepuisRaw(cmd as unknown as Record<string, unknown>);
 
 // ── Données MOCK (prototype V3 — remplaçables par les vrais fichiers) ───────
 
@@ -372,6 +423,7 @@ export const SUIVI_2026_MOCK: LigneSuivi[] = [
   // anc-001 : ligne programmée SANS commande → non engagée (à reporter).
   {
     id: "suivi-001",
+    charge_clientele: null,
     tranche: "1976",
     categorie: "CP",
     ligne_budget: "458721",
@@ -388,6 +440,7 @@ export const SUIVI_2026_MOCK: LigneSuivi[] = [
   // anc-002 : commande terminée → pas de report.
   {
     id: "suivi-002",
+    charge_clientele: null,
     tranche: "2086",
     categorie: "GE",
     ligne_budget: "458722",
@@ -404,6 +457,7 @@ export const SUIVI_2026_MOCK: LigneSuivi[] = [
   // anc-003 : commande non terminée → arbitrage.
   {
     id: "suivi-003",
+    charge_clientele: null,
     tranche: "2100",
     categorie: "GE",
     ligne_budget: "458723",
@@ -420,6 +474,7 @@ export const SUIVI_2026_MOCK: LigneSuivi[] = [
   // anc-004 : commande « Pas réalisé » (clôturée, aucun engagement) → report/annuler.
   {
     id: "suivi-004",
+    charge_clientele: null,
     tranche: "2178",
     categorie: "CP",
     ligne_budget: "458724",
@@ -437,6 +492,7 @@ export const SUIVI_2026_MOCK: LigneSuivi[] = [
   // anc-006 : commande non terminée → arbitrage.
   {
     id: "suivi-006",
+    charge_clientele: null,
     tranche: "3329",
     categorie: "CP",
     ligne_budget: "458726",
@@ -453,6 +509,7 @@ export const SUIVI_2026_MOCK: LigneSuivi[] = [
   // Ligne du suivi SANS ligne PSP → hors programmation.
   {
     id: "suivi-007",
+    charge_clientele: null,
     tranche: "3049",
     categorie: "CP",
     ligne_budget: "455100",

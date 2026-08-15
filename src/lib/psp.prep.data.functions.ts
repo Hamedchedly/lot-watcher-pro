@@ -12,6 +12,8 @@
  */
 import { createServerFn } from "@tanstack/react-start";
 
+import { parseProgrammationWorkbook } from "./psp.prep.data.ts";
+import { parseTravauxWorkbook } from "./travaux.ts";
 import type { CommandeRaw, LotRaw, TrancheRaw } from "./psp.prep.data.ts";
 
 export type DonneesReferenceBrutes = {
@@ -71,3 +73,37 @@ export const getPspReferencePatrimoine = createServerFn({ method: "GET" }).handl
     };
   },
 );
+
+/**
+ * V4 — Lecture des VRAIS fichiers 2026 (programmation + suivi) via le MOTEUR
+ * D'IMPORT EXISTANT (aucun parseur parallèle) :
+ *  - programmation : `parseProgrammationWorkbook` (feuille « Prog 2026 ») ;
+ *  - suivi annuel  : `parseTravauxWorkbook` (moteur d'import annuel) —
+ *    commandes + lignes sans commande (erreurs « Numéro de commande manquant »).
+ *
+ * Fichiers présents dans `data/2026/` (source de validation V4, suivie par git).
+ * Aucune écriture, aucun stockage.
+ */
+export const getPspFichiers2026 = createServerFn({ method: "GET" }).handler(async () => {
+  const { existsSync, readFileSync } = await import("node:fs");
+  const { fileURLToPath } = await import("node:url");
+  const dir = fileURLToPath(new URL("../../data/2026/", import.meta.url));
+  const cheminProg = `${dir}Prog_Secteur_11_2026.xlsx`;
+  const cheminSuivi = `${dir}Suivi_Travaux_Secteur_2026.xlsx`;
+
+  if (!existsSync(cheminProg) || !existsSync(cheminSuivi)) {
+    return { disponible: false as const };
+  }
+  const arrayBuffer = (chemin: string): ArrayBuffer => {
+    const b = readFileSync(chemin);
+    return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength);
+  };
+
+  const programmation = parseProgrammationWorkbook(arrayBuffer(cheminProg), {
+    nom: "Prog_Secteur_11_2026.xlsx",
+    feuille: "Prog 2026",
+  });
+  const suivi = parseTravauxWorkbook(arrayBuffer(cheminSuivi));
+
+  return { disponible: true as const, programmation, suivi };
+});

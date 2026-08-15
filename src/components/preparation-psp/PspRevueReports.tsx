@@ -22,9 +22,12 @@ import {
 } from "@/components/ui/table";
 import { money0 } from "@/lib/formats";
 import {
+  FILTRES_REVUE_VIDES,
   analyserLignesReport,
+  filtrerLignesArbitrage,
   modificationDejaConfirmee,
   resumeArbitrage,
+  type FiltresRevue,
   type LigneArbitrage,
   type LigneProgrammee,
   type LigneSuivi,
@@ -70,6 +73,7 @@ export default function PspRevueReports({
   programmees,
   suivi,
   exercice,
+  sourceFichiers,
   modifications,
   confirmees,
   decisions,
@@ -82,6 +86,7 @@ export default function PspRevueReports({
   programmees: LigneProgrammee[];
   suivi: LigneSuivi[];
   exercice: number;
+  sourceFichiers?: boolean;
   modifications: ModificationSuivi[];
   confirmees: ReadonlySet<string>;
   decisions: ReadonlyMap<string, string>;
@@ -97,6 +102,13 @@ export default function PspRevueReports({
   );
   const resume = useMemo(() => resumeArbitrage(lignes), [lignes]);
   const [anneeCible, setAnneeCible] = useState<number>(2027);
+  const [filtres, setFiltres] = useState<FiltresRevue>(FILTRES_REVUE_VIDES);
+  const lignesFiltrees = useMemo(() => filtrerLignesArbitrage(lignes, filtres), [lignes, filtres]);
+  const tranches = [...new Set(lignes.map((l) => l.tranche))].sort();
+  const charges = [
+    ...new Set(lignes.map((l) => l.charge_clientele).filter((c): c is string => Boolean(c))),
+  ].sort();
+  const etats = [...new Set(lignes.map((l) => l.etat))].sort();
 
   return (
     <div className="space-y-4">
@@ -106,7 +118,9 @@ export default function PspRevueReports({
             <Flag className="size-4 text-muted-foreground" />
             Opérations {exercice - 1} à arbitrer
             <span className="ml-auto text-[10px] font-black uppercase tracking-widest text-muted-foreground">
-              Source : suivi annuel constaté (moteur d'import existant)
+              {sourceFichiers
+                ? "Source : fichiers réels 2026 (moteur d'import existant)"
+                : "Source : suivi annuel (mock — fichiers 2026 absents)"}
             </span>
           </CardTitle>
         </CardHeader>
@@ -115,18 +129,24 @@ export default function PspRevueReports({
             <Badge className="border-slate-200 bg-slate-100 text-slate-700">
               {resume.programmees} programmées
             </Badge>
+            <Badge className="border-emerald-200 bg-emerald-50 text-emerald-700">
+              {resume.terminees} terminées
+            </Badge>
+            <Badge className="border-blue-200 bg-blue-50 text-blue-700">
+              {resume.avecCommande} avec commande
+            </Badge>
             <Badge className="border-amber-200 bg-amber-50 text-amber-700">
               {resume.sansCommande} sans commande
             </Badge>
             <Badge className="border-blue-200 bg-blue-50 text-blue-700">
-              {resume.commandeNonTerminee} commande non terminée
+              {resume.commandeNonTerminee} commandes en cours
             </Badge>
-            <Badge className="border-emerald-200 bg-emerald-50 text-emerald-700">
-              {resume.terminees} terminées
+            <Badge className="border-orange-200 bg-orange-50 text-orange-700">
+              {resume.aReporter} à reporter
             </Badge>
             {resume.pasRealisees > 0 ? (
               <Badge className="border-red-200 bg-red-50 text-red-600">
-                {resume.pasRealisees} pas réalisées
+                {resume.pasRealisees} non réalisées
               </Badge>
             ) : null}
             {resume.horsProgrammation > 0 ? (
@@ -134,6 +154,49 @@ export default function PspRevueReports({
                 {resume.horsProgrammation} hors programmation
               </Badge>
             ) : null}
+          </div>
+
+          <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border bg-surface/40 p-2">
+            <FiltreSelect
+              value={filtres.categorie}
+              placeholder="C"
+              options={["GE", "GT", "CP"]}
+              onValueChange={(v) => setFiltres((p) => ({ ...p, categorie: v === "tous" ? "" : v }))}
+            />
+            <FiltreSelect
+              value={filtres.tranche}
+              placeholder="Tranche"
+              options={tranches}
+              onValueChange={(v) => setFiltres((p) => ({ ...p, tranche: v === "tous" ? "" : v }))}
+            />
+            <FiltreSelect
+              value={filtres.charge_clientele}
+              placeholder="Chargé clientèle"
+              options={charges}
+              onValueChange={(v) =>
+                setFiltres((p) => ({ ...p, charge_clientele: v === "tous" ? "" : v }))
+              }
+            />
+            <FiltreSelect
+              value={filtres.etat}
+              placeholder="État"
+              options={etats}
+              onValueChange={(v) => setFiltres((p) => ({ ...p, etat: v === "tous" ? "" : v }))}
+            />
+            <FiltreSelect
+              value={filtres.commande}
+              placeholder="Commande"
+              options={["avec", "sans"]}
+              onValueChange={(v) =>
+                setFiltres((p) => ({
+                  ...p,
+                  commande: v === "toutes" ? "toutes" : (v as "avec" | "sans"),
+                }))
+              }
+            />
+            <span className="ml-auto text-[10px] font-bold text-muted-foreground">
+              {lignesFiltrees.length} / {lignes.length} lignes
+            </span>
           </div>
 
           <div className="mt-3 max-h-[52vh] overflow-auto rounded-lg border">
@@ -170,7 +233,7 @@ export default function PspRevueReports({
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {lignes.map((l) => (
+                {lignesFiltrees.map((l) => (
                   <LigneReportRow
                     key={`${l.tranche}|${l.categorie}|${l.nature_travaux}`}
                     ligne={l}
@@ -446,5 +509,33 @@ function ModificationsCard({
         </p>
       </CardContent>
     </Card>
+  );
+}
+
+function FiltreSelect({
+  value,
+  placeholder,
+  options,
+  onValueChange,
+}: {
+  value: string;
+  placeholder: string;
+  options: string[];
+  onValueChange: (v: string) => void;
+}) {
+  return (
+    <Select value={value || "tous"} onValueChange={onValueChange}>
+      <SelectTrigger className="h-7 w-auto min-w-[120px] text-[11px]">
+        <SelectValue placeholder={placeholder} />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="tous">Tous — {placeholder}</SelectItem>
+        {options.map((o) => (
+          <SelectItem key={o} value={o}>
+            {o}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }
