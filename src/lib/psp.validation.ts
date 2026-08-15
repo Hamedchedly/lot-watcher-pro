@@ -131,7 +131,8 @@ export const niveauPriorite = (score: number): PspNiveauPriorite =>
 
 // ── Feedback (aligné sur psp_feedback / savePspFeedback) ────────────────────
 
-export type PspDecisionUtilisateur = "validate" | "modify" | "reject" | "indeterminate";
+export type PspDecisionUtilisateur =
+  "validate" | "modify" | "reject" | "indeterminate" | "proposer_regle";
 
 export interface PspFeedbackPayload {
   cible_type: "commande" | "import" | "patrimoine" | "autre";
@@ -167,31 +168,78 @@ export function construireFeedbackPsp(opts: PspFeedbackInput): PspFeedbackPayloa
 
 /** Valeurs possibles pour chaque champ de classification (formulaire de modif). */
 export const OPTIONS_TYPE_INTERVENTION = [
-  "diagnostic", "controle", "prestation_intellectuelle", "mise_en_conformite",
-  "mise_en_securite", "urgence", "sinistre", "rehabilitation", "remplacement",
-  "reparation", "entretien", "amelioration", "amenagement", "indetermine",
+  "diagnostic",
+  "controle",
+  "prestation_intellectuelle",
+  "mise_en_conformite",
+  "mise_en_securite",
+  "urgence",
+  "sinistre",
+  "rehabilitation",
+  "remplacement",
+  "reparation",
+  "entretien",
+  "amelioration",
+  "amenagement",
+  "indetermine",
 ] as const;
 
 export const OPTIONS_DOMAINE_TECHNIQUE = [
-  "plomberie", "chauffage", "ventilation", "electricite", "ssi", "ascenseur",
-  "couverture", "etancheite", "facade", "menuiserie", "serrurerie_acces",
-  "peinture_pc", "vrd_exterieur", "diagnostic", "multi_domaine", "indetermine",
+  "plomberie",
+  "chauffage",
+  "ventilation",
+  "electricite",
+  "ssi",
+  "ascenseur",
+  "couverture",
+  "etancheite",
+  "facade",
+  "menuiserie",
+  "serrurerie_acces",
+  "peinture_pc",
+  "vrd_exterieur",
+  "diagnostic",
+  "multi_domaine",
+  "indetermine",
 ] as const;
 
 export const OPTIONS_FAMILLE_PSP = [
-  "enveloppe", "couverture_toiture", "parties_communes", "equipements_techniques",
-  "securite", "plomberie", "electricite", "menuiseries", "amenagements_exterieurs",
-  "diagnostics", "autre", "indetermine",
+  "enveloppe",
+  "couverture_toiture",
+  "parties_communes",
+  "equipements_techniques",
+  "securite",
+  "plomberie",
+  "electricite",
+  "menuiseries",
+  "amenagements_exterieurs",
+  "diagnostics",
+  "autre",
+  "indetermine",
 ] as const;
 
 export const OPTIONS_ELEMENT_PATRIMONIAL = [
-  "tranche", "batiment", "entree", "lot", "couverture", "toiture", "facade",
-  "hall", "cage_escalier", "equipement", "autre",
+  "tranche",
+  "batiment",
+  "entree",
+  "lot",
+  "couverture",
+  "toiture",
+  "facade",
+  "hall",
+  "cage_escalier",
+  "equipement",
+  "autre",
 ] as const;
 
 export const OPTIONS_NATURE_EXCEPTIONNELLE = [
-  "sinistre", "signalement", "urgence", "acquisition_patrimoine_ancien",
-  "commande_exceptionnelle", "aucune", "indetermine",
+  "sinistre",
+  "signalement",
+  "urgence",
+  "acquisition_patrimoine_ancien",
+  "commande_exceptionnelle",
+  "aucune",
+  "indetermine",
 ] as const;
 
 /** Champs de classification modifiables par l'humain. */
@@ -227,12 +275,11 @@ export const CHAMPS_SOURCE_IMMUABLES = [
  * Vérifie qu'une modification ne touche QUE des champs de classification.
  * Retourne la liste des champs interdits tentés (vide = OK).
  */
-export function champsInterditsModification(
-  modification: Record<string, unknown>,
-): string[] {
+export function champsInterditsModification(modification: Record<string, unknown>): string[] {
   const interdits = CHAMPS_SOURCE_IMMUABLES.filter((f) => f in modification);
   const inconnus = Object.keys(modification).filter(
-    (k) => !CHAMPS_MODIFIABLES.includes(k as (typeof CHAMPS_MODIFIABLES)[number]) &&
+    (k) =>
+      !CHAMPS_MODIFIABLES.includes(k as (typeof CHAMPS_MODIFIABLES)[number]) &&
       !CHAMPS_SOURCE_IMMUABLES.includes(k as (typeof CHAMPS_SOURCE_IMMUABLES)[number]),
   );
   return [...interdits, ...inconnus];
@@ -302,7 +349,10 @@ export function filtrerCommandesValidation(
 // ── Recherche ───────────────────────────────────────────────────────────────
 
 const normRecherche = (s: string | null | undefined): string =>
-  (s ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  (s ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
 
 /** Recherche globale sur COMN_NUM, COMC_NOLIG, ER, WNATURE, adresse, commune. */
 export function rechercherCommandes(
@@ -332,9 +382,8 @@ export const montantTotalEligible = (
     .filter((c) => c.perimetre_psp === "eligible")
     .reduce((s, c) => s + (c.montant_engage ?? 0), 0);
 
-export const montantTotalGroupes = (
-  groupes: Pick<PspGroupeApercu, "montant_total">[],
-): number => groupes.reduce((s, g) => s + g.montant_total, 0);
+export const montantTotalGroupes = (groupes: Pick<PspGroupeApercu, "montant_total">[]): number =>
+  groupes.reduce((s, g) => s + g.montant_total, 0);
 
 // ── Périmètre PSP (règles métier) ───────────────────────────────────────────
 
@@ -347,11 +396,7 @@ export const montantTotalGroupes = (
  */
 export type PspPerimetre = "eligible" | "hors_psp" | "a_examiner";
 
-export type PspMotifExclusion =
-  | "pmr"
-  | "autre_charge_operation"
-  | "naac_hors_psp"
-  | null;
+export type PspMotifExclusion = "pmr" | "autre_charge_operation" | "naac_hors_psp" | null;
 
 /** Catégorie PSP : source = NAAC_CODE ; « PMR » pour les travaux PMR. */
 export type PspCategoriePsp = "PMR" | "GE" | "GT" | "CP" | "AC" | "HO" | null;
@@ -377,8 +422,7 @@ export interface PspPerimetreInput {
 }
 
 /** Libellés identifiant un travail PMR (toujours hors périmètre PSP). */
-const REGEX_PMR =
-  /(^|\s)PMR($|\s)|ADAPT|ADAPTATION|DAAT|BARRE D APPUI|SDB ET WC SURELEVE|REHAUSSE/;
+const REGEX_PMR = /(^|\s)PMR($|\s)|ADAPT|ADAPTATION|DAAT|BARRE D APPUI|SDB ET WC SURELEVE|REHAUSSE/;
 
 /** Détection PMR (sur libellé normalisé). */
 export const detecterPmr = (wnature: string): boolean => REGEX_PMR.test(wnature);
@@ -407,8 +451,7 @@ export function resoudrePerimetrePsp(input: PspPerimetreInput): PspPerimetreResu
   const estPmr = detecterPmr(input.wnature);
   const naac = (input.naac ?? "").trim().toUpperCase();
   const charge = (input.charge_operation ?? "").trim();
-  const chargeExclu =
-    charge !== "" && input.charges_operation_exclus.includes(charge);
+  const chargeExclu = charge !== "" && input.charges_operation_exclus.includes(charge);
 
   let perimetre: PspPerimetre;
   let motif: PspMotifExclusion;
@@ -421,9 +464,10 @@ export function resoudrePerimetrePsp(input: PspPerimetreInput): PspPerimetreResu
   } else if (chargeExclu) {
     perimetre = "hors_psp";
     motif = "autre_charge_operation";
-    categorie = (NAAC_PSP as string[]).includes(naac) || NAAC_HORS_PSP.includes(naac)
-      ? (naac as PspCategoriePsp)
-      : null;
+    categorie =
+      (NAAC_PSP as string[]).includes(naac) || NAAC_HORS_PSP.includes(naac)
+        ? (naac as PspCategoriePsp)
+        : null;
   } else if (NAAC_HORS_PSP.includes(naac)) {
     perimetre = "hors_psp";
     motif = "naac_hors_psp";
@@ -526,9 +570,7 @@ export function construireGroupeApercu(
   },
   membres: PspCommandeValidation[],
 ): PspGroupeApercu {
-  const conf = membres.length
-    ? membres.reduce((s, c) => s + c.confiance, 0) / membres.length
-    : 0;
+  const conf = membres.length ? membres.reduce((s, c) => s + c.confiance, 0) / membres.length : 0;
   const score = calculerScorePriorite({
     montant_engage: groupe.montant_total,
     confiance: Math.min(...membres.map((c) => c.confiance), 0.99),
@@ -570,17 +612,26 @@ export function detecterCorrectionsRecurrentes(
   }>,
   seuil = SEUIL_SUGGESTION_REGLE,
 ): PspSuggestionRegle[] {
-  const compteur = new Map<string, { domaine: string; type: string; n: number; motif: string | null }>();
+  const compteur = new Map<
+    string,
+    { domaine: string; type: string; n: number; motif: string | null }
+  >();
   for (const fb of feedbacks) {
     if (fb.decision_utilisateur !== "modify" || !fb.correction) continue;
-    const domaine = String(fb.correction.domaine_technique ?? "");
-    const type = String(fb.correction.type_intervention ?? "");
+    const domaine = String((fb.correction as Record<string, unknown>)?.["domaine_technique"] ?? "");
+    const type = String((fb.correction as Record<string, unknown>)?.["type_intervention"] ?? "");
     if (!domaine) continue;
     const cle = `${domaine}::${type}`;
     const cur = compteur.get(cle) ?? { domaine, type, n: 0, motif: null };
     cur.n += 1;
-    if (!cur.motif && typeof fb.proposition_initiale?.libelle_normalise === "string") {
-      cur.motif = fb.proposition_initiale.libelle_normalise;
+    if (
+      !cur.motif &&
+      typeof (fb.proposition_initiale as Record<string, unknown> | null)?.["libelle_normalise"] ===
+        "string"
+    ) {
+      cur.motif = (fb.proposition_initiale as Record<string, unknown>)[
+        "libelle_normalise"
+      ] as string;
     }
     compteur.set(cle, cur);
   }
@@ -593,7 +644,20 @@ export function detecterCorrectionsRecurrentes(
 // Aucune écriture ici. Ces fonctions ne font que du formatage / de la détection :
 // les données sources (psp_import_rows, travaux_commandes, Excel) restent intactes.
 
-const MOIS_EN = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const MOIS_EN = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+];
 
 /**
  * Formate une date Historique CMD en français (DD/MM/YYYY).
@@ -612,7 +676,7 @@ export function formatDateCommandeFr(value: unknown): string | null {
   if (m) return `${m[3]}/${m[2]}/${m[1]}`;
 
   // DD/MM/YYYY · DD-MM-YYYY · DD.MM.YYYY
-  m = s.match(/^(\d{1,2})[\/\.-](\d{1,2})[\/\.-](\d{4})$/);
+  m = s.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/);
   if (m) return `${pad(Number(m[1]))}/${pad(Number(m[2]))}/${m[3]}`;
 
   // Weekday Mon DD YYYY …
@@ -631,7 +695,12 @@ export function formatDateCommandeFr(value: unknown): string | null {
 }
 
 /** Types de décision humaine enregistrables dans psp_decisions. */
-export const TYPES_DECISION_PSP = ["nature", "corps_etat", "perimetre_psp", "rapprochement"] as const;
+export const TYPES_DECISION_PSP = [
+  "nature",
+  "corps_etat",
+  "perimetre_psp",
+  "rapprochement",
+] as const;
 export type TypeDecisionPsp = (typeof TYPES_DECISION_PSP)[number];
 
 /** Statuts autorisés d'une décision psp_decisions. */

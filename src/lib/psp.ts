@@ -25,12 +25,7 @@ export type PspStatutLigne = "valide" | "a_controler" | "erreur";
 
 /** Niveau de rattachement patrimonial (hiérarchie S11 > Ville > Tranche > Bâtiment > Entrée > Lot). */
 export type PspNiveauRattachement =
-  | "tranche"
-  | "batiment"
-  | "entree"
-  | "lot"
-  | "unknown"
-  | "ambiguous";
+  "tranche" | "batiment" | "entree" | "lot" | "unknown" | "ambiguous";
 
 /**
  * Types d'intervention retenus pour l'analyse future des commandes.
@@ -262,24 +257,24 @@ const headerAliases: Record<string, keyof PspParsedRow> = {
  * est ignoré. Ce mapping est volontairement extensible pour plusieurs exports.
  */
 const isisAliases: Record<string, keyof PspParsedRow> = {
-  "comcnolig": "numero_commande",
-  "comnnum": "numero_commande_interne",
-  "wpatrimoine": "patrimoine",
-  "percsecteur": "secteur",
-  "entnnum": "entree",
-  "bainnum": "batiment",
-  "comddate": "date_commande",
-  "naaccode": "nature_analytique",
-  "comcetat": "etat",
-  "comnmtdevis": "budget",
-  "wmtrappro": "engage",
-  "wmtecart": "ecart",
-  "frannum": "fournisseur",
-  "wnature": "corps_etat",
-  "wnotes": "descriptif",
-  "wadresse": "adresse",
-  "wcommune": "commune",
-  "uticcode": "charge_operation",
+  comcnolig: "numero_commande",
+  comnnum: "numero_commande_interne",
+  wpatrimoine: "patrimoine",
+  percsecteur: "secteur",
+  entnnum: "entree",
+  bainnum: "batiment",
+  comddate: "date_commande",
+  naaccode: "nature_analytique",
+  comcetat: "etat",
+  comnmtdevis: "budget",
+  wmtrappro: "engage",
+  wmtecart: "ecart",
+  frannum: "fournisseur",
+  wnature: "corps_etat",
+  wnotes: "descriptif",
+  wadresse: "adresse",
+  wcommune: "commune",
+  uticcode: "charge_operation",
 };
 
 /** Normalise un intitulé d'en-tête en forme compacte (sans espaces ni séparateurs). */
@@ -440,7 +435,9 @@ export const extractErReferences = (
  * Formats reconnus : "(j) Couvertures", "Couvertures (j)".
  * Le code entre parenthèses est prioritaire (clé de classification).
  */
-export const extractCorpsEtat = (value: unknown): { code: string | null; libelle: string | null } => {
+export const extractCorpsEtat = (
+  value: unknown,
+): { code: string | null; libelle: string | null } => {
   const v = text(value);
   if (v === null) return { code: null, libelle: null };
   const strict = v.match(/^\(([A-Za-z0-9]+)\)\s*(.*)$/);
@@ -537,9 +534,11 @@ function validerFinances(raw: Raw): {
  * La colonne « numéro de commande » est reconnue par alias classiques
  * (ex "No commande") OU par nom technique ISIS (ex "COMC_NOLIG.Ana_comd_trav_er").
  */
-function detectSheetAndHeader(
-  workbook: XLSX.WorkBook,
-): { name: string; matrix: unknown[][]; mainHeaderIndex: number } {
+function detectSheetAndHeader(workbook: XLSX.WorkBook): {
+  name: string;
+  matrix: unknown[][];
+  mainHeaderIndex: number;
+} {
   const isCommandeCell = (cell: unknown) =>
     resolveHeaderAlias(cell).normalizedField === "numero_commande";
 
@@ -687,7 +686,7 @@ export function parsePspWorkbook(data: ArrayBuffer): PspParsedTravaux {
     const statut: PspStatutLigne = erreursPsp.length > 0 ? "a_controler" : "valide";
 
     const commande: PspParsedRow = {
-      ligne: base.ligne,
+      ligne: base.ligne ?? 0,
       numero_commande: numero,
       numero_commande_interne: text(raw["numero_commande_interne"]),
       secteur: text(raw["secteur"]),

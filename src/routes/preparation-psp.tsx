@@ -38,6 +38,7 @@ import {
   type DeplacementMemo,
   type FiltresDetail,
   type PspAnnee,
+  type PspCategorie,
   type PspOperation,
   type SaisieOperation,
 } from "@/lib/psp.prep";
@@ -63,6 +64,13 @@ import {
   type ModificationSuivi,
 } from "@/lib/psp.prep.suivi";
 import { getTravauxDashboard } from "@/lib/travaux.dashboard.functions";
+import {
+  createPspLigne,
+  deletePspLigne,
+  getPspBrouillon,
+  updatePspLigne,
+  type PspLignePersist,
+} from "@/lib/psp.prep.supabase.functions";
 
 export const Route = createFileRoute("/preparation-psp")({
   head: () => ({
@@ -71,7 +79,7 @@ export const Route = createFileRoute("/preparation-psp")({
       {
         name: "description",
         content:
-          "V2 : préparation de la programmation pluriannuelle des travaux (2027-2031) connectée en lecture seule aux données PAT S11. Aucune écriture en base.",
+          "V6 : préparation de la programmation pluriannuelle des travaux (2027-2031) avec brouillon persisté dans Supabase (lignes, devis, reports, décisions, commandes).",
       },
     ],
   }),
@@ -95,6 +103,63 @@ function PreparationPspPage() {
   });
   const [operations, setOperations] = useState<PspOperation[]>(() => PSP_OPERATIONS);
   const [deplacements, setDeplacements] = useState<DeplacementMemo[]>([]);
+
+  // ── Persistance Supabase V6 : brouillon actif (créé automatiquement si absent) ──
+  const [programmation, setProgrammation] = useState<{
+    id: string;
+    statut: string;
+    version: number;
+  } | null>(null);
+  const fetchBrouillon = useServerFn(getPspBrouillon);
+  const { data: brouillon, isFetching: brouillonChargement } = useQuery({
+    queryKey: ["psp-brouillon-supabase"],
+    queryFn: () => fetchBrouillon(),
+    staleTime: 1000 * 30,
+    retry: 1,
+  });
+  const figee = programmation?.statut === "figee";
+
+  // Au chargement : la source de vérité est le brouillon Supabase (lignes réelles).
+  useEffect(() => {
+    if (!brouillon) return;
+    setProgrammation({
+      id: brouillon.programmation.id,
+      statut: brouillon.programmation.statut,
+      version: brouillon.programmation.version,
+    });
+    const devisParLigne = new Map<string, Array<Record<string, unknown>>>();
+    for (const d of brouillon.devis ?? []) {
+      const id = String(d["psp_ligne_id"] ?? "");
+      if (!id) continue;
+      devisParLigne.set(id, [...(devisParLigne.get(id) ?? []), d]);
+    }
+    const ops: PspOperation[] = (brouillon.lignes ?? []).map((l: PspLignePersist) => ({
+      id: l.id,
+      annee: 2027 as PspAnnee,
+      tranche: l.tranche_code,
+      charge_clientele: "",
+      charge_operation: "",
+      categorie: (l.categorie as PspCategorie) ?? "GT",
+      corps_etat_code: l.corps_etat_code ?? "",
+      corps_etat: l.corps_etat ?? "",
+      adresse: "",
+      ville: "",
+      sous_secteur: null,
+      nature_travaux: l.nature_travaux ?? "",
+      budget: PSP_ANNEES.reduce((s, a) => s + (l.programme?.[String(a)] ?? 0), 0),
+      programme: l.programme ?? {},
+      remarques: l.remarques,
+      devis: (devisParLigne.get(l.id) ?? []).map((d) => ({
+        entreprise: String(d["entreprise"] ?? ""),
+        montant: Number(d["montant"] ?? 0),
+        remarque: (d["commentaire"] as string | null) ?? null,
+      })),
+      reportee: l.origine === "report",
+      ancienne_annee: null,
+      ancien_montant: null,
+    }));
+    setOperations(ops);
+  }, [brouillon]);
 
   // Référence réelle PAT S11 (lecture seule, ~3 requêtes, aucune écriture).
   const fetchReference = useServerFn(getPspReferencePatrimoine);
@@ -220,7 +285,11 @@ function PreparationPspPage() {
   /** Décisions locales de la revue des reports (brouillon courant uniquement). */
   const [decisions, setDecisions] = useState<Map<string, string>>(new Map());
 
-  const handleReporter = (ligne: LigneArbitrage, anneeCible: number) => {
+  const handleReporter = async (ligne: LigneArbitrage, anneeCible: number) => {
+    if (figee || !programmation?.id) {
+      toast.error(figee ? "Programmation figée : report impossible." : "Brouillon non chargé.");
+      return;
+    }
     const saisie: SaisieOperation = {
       tranche: ligne.tranche,
       categorie: ligne.categorie,
@@ -239,7 +308,6 @@ function PreparationPspPage() {
       const liste = ajouterOperationListe(prev, saisie, id);
       const op = liste[liste.length - 1];
       if (op) {
-        // Conserver l'information d'origine : reporté de N → badge « REPORTÉ DE 2026 ».
         op.reportee = true;
         op.ancienne_annee = ligne.annee_initiale;
         op.ancien_montant = ligne.montant_programme;
@@ -249,7 +317,32 @@ function PreparationPspPage() {
     setDecisions((prev) =>
       new Map(prev).set(`${ligne.tranche}|${ligne.categorie}`, `Report ${anneeCible}`),
     );
-    toast.success(`Opération reportée en ${anneeCible} (brouillon local).`);
+    // Persistance : la ligne cible est créée dans le brouillon (origine='report').
+    const programme: Record<string, number> = {};
+    PSP_ANNEES.forEach((a) => {
+      programme[String(a)] = a === anneeCible ? ligne.montant_programme : 0;
+    });
+    try {
+      const creee = await createLigneFn({
+        data: {
+          programmationId: programmation.id,
+          trancheCode: ligne.tranche,
+          categorie: ligne.categorie,
+          corpsEtatCode: null,
+          corpsEtat: null,
+          natureTravaux: ligne.nature_travaux || null,
+          programme,
+          ligneBudget: null,
+          remarques: saisie.remarques ?? null,
+          origine: "report",
+        },
+      });
+      setOperations((prev) => prev.map((o) => (o.id === id ? { ...o, id: creee.id } : o)));
+      toast.success(`Opération reportée en ${anneeCible} (brouillon Supabase).`);
+    } catch (e) {
+      setOperations((prev) => supprimerOperationListe(prev, id));
+      toast.error(`Report non persisté : ${(e as Error).message}`);
+    }
   };
 
   const handleAnnuler = (ligne: LigneArbitrage) => {
@@ -279,7 +372,13 @@ function PreparationPspPage() {
   );
 
   const sourceLabel =
-    source.type === "fichier" && source.fichier ? source.fichier : "esquisse 2027 (mock V1)";
+    source.type === "fichier" && source.fichier
+      ? source.fichier
+      : brouillonChargement
+        ? "brouillon Supabase (chargement…)"
+        : figee
+          ? `brouillon Supabase v${programmation?.version ?? "?"} — GELÉ (figée)`
+          : `brouillon Supabase v${programmation?.version ?? "?"}`;
   const referenceResume = refBrute
     ? `référence réelle : ${refBrute.tranches.length} tranches · ${refBrute.lots.length} lots · ${refBrute.commandes.length} commandes`
     : refChargement
@@ -304,18 +403,34 @@ function PreparationPspPage() {
     toast.info("Analyse — simulation V2. Le moteur d'analyse sera connecté à Supabase plus tard.");
 
   const ouvrirAjout = () => {
+    if (figee) {
+      toast.error("Programmation figée : ajout d'opération impossible.");
+      return;
+    }
     setFormMode("ajout");
     setFormOperation(null);
     setFormOuvert(true);
   };
 
   const ouvrirModification = (op: PspOperation) => {
+    if (figee) {
+      toast.error("Programmation figée : modification impossible.");
+      return;
+    }
     setFormMode("modification");
     setFormOperation(op);
     setFormOuvert(true);
   };
 
-  const handleAjouter = (saisie: SaisieOperation) => {
+  const createLigneFn = useServerFn(createPspLigne);
+  const updateLigneFn = useServerFn(updatePspLigne);
+  const deleteLigneFn = useServerFn(deletePspLigne);
+
+  const handleAjouter = async (saisie: SaisieOperation) => {
+    if (figee || !programmation?.id) {
+      toast.error(figee ? "Programmation figée : ajout impossible." : "Brouillon non chargé.");
+      return;
+    }
     const id = `loc-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
     const sousSecteur = reference?.tranches.get(saisie.tranche)?.sous_secteur ?? null;
     setOperations((prev) => {
@@ -324,11 +439,39 @@ function PreparationPspPage() {
       if (nouvelle) nouvelle.sous_secteur = sousSecteur;
       return liste;
     });
-    toast.success("Opération ajoutée localement (aucune écriture en base).");
+    const programme: Record<string, number> = {};
+    PSP_ANNEES.forEach((a, i) => {
+      programme[String(a)] = Number(saisie.programme[i]) || 0;
+    });
+    try {
+      const ligne = await createLigneFn({
+        data: {
+          programmationId: programmation.id,
+          trancheCode: saisie.tranche,
+          categorie: saisie.categorie,
+          corpsEtatCode: null,
+          corpsEtat: saisie.corps_etat || null,
+          natureTravaux: saisie.nature_travaux || null,
+          programme,
+          ligneBudget: null,
+          remarques: saisie.remarques ?? null,
+          origine: "preparation",
+        },
+      });
+      setOperations((prev) => prev.map((o) => (o.id === id ? { ...o, id: ligne.id } : o)));
+      toast.success(`Opération persistée dans Supabase (brouillon v${programmation.version}).`);
+    } catch (e) {
+      setOperations((prev) => supprimerOperationListe(prev, id));
+      toast.error(`Échec de la persistance : ${(e as Error).message}`);
+    }
   };
 
-  const handleModifier = (saisie: SaisieOperation) => {
+  const handleModifier = async (saisie: SaisieOperation) => {
     if (!formOperation) return;
+    if (figee) {
+      toast.error("Programmation figée : modification impossible.");
+      return;
+    }
     const programme: Record<string, number> = {};
     PSP_ANNEES.forEach((a, i) => {
       programme[String(a)] = Number(saisie.programme[i]) || 0;
@@ -349,25 +492,55 @@ function PreparationPspPage() {
         remarques: saisie.remarques,
       }),
     );
-    toast.success("Opération modifiée — totaux recalculés.");
+    try {
+      await updateLigneFn({
+        data: {
+          id: formOperation.id,
+          trancheCode: saisie.tranche,
+          categorie: saisie.categorie,
+          corpsEtatCode: null,
+          corpsEtat: saisie.corps_etat || null,
+          natureTravaux: saisie.nature_travaux || null,
+          programme,
+          ligneBudget: null,
+          remarques: saisie.remarques ?? null,
+        },
+      });
+      toast.success("Opération modifiée — totaux recalculés et persistés.");
+    } catch (e) {
+      toast.error(`Échec de la persistance : ${(e as Error).message}`);
+    }
   };
 
   const handleDeplacer = (id: string, cible: PspAnnee, motif: string | null) => {
+    if (figee) {
+      toast.error("Programmation figée : déplacement impossible.");
+      return;
+    }
     const { ops, deplacement } = deplacerOperation(operations, id, cible, motif);
     setOperations(ops);
     if (deplacement) setDeplacements((prev) => [...prev, deplacement]);
     if (deplacement) {
       toast.success(
-        `Déplacée ${deplacement.anneePrecedente} → ${deplacement.anneeNouvelle} (${money0(deplacement.montant)}), en mémoire.`,
+        `Déplacée ${deplacement.anneePrecedente} → ${deplacement.anneeNouvelle} (${money0(deplacement.montant)}).`,
       );
     } else {
       toast.info("Déplacement impossible : opération introuvable ou déjà sur cette année.");
     }
   };
 
-  const handleSupprimer = (id: string) => {
+  const handleSupprimer = async (id: string) => {
+    if (figee) {
+      toast.error("Programmation figée : suppression impossible.");
+      return;
+    }
     setOperations((prev) => supprimerOperationListe(prev, id));
-    toast.info("Opération supprimée localement.");
+    try {
+      await deleteLigneFn({ data: { id } });
+      toast.success("Opération supprimée (persistance Supabase).");
+    } catch (e) {
+      toast.error(`Échec de la suppression : ${(e as Error).message}`);
+    }
   };
 
   const handleChargerEsquisse = (fichier: File) => {

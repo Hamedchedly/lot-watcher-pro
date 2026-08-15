@@ -44,8 +44,7 @@ export const getPspValidationApercu = createServerFn({ method: "POST" })
     const { supabaseAdmin } = await import("../integrations/supabase-ext/client.server");
     const db = supabaseAdmin as any;
 
-    const chargesExclus =
-      data.charges_operation_exclus ?? CHARGES_OPERATION_EXCLUS_PAR_DEFAUT;
+    const chargesExclus = data.charges_operation_exclus ?? CHARGES_OPERATION_EXCLUS_PAR_DEFAUT;
     const overrides = data.overrides_eligible ?? [];
 
     const { data: imps, error: errImports } = await db
@@ -69,31 +68,32 @@ export const getPspValidationApercu = createServerFn({ method: "POST" })
     // (absent de l'import actuel — la dimension reste disponible en futur).
     const extraireCharge = (db_: Record<string, unknown> | null | undefined): string | null => {
       const d = db_ ?? {};
-      const v =
-        d.charge_operation ?? d.utic_code ?? d.utic ?? d["UTIC_CODE"] ?? null;
+      const v = d["charge_operation"] ?? d["utic_code"] ?? d["utic"] ?? d["UTIC_CODE"] ?? null;
       return typeof v === "string" && v.trim() !== "" ? v.trim() : null;
     };
 
     // Classification + score + périmètre (déterministe, en mémoire)
-    const commandes: PspCommandeValidation[] = (rows ?? []).map((r) => {
+    const commandes: PspCommandeValidation[] = (rows ?? []).map((r: Record<string, unknown>) => {
       const cls = classifierCommande({
-        comn: r.numero_commande_interne,
-        comc: r.numero_commande,
-        naac: r.nature_analytique,
-        wnature: r.corps_etat_libelle ?? "",
-        patrimoine: r.patrimoine,
-        montant_engage: r.montant_engage,
+        comn: String(r["numero_commande_interne"] ?? ""),
+        comc: (r["numero_commande"] as string | null) ?? null,
+        naac: (r["nature_analytique"] as string | null) ?? null,
+        wnature: String(r["corps_etat_libelle"] ?? ""),
+        patrimoine: (r["patrimoine"] as string | null) ?? null,
+        montant_engage: (r["montant_engage"] as number | null) ?? null,
       });
-      const charge = extraireCharge(r.donnees_brutes);
+      const charge = extraireCharge(
+        r["donnees_brutes"] as Record<string, unknown> | null | undefined,
+      );
       const perim = resoudrePerimetrePsp({
-        naac: r.nature_analytique,
-        wnature: r.corps_etat_libelle ?? "",
+        naac: (r["nature_analytique"] as string | null) ?? null,
+        wnature: String(r["corps_etat_libelle"] ?? ""),
         charge_operation: charge,
         charges_operation_exclus: chargesExclus,
-        override_eligible: overrides.includes(r.numero_commande_interne),
+        override_eligible: overrides.includes(String(r["numero_commande_interne"] ?? "")),
       });
       const score = calculerScorePriorite({
-        montant_engage: r.montant_engage,
+        montant_engage: (r["montant_engage"] as number | null) ?? null,
         confiance: cls.confiance,
         exceptionnelle: cls.nature_exceptionnelle !== "aucune",
         multi_domaine: cls.domaine_technique === "multi_domaine",
@@ -111,17 +111,17 @@ export const getPspValidationApercu = createServerFn({ method: "POST" })
       }
       return {
         comn: cls.comn,
-        comc: r.numero_commande ?? null,
+        comc: (r["numero_commande"] as string | null) ?? null,
         naac: cls.naac_source,
-        patrimoine: r.patrimoine ?? null,
-        adresse: r.adresse ?? null,
-        commune: r.commune ?? null,
-        wnature: r.corps_etat_libelle ?? "",
-        montant_budget: r.montant_budget ?? null,
-        montant_engage: r.montant_engage ?? null,
-        fournisseur: r.fournisseur ?? null,
-        date_commande: r.date_commande ?? null,
-        er_reference: r.er_reference ?? null,
+        patrimoine: (r["patrimoine"] as string | null) ?? null,
+        adresse: (r["adresse"] as string | null) ?? null,
+        commune: (r["commune"] as string | null) ?? null,
+        wnature: String(r["corps_etat_libelle"] ?? ""),
+        montant_budget: (r["montant_budget"] as number | null) ?? null,
+        montant_engage: (r["montant_engage"] as number | null) ?? null,
+        fournisseur: (r["fournisseur"] as string | null) ?? null,
+        date_commande: (r["date_commande"] as string | null) ?? null,
+        er_reference: (r["er_reference"] as string | null) ?? null,
         type_intervention: cls.type_intervention,
         domaine_technique: cls.domaine_technique,
         domaines_detectes: cls.domaines_detectes,

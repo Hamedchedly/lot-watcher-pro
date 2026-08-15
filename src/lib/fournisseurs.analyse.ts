@@ -644,14 +644,14 @@ export function extraireAdressePhysique(adresse: string | null | undefined): str
   // Un identifiant patrimoine « ER.… » n'est pas une adresse : retiré où qu'il apparaisse
   // (« - ER.37062 », «, SERRIS - ER.26252 », « - INDIV ER.34690 », « ER.T1400 »…).
   const sansEr = brut
-    .replace(/\s*[-–—,;]\s*ER\.[A-Z0-9.\-]+/gi, "")
-    .replace(/\s*[-–—,;]\s*[A-ZÀ-ÿ][A-ZÀ-ÿ0-9]{0,14}\s+ER\.[A-Z0-9.\-]+/gi, "");
+    .replace(/\s*[-–—,;]\s*ER\.[A-Z0-9.-]+/gi, "")
+    .replace(/\s*[-–—,;]\s*[A-ZÀ-ÿ][A-ZÀ-ÿ0-9]{0,14}\s+ER\.[A-Z0-9.-]+/gi, "");
   const nettoye = sansEr
     .trim()
     .replace(/[,\-–—]\s*$/, "")
     .trim();
   if (!nettoye) return null;
-  if (/^ER\.[A-Z0-9.\-]+$/i.test(nettoye)) return null;
+  if (/^ER\.[A-Z0-9.-]+$/i.test(nettoye)) return null;
   return nettoye;
 }
 

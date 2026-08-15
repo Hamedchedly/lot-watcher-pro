@@ -86,22 +86,31 @@ console.log("\n=== VÉRIFICATIONS DOCUMENTAIRES ===");
 
 // 2.1 Les 5 tables sont bien créées.
 for (const t of MODEL.tables) {
-  const re = new RegExp(`create\\s+table\\s+if\\s+not\\s+exists\\s+${t.name.replace(".", "\\.")}\\b`, "i");
+  const re = new RegExp(
+    `create\\s+table\\s+if\\s+not\\s+exists\\s+${t.name.replace(".", "\\.")}\\b`,
+    "i",
+  );
   check(`CREATE TABLE ${t.name}`, re.test(sql));
 }
 
 // 2.2 Les généralisations d'existantes sont additives (ALTER … ADD COLUMN, pas de CREATE).
 for (const g of MODEL.generalisations) {
-  const hasAlter = new RegExp(`alter\\s+table\\s+${g.table.replace(".", "\\.")}\\s+add\\s+column`, "i").test(sql);
+  const hasAlter = new RegExp(
+    `alter\\s+table\\s+${g.table.replace(".", "\\.")}\\s+add\\s+column`,
+    "i",
+  ).test(sql);
   check(`ALTER additif ${g.table}`, hasAlter);
   for (const col of g.addColumns) {
     check(
       `  colonne ${g.table}.${col} ajoutée`,
-      hasAlter && new RegExp(`add\\s+column\\s+if\\s+not\\s+exists\\s+${col}\\b`, "i").test(sql)
+      hasAlter && new RegExp(`add\\s+column\\s+if\\s+not\\s+exists\\s+${col}\\b`, "i").test(sql),
     );
   }
   // La table qu'elle remplace ne doit PAS être créée.
-  const regexReplace = new RegExp(`create\\s+table\\s+(if\\s+not\\s+exists\\s+)?${g.replaces}\\b`, "i");
+  const regexReplace = new RegExp(
+    `create\\s+table\\s+(if\\s+not\\s+exists\\s+)?${g.replaces}\\b`,
+    "i",
+  );
   check(`  PAS de CREATE ${g.replaces} (réutilisé via ${g.table})`, !regexReplace.test(sql));
 }
 
@@ -120,7 +129,7 @@ for (const inv of MODEL.invariants) {
 const sqlSansComment = strip(sql);
 check(
   "UNIQUE(programmation_id, tranche_code, categorie) réel",
-  /unique\s*\(\s*programmation_id\s*,\s*tranche_code\s*,\s*categorie\s*\)/i.test(sqlSansComment)
+  /unique\s*\(\s*programmation_id\s*,\s*tranche_code\s*,\s*categorie\s*\)/i.test(sqlSansComment),
 );
 
 // 2.6 Les FK pointent vers les tables réelles de la base (référence, pas duplication).
@@ -135,11 +144,16 @@ for (const [fk, target] of [
 
 // 2.7 Le modèle documentaire et le SQL sont alignés.
 check("data-model.md mentionne psp_programmations", md.includes("psp_programmations"));
-check("data-model.md documente psp_reports source/cible", md.includes("source_ligne_id") && md.includes("cible_ligne_id"));
+check(
+  "data-model.md documente psp_reports source/cible",
+  md.includes("source_ligne_id") && md.includes("cible_ligne_id"),
+);
 check("data-model.md documente le JSONB programme (Option A)", /Option A \(JSONB\)/.test(md));
 check("data-model.md documente l'absence de psp_arbitrages", md.includes("psp_arbitrages"));
-check("data-model.md documente l'absence de psp_ligne_commandes", md.includes("psp_ligne_commandes"));
-
+check(
+  "data-model.md documente l'absence de psp_ligne_commandes",
+  md.includes("psp_ligne_commandes"),
+);
 
 // ── 3. Constats live (optionnel, lecture seule) ─────────────────────────────────
 console.log("\n=== CONSTATS LIVE (optionnels, lecture seule) ===");
@@ -160,49 +174,80 @@ try {
     return !error;
   };
 
-  const spec = await (await fetch(`${url}/rest/v1/`, { headers: { apikey: key, Accept: "application/json" } })).json();
+  const spec = await (
+    await fetch(`${url}/rest/v1/`, { headers: { apikey: key, Accept: "application/json" } })
+  ).json();
   const definitions = spec.definitions ?? {};
   const colonnes = (table) => Object.keys(definitions[table]?.properties ?? {}).sort();
 
-  // 3.1 psp_programmations : ABSENTE (contrôle direct + OpenAPI).
+  // 3.1 psp_programmations : PRÉSENTE après la migration V6 (le constat V5.1
+  // d'absence a été validé avant migration ; depuis, la table est créée).
   const progLive = await existence("psp_programmations");
   check(
-    "psp_programmations ABSENTE (probe sans head)",
-    !progLive,
-    "la table répond sur une requête sélection — constat V5 à revoir"
+    "psp_programmations PRÉSENTE après migration V6 (probe sans head)",
+    progLive,
+    "la table ne répond pas — migration 20260815 non appliquée ?",
   );
   check(
-    "psp_programmations ABSENTE (OpenAPI)",
-    !definitions["psp_programmations"],
-    "présente dans les définitions OpenAPI — constat V5 à revoir"
+    "psp_programmations PRÉSENTE (OpenAPI)",
+    !!definitions["psp_programmations"],
+    "absente des définitions OpenAPI — migration 20260815 non appliquée ?",
   );
 
   // 3.2 psp_command_links : présente, colonnes réelles.
   const linksCols = colonnes("psp_command_links");
   check("psp_command_links présente (OpenAPI)", linksCols.length > 0, "absente des définitions");
-  for (const col of ["commande_id", "import_row_id", "type_relation", "methode", "confiance", "statut", "justification"]) {
-    check(`psp_command_links.${col} (colonne réelle)`, linksCols.includes(col), `got: ${linksCols.join(", ")}`);
+  for (const col of [
+    "commande_id",
+    "import_row_id",
+    "type_relation",
+    "methode",
+    "confiance",
+    "statut",
+    "justification",
+  ]) {
+    check(
+      `psp_command_links.${col} (colonne réelle)`,
+      linksCols.includes(col),
+      `got: ${linksCols.join(", ")}`,
+    );
   }
 
   // 3.3 psp_decisions : présente, colonnes réelles.
   const decisionsCols = colonnes("psp_decisions");
   check("psp_decisions présente (OpenAPI)", decisionsCols.length > 0, "absente des définitions");
   for (const col of ["cle_metier", "type_decision", "decision_utilisateur", "statut", "motif"]) {
-    check(`psp_decisions.${col} (colonne réelle)`, decisionsCols.includes(col), `got: ${decisionsCols.join(", ")}`);
+    check(
+      `psp_decisions.${col} (colonne réelle)`,
+      decisionsCols.includes(col),
+      `got: ${decisionsCols.join(", ")}`,
+    );
   }
 
   // 3.4 psp_rules : présente (candidat aux règles PSP).
   const rulesCols = colonnes("psp_rules");
   check("psp_rules présente (OpenAPI)", rulesCols.length > 0, "absente des définitions");
   for (const col of ["type_regle", "condition", "resultat", "statut"]) {
-    check(`psp_rules.${col} (colonne réelle)`, rulesCols.includes(col), `got: ${rulesCols.join(", ")}`);
+    check(
+      `psp_rules.${col} (colonne réelle)`,
+      rulesCols.includes(col),
+      `got: ${rulesCols.join(", ")}`,
+    );
   }
 
   // 3.5 Pattern travaux_commandes_historique confirmé (réutilisé par psp_ligne_historique).
   const histCols = colonnes("travaux_commandes_historique");
-  check("travaux_commandes_historique présente (pattern réutilisé)", histCols.length > 0, "absente des définitions");
+  check(
+    "travaux_commandes_historique présente (pattern réutilisé)",
+    histCols.length > 0,
+    "absente des définitions",
+  );
   for (const col of ["operation", "avant", "apres", "resolu"]) {
-    check(`travaux_commandes_historique.${col} (colonne réelle)`, histCols.includes(col), `got: ${histCols.join(", ")}`);
+    check(
+      `travaux_commandes_historique.${col} (colonne réelle)`,
+      histCols.includes(col),
+      `got: ${histCols.join(", ")}`,
+    );
   }
 
   live = true;
@@ -223,4 +268,3 @@ if (FAIL.length) {
   process.exit(1);
 }
 console.log("\nModèle PSP V5.1 cohérent — aucune écriture Supabase effectuée.");
-

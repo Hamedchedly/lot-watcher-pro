@@ -1,0 +1,475 @@
+/**
+ * PSP V6 — Persistance Supabase du Préparateur PSP (server functions, service_role).
+ *
+ * Toutes les écritures passent par le service_role (BYPASS RLS) ; le frontend
+ * n'expose jamais service_role. Le gel (statut=figee) est défendu par les
+ * triggers de la base — l'UI ne fait que le respecter, elle n'est pas la sécurité.
+ *
+ * Règles appliquées :
+ *  · `getPspBrouillon` charge programmation + lignes + devis + reports +
+ *    décisions + liens en quelques requêtes (aucun N+1) ;
+ *  · `import_row_id` d'un lien commande est TOUJOURS résolu via psp_import_rows
+ *    (numero_commande_interne ↔ travaux_commandes.numero_commande) — jamais fictif ;
+ *    si introuvable → erreur métier explicite ;
+ *  · `psp_decisions` : les NOT NULL réels (type_decision, cible_type, cible_id,
+ *    proposition_initiale, valeur_retenue, statut) sont renseignés avec de vraies
+ *    valeurs métier (cible_type='psp_ligne', cible_id=ligne.id).
+ */
+import { createServerFn } from "@tanstack/react-start";
+import { z } from "zod";
+
+export type PspLignePersist = {
+  id: string;
+  programmation_id: string;
+  tranche_code: string;
+  categorie: string;
+  corps_etat_code: string | null;
+  corps_etat: string | null;
+  nature_travaux: string | null;
+  programme: Record<string, number>;
+  ligne_budget: string | null;
+  remarques: string | null;
+  origine: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type PspBrouillonComplet = {
+  programmation: {
+    id: string;
+    annee_debut: number;
+    annee_fin: number;
+    version: number;
+    type: string;
+    statut: string;
+    remarques: string | null;
+  };
+  lignes: PspLignePersist[];
+  devis: Array<Record<string, unknown>>;
+  reports: Array<Record<string, unknown>>;
+  decisions: Array<Record<string, unknown>>;
+  links: Array<Record<string, unknown>>;
+};
+
+const ligneInput = z.object({
+  programmationId: z.string().uuid(),
+  trancheCode: z.string().min(1),
+  categorie: z.enum(["GE", "GT", "CP"]),
+  corpsEtatCode: z.string().nullish(),
+  corpsEtat: z.string().nullish(),
+  natureTravaux: z.string().nullish(),
+  programme: z.record(z.string(), z.number()),
+  ligneBudget: z.string().nullish(),
+  remarques: z.string().nullish(),
+  origine: z.enum(["preparation", "report", "esquisse", "suivi"]).default("preparation"),
+});
+type LigneInput = z.infer<typeof ligneInput>;
+
+const patchLigne = z.object({
+  id: z.string().uuid(),
+  trancheCode: z.string().min(1),
+  categorie: z.enum(["GE", "GT", "CP"]),
+  corpsEtatCode: z.string().nullish(),
+  corpsEtat: z.string().nullish(),
+  natureTravaux: z.string().nullish(),
+  programme: z.record(z.string(), z.number()),
+  ligneBudget: z.string().nullish(),
+  remarques: z.string().nullish(),
+});
+
+const idSchema = z.object({ id: z.string().uuid() });
+
+const devisInput = z.object({
+  pspLigneId: z.string().uuid(),
+  entreprise: z.string().nullish(),
+  dateDevis: z.string().nullish(),
+  montant: z.number().positive().nullish(),
+  statut: z
+    .enum([
+      "a_demander",
+      "demande_envoyee",
+      "recu",
+      "a_analyser",
+      "retenu",
+      "non_retenu",
+      "expire",
+      "annule",
+    ])
+    .default("a_demander"),
+  commentaire: z.string().nullish(),
+  documentReference: z.string().nullish(),
+});
+
+const reportInput = z.object({
+  sourceLigneId: z.string().uuid(),
+  sourceAnnee: z.number().int().min(2000).max(2100),
+  cibleLigneId: z.string().uuid(),
+  cibleAnnee: z.number().int().min(2000).max(2100),
+  montant: z.number().min(0),
+  motif: z.string().nullish(),
+});
+
+const decisionInput = z.object({
+  cleMetier: z.string().min(1),
+  typeDecision: z.enum([
+    "nature",
+    "corps_etat",
+    "perimetre_psp",
+    "rapprochement",
+    "report",
+    "annulation",
+    "conservation",
+    "reevaluation",
+    "conflit_categorie",
+  ]),
+  pspLigneId: z.string().uuid(),
+  decisionUtilisateur: z.string().min(1),
+  statut: z.enum(["valide", "validee", "proposition", "rejete"]).default("validee"),
+  motif: z.string().nullish(),
+  anneeCible: z.number().int().min(2000).max(2100).nullish(),
+  montant: z.number().min(0).nullish(),
+});
+
+const commandLinkInput = z.object({
+  commandeId: z.string().uuid(),
+  pspLigneId: z.string().uuid(),
+  justification: z.string().nullish(),
+});
+
+/** Charge le brouillon actif (2027-2031, officielle) + toutes ses relations. */
+export const getPspBrouillon = createServerFn({ method: "POST" })
+  .validator((d: unknown) => d as undefined)
+  .handler(async ({ data: _d }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
+    const db = supabaseAdmin as any;
+
+    const { data: prog, error } = await db
+      .from("psp_programmations")
+      .select("*")
+      .eq("type", "officielle")
+      .eq("statut", "brouillon")
+      .order("version", { ascending: false })
+      .limit(1);
+    if (error) throw new Error(`Lecture du brouillon : ${error.message}`);
+    let programmation = prog?.[0] ?? null;
+
+    if (!programmation) {
+      const { data: created, error: e2 } = await db
+        .from("psp_programmations")
+        .insert({
+          annee_debut: 2027,
+          annee_fin: 2031,
+          version: 1,
+          type: "officielle",
+          statut: "brouillon",
+          remarques: "Brouillon V6 créé automatiquement",
+        })
+        .select("*")
+        .single();
+      if (e2) throw new Error(`Création du brouillon : ${e2.message}`);
+      programmation = created;
+    }
+
+    const pid = programmation.id;
+    const { data: lignes, error: eL } = await db
+      .from("psp_lignes")
+      .select("*")
+      .eq("programmation_id", pid)
+      .order("tranche_code");
+    if (eL) throw new Error(`Lecture des lignes : ${eL.message}`);
+
+    const ids = ((lignes ?? []) as Array<{ id: string }>).map((l) => l.id);
+    const devis = ids.length
+      ? ((await db.from("psp_devis").select("*").in("psp_ligne_id", ids)).data ?? [])
+      : [];
+    const reports = ids.length
+      ? ((
+          await db
+            .from("psp_reports")
+            .select("*")
+            .or(`source_ligne_id.in.(${ids.join(",")}),cible_ligne_id.in.(${ids.join(",")})`)
+        ).data ?? [])
+      : [];
+    const decisions = ids.length
+      ? ((await db.from("psp_decisions").select("*").in("psp_ligne_id", ids)).data ?? [])
+      : [];
+    const links = ids.length
+      ? ((await db.from("psp_command_links").select("*").in("psp_ligne_id", ids)).data ?? [])
+      : [];
+
+    return {
+      programmation: {
+        id: programmation.id,
+        annee_debut: programmation.annee_debut,
+        annee_fin: programmation.annee_fin,
+        version: programmation.version,
+        type: programmation.type,
+        statut: programmation.statut,
+        remarques: programmation.remarques ?? null,
+      },
+      lignes: (lignes ?? []) as PspLignePersist[],
+      devis,
+      reports,
+      decisions,
+      links,
+    };
+  });
+
+/** Crée une ligne dans le brouillon (INSERT psp_lignes). */
+export const createPspLigne = createServerFn({ method: "POST" })
+  .validator((d: unknown) => ligneInput.parse(d))
+  .handler(async ({ data }: { data: LigneInput }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
+    const db = supabaseAdmin as any;
+    const { data: ligne, error } = await db
+      .from("psp_lignes")
+      .insert({
+        programmation_id: data.programmationId,
+        tranche_code: data.trancheCode,
+        categorie: data.categorie,
+        corps_etat_code: data.corpsEtatCode ?? null,
+        corps_etat: data.corpsEtat ?? null,
+        nature_travaux: data.natureTravaux ?? null,
+        programme: data.programme,
+        ligne_budget: data.ligneBudget ?? null,
+        remarques: data.remarques ?? null,
+        origine: data.origine,
+      })
+      .select("*")
+      .single();
+    if (error) throw new Error(`Création de la ligne : ${error.message}`);
+    return ligne as PspLignePersist;
+  });
+
+/** Modifie une ligne du brouillon (UPDATE psp_lignes). */
+export const updatePspLigne = createServerFn({ method: "POST" })
+  .validator((d: unknown) => patchLigne.parse(d))
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
+    const db = supabaseAdmin as any;
+    const { data: ligne, error } = await db
+      .from("psp_lignes")
+      .update({
+        tranche_code: data.trancheCode,
+        categorie: data.categorie,
+        corps_etat_code: data.corpsEtatCode ?? null,
+        corps_etat: data.corpsEtat ?? null,
+        nature_travaux: data.natureTravaux ?? null,
+        programme: data.programme,
+        ligne_budget: data.ligneBudget ?? null,
+        remarques: data.remarques ?? null,
+      })
+      .eq("id", data.id)
+      .select("*")
+      .single();
+    if (error) throw new Error(`Modification de la ligne : ${error.message}`);
+    return ligne as PspLignePersist;
+  });
+
+/** Supprime une ligne du brouillon (DELETE psp_lignes — bloqué en base si figée). */
+export const deletePspLigne = createServerFn({ method: "POST" })
+  .validator((d: unknown) => idSchema.parse(d))
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
+    const db = supabaseAdmin as any;
+    const { error } = await db.from("psp_lignes").delete().eq("id", data.id);
+    if (error) throw new Error(`Suppression de la ligne : ${error.message}`);
+    return { ok: true as const };
+  });
+
+/** Crée un devis pour une ligne (1..N). */
+export const createPspDevis = createServerFn({ method: "POST" })
+  .validator((d: unknown) => devisInput.parse(d))
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
+    const db = supabaseAdmin as any;
+    const { data: devis, error } = await db
+      .from("psp_devis")
+      .insert({
+        psp_ligne_id: data.pspLigneId,
+        entreprise: data.entreprise ?? null,
+        date_devis: data.dateDevis ?? null,
+        montant: data.montant ?? null,
+        statut: data.statut,
+        commentaire: data.commentaire ?? null,
+        document_reference: data.documentReference ?? null,
+      })
+      .select("*")
+      .single();
+    if (error) throw new Error(`Création du devis : ${error.message}`);
+    return devis;
+  });
+
+/** Met à jour un devis (statut, montant, commentaire…). */
+export const updatePspDevis = createServerFn({ method: "POST" })
+  .validator((d: unknown) =>
+    z
+      .object({
+        id: z.string().uuid(),
+        entreprise: z.string().nullish(),
+        dateDevis: z.string().nullish(),
+        montant: z.number().positive().nullish(),
+        statut: z
+          .enum([
+            "a_demander",
+            "demande_envoyee",
+            "recu",
+            "a_analyser",
+            "retenu",
+            "non_retenu",
+            "expire",
+            "annule",
+          ])
+          .optional(),
+        commentaire: z.string().nullish(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
+    const db = supabaseAdmin as any;
+    const patch: Record<string, unknown> = {};
+    if (data.entreprise !== undefined) patch["entreprise"] = data.entreprise ?? null;
+    if (data.dateDevis !== undefined) patch["date_devis"] = data.dateDevis ?? null;
+    if (data.montant !== undefined) patch["montant"] = data.montant ?? null;
+    if (data.statut !== undefined) patch["statut"] = data.statut;
+    if (data.commentaire !== undefined) patch["commentaire"] = data.commentaire ?? null;
+    const { data: devis, error } = await db
+      .from("psp_devis")
+      .update(patch)
+      .eq("id", data.id)
+      .select("*")
+      .single();
+    if (error) throw new Error(`Modification du devis : ${error.message}`);
+    return devis;
+  });
+
+/** Supprime un devis. */
+export const deletePspDevis = createServerFn({ method: "POST" })
+  .validator((d: unknown) => idSchema.parse(d))
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
+    const db = supabaseAdmin as any;
+    const { error } = await db.from("psp_devis").delete().eq("id", data.id);
+    if (error) throw new Error(`Suppression du devis : ${error.message}`);
+    return { ok: true as const };
+  });
+
+/** Crée un report source → cible (la ligne cible porte origine='report'). */
+export const createPspReport = createServerFn({ method: "POST" })
+  .validator((d: unknown) => reportInput.parse(d))
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
+    const db = supabaseAdmin as any;
+    const { data: report, error } = await db
+      .from("psp_reports")
+      .insert({
+        source_ligne_id: data.sourceLigneId,
+        source_annee: data.sourceAnnee,
+        cible_ligne_id: data.cibleLigneId,
+        cible_annee: data.cibleAnnee,
+        montant: data.montant,
+        motif: data.motif ?? null,
+      })
+      .select("*")
+      .single();
+    if (error) throw new Error(`Création du report : ${error.message}`);
+    return report;
+  });
+
+/**
+ * Enregistre une décision PSP (généralisation de savePspDecision) dans
+ * psp_decisions. Les NOT NULL réels sont renseignés : cible_type='psp_ligne',
+ * cible_id=ligne.id, proposition_initiale/valeur_retenue = état du programme.
+ */
+export const saveDecisionPsp = createServerFn({ method: "POST" })
+  .validator((d: unknown) => decisionInput.parse(d))
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
+    const db = supabaseAdmin as any;
+    const now = new Date().toISOString();
+    const { data: ligne } = await db
+      .from("psp_lignes")
+      .select("programme")
+      .eq("id", data.pspLigneId)
+      .single();
+    const programme = (ligne?.programme ?? {}) as Record<string, number>;
+    const payload = {
+      cle_metier: data.cleMetier,
+      type_decision: data.typeDecision,
+      cible_type: "psp_ligne",
+      cible_id: data.pspLigneId,
+      proposition_initiale: programme,
+      valeur_retenue: data.anneeCible
+        ? { [String(data.anneeCible)]: data.montant ?? 0 }
+        : programme,
+      decision_utilisateur: data.decisionUtilisateur,
+      statut: data.statut,
+      motif: data.motif ?? null,
+      psp_ligne_id: data.pspLigneId,
+      annee_cible: data.anneeCible ?? null,
+      montant: data.montant ?? null,
+      created_at: now,
+      updated_at: now,
+    };
+    const { data: inserted, error } = await db
+      .from("psp_decisions")
+      .insert(payload)
+      .select("*")
+      .single();
+    if (error) throw new Error(`Enregistrement de la décision : ${error.message}`);
+    return inserted;
+  });
+
+/**
+ * Rattache une commande existante à une ligne PSP via psp_command_links.
+ * import_row_id est TOUJOURS résolu réellement (psp_import_rows.numero_commande_interne
+ * ↔ travaux_commandes.numero_commande). Si introuvable → erreur métier, aucune
+ * liaison créée.
+ */
+export const createPspCommandLink = createServerFn({ method: "POST" })
+  .validator((d: unknown) => commandLinkInput.parse(d))
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
+    const db = supabaseAdmin as any;
+
+    const { data: commande } = await db
+      .from("travaux_commandes")
+      .select("numero_commande")
+      .eq("id", data.commandeId)
+      .single();
+    if (!commande?.numero_commande) {
+      throw new Error(
+        "Impossible de rattacher la commande à la ligne PSP : import d'origine introuvable.",
+      );
+    }
+    const numero = String(commande.numero_commande).trim();
+    const { data: importRows } = await db
+      .from("psp_import_rows")
+      .select("id")
+      .eq("numero_commande_interne", numero)
+      .limit(1);
+    const importRow = importRows?.[0];
+    if (!importRow?.id) {
+      throw new Error(
+        "Impossible de rattacher la commande à la ligne PSP : import d'origine introuvable.",
+      );
+    }
+
+    const { data: link, error } = await db
+      .from("psp_command_links")
+      .insert({
+        commande_id: data.commandeId,
+        import_row_id: importRow.id,
+        psp_ligne_id: data.pspLigneId,
+        type_relation: "rattachement_ligne",
+        methode: "manuel",
+        confiance: 1,
+        statut: "valide",
+        justification: data.justification ?? "Rattachement manuel ligne PSP ↔ commande",
+      })
+      .select("*")
+      .single();
+    if (error) throw new Error(`Rattachement de la commande : ${error.message}`);
+    return link;
+  });
