@@ -52,8 +52,8 @@ const filtersActive = (f: FiltresDetail): boolean =>
 
 /** Colonnes descriptives (avant les années) : TR CC Adresse Corps C Nature. */
 const NB_COLS_DESCRIPTIVES = 6;
-/** Colonnes après Total : Devis, Statut, Priorité, Actions. */
-const NB_COLS_TRAILING = 4;
+/** Colonnes après Total : Devis, Statut, Priorité, Notes, Actions. */
+const NB_COLS_TRAILING = 5;
 
 const COLONNES: Array<{ cle: CleTri | null; label: string; align?: "right" }> = [
   { cle: "tranche", label: "TR" },
@@ -71,6 +71,7 @@ const COLONNES: Array<{ cle: CleTri | null; label: string; align?: "right" }> = 
   { cle: null, label: "Devis" },
   { cle: "statut", label: "Statut" },
   { cle: "priorite", label: "Priorité" },
+  { cle: null, label: "Notes" },
   { cle: null, label: "Actions" },
 ];
 
@@ -88,6 +89,8 @@ export default function PspTable({
   onOpenOperation,
   onModifier,
   onSupprimer,
+  onStatutPriorite,
+  onNotes,
   perimetresParLigne,
   lotsParId,
   quickAdd,
@@ -100,6 +103,8 @@ export default function PspTable({
   onOpenOperation: (op: PspOperation) => void;
   onModifier: (op: PspOperation) => void;
   onSupprimer: (id: string) => void;
+  onStatutPriorite: (id: string, patch: { statut?: string; priorite?: string }) => void;
+  onNotes: (id: string, remarques: string) => void;
   perimetresParLigne: Map<string, PerimetreLigne[]>;
   lotsParId: Map<string, LotInfo>;
   quickAdd: {
@@ -179,7 +184,7 @@ export default function PspTable({
       ) : null}
 
       <div className="max-h-[62vh] overflow-auto">
-        <Table className="min-w-[1200px]">
+        <Table className="min-w-[1700px]">
           <TableHeader>
             <TableRow className="border-b bg-muted/50">
               {COLONNES.map((col, i) => (
@@ -216,6 +221,16 @@ export default function PspTable({
           </TableHeader>
 
           <TableBody>
+            {/* Ligne de saisie directe — VRAIE LIGNE, juste sous l'en-tête */}
+            {quickAdd ? (
+              <PspQuickAddRow
+                programmationId={quickAdd.programmationId}
+                reference={quickAdd.reference}
+                onSaved={quickAdd.onSaved}
+                figee={figee}
+              />
+            ) : null}
+
             {mode === "detail"
               ? triees.map((op) => (
                   <PspOperationRow
@@ -226,6 +241,8 @@ export default function PspTable({
                     onOpen={onOpenOperation}
                     onModifier={onModifier}
                     onSupprimer={onSupprimer}
+                    onStatutPriorite={onStatutPriorite}
+                    onNotes={onNotes}
                   />
                 ))
               : null}
@@ -242,6 +259,8 @@ export default function PspTable({
                     onOpenOperation={onOpenOperation}
                     onModifier={onModifier}
                     onSupprimer={onSupprimer}
+                    onStatutPriorite={onStatutPriorite}
+                    onNotes={onNotes}
                     perimetresParLigne={perimetresParLigne}
                     lotsParId={lotsParId}
                   />
@@ -260,29 +279,13 @@ export default function PspTable({
                     onOpenOperation={onOpenOperation}
                     onModifier={onModifier}
                     onSupprimer={onSupprimer}
+                    onStatutPriorite={onStatutPriorite}
+                    onNotes={onNotes}
                     perimetresParLigne={perimetresParLigne}
                     lotsParId={lotsParId}
                   />
                 ))
               : null}
-
-            {/* Ligne de saisie directe — TOUJOURS en bas du tableau */}
-            {quickAdd ? (
-              <TableRow className="bg-primary/5 hover:bg-primary/5">
-                <TableCell
-                  colSpan={nbColonnes}
-                  className="px-2 py-2"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <PspQuickAddRow
-                    programmationId={quickAdd.programmationId}
-                    reference={quickAdd.reference}
-                    onSaved={quickAdd.onSaved}
-                    figee={figee}
-                  />
-                </TableCell>
-              </TableRow>
-            ) : null}
           </TableBody>
 
           {mode === "detail" ? (
@@ -319,6 +322,8 @@ type PropsOpLigne = {
   onOpenOperation: (op: PspOperation) => void;
   onModifier: (op: PspOperation) => void;
   onSupprimer: (id: string) => void;
+  onStatutPriorite: (id: string, patch: { statut?: string; priorite?: string }) => void;
+  onNotes: (id: string, remarques: string) => void;
   perimetresParLigne: Map<string, PerimetreLigne[]>;
   lotsParId: Map<string, LotInfo>;
 };
@@ -433,6 +438,8 @@ function FragmentSousGroupe({
   onOpenOperation,
   onModifier,
   onSupprimer,
+  onStatutPriorite,
+  onNotes,
   perimetresParLigne,
   lotsParId,
 }: {
@@ -464,11 +471,11 @@ function FragmentSousGroupe({
               onOpen={onOpenOperation}
               onModifier={onModifier}
               onSupprimer={onSupprimer}
+              onStatutPriorite={onStatutPriorite}
+              onNotes={onNotes}
             />
           ))
         : null}
     </>
   );
 }
-
-const nbColonnes = COLONNES.length;

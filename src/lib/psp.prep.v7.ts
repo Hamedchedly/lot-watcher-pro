@@ -266,3 +266,63 @@ export function libelleAdressePerimetre(
   for (const e of autres) parts.push(adresseExportPatrimoine(e));
   return parts.join(" ; ");
 }
+
+// ── 9. Construction du périmètre patrimonial depuis la sélection UI (pure) ─────
+/** Extrait le numéro d'une entrée : « 25-27 RUE DE RUZE » → « 25-27 ». */
+export function numeroDeEntree(entree: string): string {
+  const m = entree.match(/^([\d.\-/]+)\s*(BIS|TER|QUATER)?\s/i);
+  return m ? `${m[1]?.trim() ?? ""}${m[2] ? ` ${m[2].toUpperCase()}` : ""}` : entree;
+}
+
+/**
+ * Construit les lignes `psp_ligne_patrimoine` depuis la sélection de la ligne de
+ * saisie. Règle : une seule tranche ; lots prioritaire sur adresse ; adresses
+ * prioritaire sur rue ; rue prioritaire sur tranche. Tous les niveaux sont
+ * structurés (vérifiés par CHECK en base).
+ */
+export function construirePerimetres(input: {
+  lots: Array<{ id: string; adresse?: string | null; code_patrimoine?: string | null }>;
+  adresses: string[];
+  rue: string | null;
+  mode: "auto" | "force";
+}): PerimetreLigne[] {
+  if (input.mode === "force" && input.lots.length === 0) {
+    // Périmètre "toute la tranche" (toujours exprimé avec tranche_code).
+    return [{ niveau: "tranche", rue: null, numero: null, lot_id: null }];
+  }
+  if (input.lots.length > 0) {
+    return input.lots.map((l) => ({
+      niveau: "lot",
+      rue: null,
+      numero: null,
+      lot_id: l.id,
+    }));
+  }
+  if (input.adresses.length > 0 && input.rue) {
+    return input.adresses.map((a) => ({
+      niveau: "adresse",
+      rue: input.rue,
+      numero: numeroDeEntree(a),
+      lot_id: null,
+    }));
+  }
+  if (input.rue) {
+    return [{ niveau: "rue", rue: input.rue, numero: null, lot_id: null }];
+  }
+  return [{ niveau: "tranche", rue: null, numero: null, lot_id: null }];
+}
+
+/**
+ * Programmé par année × catégorie — règle unique utilisée par la répartition
+ * annuelle (PspKpi) et testable. Clé `${annee}|${categorie}`. Jamais stocké.
+ */
+export function programmeParAnneeCategorie(ops: PspOperation[]): Record<string, number> {
+  const m: Record<string, number> = {};
+  for (const op of ops) {
+    for (const a of PSP_ANNEES) {
+      const v = op.programme?.[String(a)] ?? 0;
+      if (v > 0) m[`${a}|${op.categorie}`] = (m[`${a}|${op.categorie}`] ?? 0) + v;
+    }
+  }
+  return m;
+}

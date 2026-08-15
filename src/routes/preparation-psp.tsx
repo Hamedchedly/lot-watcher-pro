@@ -69,6 +69,7 @@ import { getTravauxDashboard } from "@/lib/travaux.dashboard.functions";
 import {
   createPspDevis,
   createPspLigne,
+  createPspPerimetres,
   createPspProgrammation,
   deletePspDevis,
   deletePspLigne,
@@ -200,6 +201,7 @@ function PreparationPspPage() {
         statut: String(d["statut"] ?? ""),
         remarque: (d["commentaire"] as string | null) ?? null,
         commentaire: (d["commentaire"] as string | null) ?? null,
+        document_reference: (d["document_reference"] as string | null) ?? null,
       })),
       reportee: l.origine === "report",
       statut: l.statut,
@@ -513,6 +515,7 @@ function PreparationPspPage() {
   const updateLigneFn = useServerFn(updatePspLigne);
   const deleteLigneFn = useServerFn(deletePspLigne);
   const createProgFn = useServerFn(createPspProgrammation);
+  const createPerimetresFn = useServerFn(createPspPerimetres);
   const statutPrioriteFn = useServerFn(updatePspLigneStatutPriorite);
   const createDevisFn = useServerFn(createPspDevis);
   const updateDevisFn = useServerFn(updatePspDevis);
@@ -575,6 +578,7 @@ function PreparationPspPage() {
         statut: String(devis["statut"] ?? ""),
         remarque: (devis["commentaire"] as string | null) ?? null,
         commentaire: (devis["commentaire"] as string | null) ?? null,
+        document_reference: (devis["document_reference"] as string | null) ?? null,
       },
     ]);
     toast.success("Devis ajouté et persisté (psp_devis).");
@@ -599,6 +603,7 @@ function PreparationPspPage() {
           | "annule"
           | undefined,
         commentaire: d.commentaire,
+        documentReference: d.documentReference ?? null,
       },
     });
     setOperations((prev) =>
@@ -614,6 +619,7 @@ function PreparationPspPage() {
                 statut: d.statut ?? dv.statut ?? "",
                 commentaire: d.commentaire ?? dv.commentaire ?? null,
                 remarque: d.commentaire ?? dv.remarque ?? null,
+                document_reference: d.documentReference ?? dv.document_reference ?? null,
               }
             : dv,
         ),
@@ -659,15 +665,30 @@ function PreparationPspPage() {
           programmationId: programmation.id,
           trancheCode: saisie.tranche,
           categorie: saisie.categorie,
-          corpsEtatCode: null,
+          corpsEtatCode: (saisie.corps_etat.match(/\(([^)]+)\)/)?.[1] ?? null) as string | null,
           corpsEtat: saisie.corps_etat || null,
           natureTravaux: saisie.nature_travaux || null,
           programme,
           ligneBudget: null,
           remarques: saisie.remarques ?? null,
+          statut:
+            (saisie.statut as
+              "a_definir" | "attente_agence" | "attente_confirmation" | undefined) ?? undefined,
+          priorite:
+            (saisie.priorite as "prioritaire" | "normale" | "non_prioritaire" | undefined) ??
+            undefined,
           origine: "preparation",
         },
       });
+      if (saisie.perimetres && saisie.perimetres.length > 0) {
+        await createPerimetresFn({
+          data: {
+            pspLigneId: ligne.id,
+            trancheCode: saisie.tranche,
+            perimetres: saisie.perimetres,
+          },
+        });
+      }
       setOperations((prev) => prev.map((o) => (o.id === id ? { ...o, id: ligne.id } : o)));
       toast.success(`Opération persistée dans Supabase (brouillon v${programmation.version}).`);
     } catch (e) {
@@ -686,21 +707,43 @@ function PreparationPspPage() {
     PSP_ANNEES.forEach((a, i) => {
       programme[String(a)] = Number(saisie.programme[i]) || 0;
     });
+    const patch: {
+      tranche: string;
+      categorie: string;
+      charge_clientele: string;
+      charge_operation: string;
+      corps_etat: string;
+      adresse: string;
+      ville: string;
+      sous_secteur: string | null;
+      nature_travaux: string;
+      annee: number;
+      programme: Record<string, number>;
+      remarques: string | null;
+      statut?: string;
+      priorite?: string;
+    } = {
+      tranche: saisie.tranche,
+      categorie: saisie.categorie,
+      charge_clientele: saisie.charge_clientele,
+      charge_operation: saisie.charge_operation,
+      corps_etat: saisie.corps_etat,
+      adresse: saisie.adresse,
+      ville: saisie.ville,
+      sous_secteur: reference?.tranches.get(saisie.tranche)?.sous_secteur ?? null,
+      nature_travaux: saisie.nature_travaux,
+      annee: saisie.annee,
+      programme,
+      remarques: saisie.remarques,
+    };
+    if (saisie.statut !== undefined) patch.statut = saisie.statut;
+    if (saisie.priorite !== undefined) patch.priorite = saisie.priorite;
     setOperations((prev) =>
-      modifierOperationListe(prev, formOperation.id, {
-        tranche: saisie.tranche,
-        categorie: saisie.categorie,
-        charge_clientele: saisie.charge_clientele,
-        charge_operation: saisie.charge_operation,
-        corps_etat: saisie.corps_etat,
-        adresse: saisie.adresse,
-        ville: saisie.ville,
-        sous_secteur: reference?.tranches.get(saisie.tranche)?.sous_secteur ?? null,
-        nature_travaux: saisie.nature_travaux,
-        annee: saisie.annee,
-        programme,
-        remarques: saisie.remarques,
-      }),
+      modifierOperationListe(
+        prev,
+        formOperation.id,
+        patch as Parameters<typeof modifierOperationListe>[2],
+      ),
     );
     try {
       await updateLigneFn({
@@ -708,17 +751,70 @@ function PreparationPspPage() {
           id: formOperation.id,
           trancheCode: saisie.tranche,
           categorie: saisie.categorie,
-          corpsEtatCode: null,
+          corpsEtatCode: (saisie.corps_etat.match(/\(([^)]+)\)/)?.[1] ?? null) as string | null,
           corpsEtat: saisie.corps_etat || null,
           natureTravaux: saisie.nature_travaux || null,
           programme,
           ligneBudget: null,
           remarques: saisie.remarques ?? null,
+          statut:
+            (saisie.statut as
+              "a_definir" | "attente_agence" | "attente_confirmation" | undefined) ?? undefined,
+          priorite:
+            (saisie.priorite as "prioritaire" | "normale" | "non_prioritaire" | undefined) ??
+            undefined,
         },
       });
+      // Périmètre patrimonial : remplacé si l'utilisateur l'a modifié dans l'éditeur.
+      if (saisie.perimetres && saisie.perimetres.length > 0) {
+        await createPerimetresFn({
+          data: {
+            pspLigneId: formOperation.id,
+            trancheCode: saisie.tranche,
+            perimetres: saisie.perimetres,
+          },
+        });
+        setPerimetresParLigne((prev) => {
+          const next = new Map(prev);
+          next.set(formOperation.id, saisie.perimetres ?? []);
+          return next;
+        });
+      }
       toast.success("Opération modifiée — totaux recalculés et persistés.");
     } catch (e) {
       toast.error(`Échec de la persistance : ${(e as Error).message}`);
+    }
+  };
+
+  /** Notes/remarques éditables en ligne (psp_lignes.remarques). */
+  const handleNotes = async (id: string, remarques: string) => {
+    if (figee) {
+      toast.error("Programmation figée : modification impossible.");
+      return;
+    }
+    const op = operations.find((o) => o.id === id);
+    if (!op) return;
+    setOperations((prev) =>
+      prev.map((o) => (o.id === id ? { ...o, remarques: remarques || null } : o)),
+    );
+    try {
+      await updateLigneFn({
+        data: {
+          id,
+          trancheCode: op.tranche,
+          categorie: op.categorie,
+          corpsEtatCode: op.corps_etat_code || null,
+          corpsEtat: op.corps_etat || null,
+          natureTravaux: op.nature_travaux || null,
+          programme: op.programme,
+          ligneBudget: null,
+          remarques: remarques || null,
+          statut: op.statut,
+          priorite: op.priorite,
+        },
+      });
+    } catch (e) {
+      toast.error(`Notes non persistées : ${(e as Error).message}`);
     }
   };
 
@@ -846,6 +942,8 @@ function PreparationPspPage() {
                 onOpenOperation={(op) => setSelectedOpId(op.id)}
                 onModifier={ouvrirModification}
                 onSupprimer={handleSupprimer}
+                onStatutPriorite={handleStatutPriorite}
+                onNotes={handleNotes}
                 perimetresParLigne={perimetresParLigne}
                 lotsParId={lotsParId}
                 quickAdd={
@@ -889,6 +987,7 @@ function PreparationPspPage() {
         mode={formMode}
         operation={formOperation}
         reference={reference}
+        perimetresLigne={perimetresParLigne.get(formOperation?.id ?? "") ?? []}
         onSave={formMode === "ajout" ? handleAjouter : handleModifier}
         onClose={() => setFormOuvert(false)}
       />

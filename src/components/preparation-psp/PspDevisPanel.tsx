@@ -28,6 +28,8 @@ export type DevisEdit = {
   montant?: number;
   statut?: string | null;
   commentaire?: string | null;
+  /** Numéro / référence du devis (psp_devis.document_reference). */
+  documentReference?: string | null;
 };
 
 /**
@@ -57,6 +59,7 @@ export default function PspDevisPanel({
     montant: string;
     statut: string;
     commentaire: string;
+    document_reference: string;
   } | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -65,6 +68,7 @@ export default function PspDevisPanel({
   const [montant, setMontant] = useState("");
   const [statut, setStatut] = useState("recu");
   const [commentaire, setCommentaire] = useState("");
+  const [numero, setNumero] = useState("");
 
   const stats = statsDevis(operation.devis);
   const budget = totalOperation(operation);
@@ -77,6 +81,7 @@ export default function PspDevisPanel({
     setMontant("");
     setStatut("recu");
     setCommentaire("");
+    setNumero("");
   };
 
   const ajouter = async () => {
@@ -89,6 +94,7 @@ export default function PspDevisPanel({
         montant: Number(montant) || 0,
         statut,
         commentaire: commentaire.trim() || null,
+        documentReference: numero.trim() || null,
       });
       reinitFormulaire();
       setAjoutOuvert(false);
@@ -107,6 +113,7 @@ export default function PspDevisPanel({
         montant: Number(editForm.montant) || 0,
         statut: editForm.statut || null,
         commentaire: editForm.commentaire.trim() || null,
+        documentReference: editForm.document_reference.trim() || null,
       });
       setEditionId(null);
       setEditForm(null);
@@ -123,6 +130,7 @@ export default function PspDevisPanel({
       montant: String(d.montant || ""),
       statut: d.statut ?? "recu",
       commentaire: d.commentaire ?? "",
+      document_reference: d.document_reference ?? "",
     });
   };
 
@@ -205,6 +213,14 @@ export default function PspDevisPanel({
                     </Select>
                   </div>
                   <Input
+                    value={editForm.document_reference}
+                    onChange={(e) =>
+                      setEditForm({ ...editForm, document_reference: e.target.value })
+                    }
+                    placeholder="N° de devis"
+                    className="h-7 text-xs"
+                  />
+                  <Input
                     value={editForm.commentaire}
                     onChange={(e) => setEditForm({ ...editForm, commentaire: e.target.value })}
                     placeholder="Commentaire"
@@ -223,6 +239,11 @@ export default function PspDevisPanel({
                 <div className="flex flex-wrap items-center justify-between gap-1">
                   <span className="flex flex-wrap items-center gap-1.5 text-xs font-medium">
                     <span className="font-black">{d.entreprise}</span>
+                    {d.document_reference ? (
+                      <span className="font-mono text-[10px] text-muted-foreground">
+                        N° {d.document_reference}
+                      </span>
+                    ) : null}
                     {d.date_devis ? (
                       <span className="text-muted-foreground">
                         {new Date(d.date_devis).toLocaleDateString("fr-FR")}
@@ -309,6 +330,12 @@ export default function PspDevisPanel({
                   </SelectContent>
                 </Select>
               </div>
+              <Input
+                value={numero}
+                onChange={(e) => setNumero(e.target.value)}
+                placeholder="N° de devis"
+                className="h-7 text-xs"
+              />
               <Input
                 value={commentaire}
                 onChange={(e) => setCommentaire(e.target.value)}

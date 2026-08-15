@@ -63,6 +63,8 @@ export type PspDevis = {
   remarque: string | null;
   /** Commentaire libre (psp_devis.commentaire). */
   commentaire?: string | null;
+  /** Numéro / référence du devis (psp_devis.document_reference). */
+  document_reference?: string | null;
 };
 
 /**
@@ -1344,6 +1346,16 @@ export type SaisieOperation = {
   /** 5 montants pour 2027→2031. */
   programme: number[];
   remarques: string | null;
+  /** Périmètre patrimonial structuré (V7.2) — optionnel (reste l'existant sinon). */
+  perimetres?: Array<{
+    niveau: string;
+    rue: string | null;
+    numero: string | null;
+    lot_id: string | null;
+  }>;
+  /** Statut / priorité (V7.2) — persistés dans psp_lignes. */
+  statut?: string;
+  priorite?: string;
 };
 
 /**

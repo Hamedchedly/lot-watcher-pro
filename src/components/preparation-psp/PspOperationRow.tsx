@@ -1,8 +1,17 @@
+import { useState } from "react";
 import { Building2, Pencil, Trash2 } from "lucide-react";
 
 import PspSecteurBadge from "@/components/preparation-psp/PspSecteurBadge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { TableCell, TableRow } from "@/components/ui/table";
 import { money0 } from "@/lib/formats";
 import { PSP_ANNEES, montantAnnee, totalOperation, type PspOperation } from "@/lib/psp.prep";
@@ -27,9 +36,10 @@ const PRIORITE_STYLES: Record<string, string> = {
 };
 
 /**
- * Ligne d'opération du tableau — cliquable (ouvre la fiche opération).
- * Colonnes V7.1 : TR, CC, Adresse / périmètre réel, Corps d'état, Catégorie,
- * Nature travaux, 2027-2031, Total, Devis, Statut, Priorité, Actions.
+ * Ligne d'opération du tableau (V7.2) — cliquable (fiche opération).
+ * Colonnes : TR, CC, Adresse / périmètre réel, Corps d'état, Catégorie,
+ * Nature travaux, 2027-2031, Total, Devis, Statut (éditable), Priorité
+ * (éditable), Notes (éditables), Actions. Modifier / Supprimer / fiche.
  */
 export default function PspOperationRow({
   op,
@@ -38,6 +48,8 @@ export default function PspOperationRow({
   onOpen,
   onModifier,
   onSupprimer,
+  onStatutPriorite,
+  onNotes,
 }: {
   op: PspOperation;
   perimetres: PerimetreLigne[];
@@ -45,7 +57,12 @@ export default function PspOperationRow({
   onOpen: (op: PspOperation) => void;
   onModifier: (op: PspOperation) => void;
   onSupprimer: (id: string) => void;
+  onStatutPriorite: (id: string, patch: { statut?: string; priorite?: string }) => void;
+  onNotes: (id: string, remarques: string) => void;
 }) {
+  const [editing, setEditing] = useState<{ statut?: boolean; priorite?: boolean }>({});
+  const [notes, setNotes] = useState(op.remarques ?? "");
+
   const adresse = libelleAdressePerimetre(perimetres, lotsParId, {
     adresse: op.adresse,
     ville: op.ville,
@@ -117,16 +134,93 @@ export default function PspOperationRow({
           {nbDevis > 0 ? `☑ Oui (${nbDevis})` : "☐ Non"}
         </span>
       </TableCell>
-      <TableCell className="py-2">
-        <Badge className={cn("font-bold", STATUT_STYLES[statut] ?? STATUT_STYLES["a_definir"])}>
-          {STATUT_LABELS[statut] ?? statut}
-        </Badge>
+
+      {/* Statut — badge + sélecteur inline */}
+      <TableCell className="py-2" onClick={(e) => e.stopPropagation()}>
+        {editing.statut ? (
+          <Select
+            value={statut}
+            onValueChange={(v) => {
+              onStatutPriorite(op.id, { statut: v });
+              setEditing({ ...editing, statut: false });
+            }}
+          >
+            <SelectTrigger className="h-7 w-[150px] text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {Object.entries(STATUT_LABELS).map(([v, l]) => (
+                <SelectItem key={v} value={v}>
+                  {l}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setEditing({ ...editing, statut: true })}
+            title="Cliquer pour modifier le statut"
+          >
+            <Badge className={cn("font-bold", STATUT_STYLES[statut] ?? STATUT_STYLES["a_definir"])}>
+              {STATUT_LABELS[statut] ?? statut}
+            </Badge>
+          </button>
+        )}
       </TableCell>
-      <TableCell className="py-2">
-        <Badge className={cn("font-bold", PRIORITE_STYLES[priorite] ?? PRIORITE_STYLES["normale"])}>
-          {PRIORITE_LABELS[priorite] ?? priorite}
-        </Badge>
+
+      {/* Priorité — badge + sélecteur inline */}
+      <TableCell className="py-2" onClick={(e) => e.stopPropagation()}>
+        {editing.priorite ? (
+          <Select
+            value={priorite}
+            onValueChange={(v) => {
+              onStatutPriorite(op.id, { priorite: v });
+              setEditing({ ...editing, priorite: false });
+            }}
+          >
+            <SelectTrigger className="h-7 w-[130px] text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {Object.entries(PRIORITE_LABELS).map(([v, l]) => (
+                <SelectItem key={v} value={v}>
+                  {l}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setEditing({ ...editing, priorite: true })}
+            title="Cliquer pour modifier la priorité"
+          >
+            <Badge
+              className={cn("font-bold", PRIORITE_STYLES[priorite] ?? PRIORITE_STYLES["normale"])}
+            >
+              {PRIORITE_LABELS[priorite] ?? priorite}
+            </Badge>
+          </button>
+        )}
       </TableCell>
+
+      {/* Notes — modifiables en ligne (psp_lignes.remarques) */}
+      <TableCell className="min-w-[140px] py-2" onClick={(e) => e.stopPropagation()}>
+        <Input
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          onBlur={() => {
+            const value = notes.trim();
+            const actuelle = (op.remarques ?? "").trim();
+            if (value !== actuelle) onNotes(op.id, value);
+          }}
+          placeholder="Notes…"
+          className="h-7 text-xs"
+        />
+      </TableCell>
+
+      {/* Actions */}
       <TableCell className="py-2" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center gap-1">
           <Button

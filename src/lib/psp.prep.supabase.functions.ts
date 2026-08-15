@@ -398,6 +398,7 @@ export const updatePspDevis = createServerFn({ method: "POST" })
           ])
           .optional(),
         commentaire: z.string().nullish(),
+        documentReference: z.string().nullish(),
       })
       .parse(d),
   )
@@ -410,6 +411,8 @@ export const updatePspDevis = createServerFn({ method: "POST" })
     if (data.montant !== undefined) patch["montant"] = data.montant ?? null;
     if (data.statut !== undefined) patch["statut"] = data.statut;
     if (data.commentaire !== undefined) patch["commentaire"] = data.commentaire ?? null;
+    if (data.documentReference !== undefined)
+      patch["document_reference"] = data.documentReference ?? null;
     const { data: devis, error } = await db
       .from("psp_devis")
       .update(patch)
