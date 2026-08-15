@@ -51,6 +51,13 @@ export default function PspDevisPanel({
 }) {
   const [ajoutOuvert, setAjoutOuvert] = useState(false);
   const [editionId, setEditionId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState<{
+    entreprise: string;
+    date_devis: string;
+    montant: string;
+    statut: string;
+    commentaire: string;
+  } | null>(null);
   const [busy, setBusy] = useState(false);
 
   const [entre, setEntre] = useState("");
@@ -90,21 +97,38 @@ export default function PspDevisPanel({
     }
   };
 
-  const sauver = async (d: PspDevis) => {
-    if (!d.id || figee) return;
+  const sauver = async () => {
+    if (!editionId || !editForm || figee) return;
     setBusy(true);
     try {
-      await onUpdate(d.id, {
-        entreprise: d.entreprise,
-        dateDevis: d.date_devis ?? null,
-        montant: d.montant,
-        statut: d.statut ?? null,
-        commentaire: d.commentaire ?? null,
+      await onUpdate(editionId, {
+        entreprise: editForm.entreprise,
+        dateDevis: editForm.date_devis || null,
+        montant: Number(editForm.montant) || 0,
+        statut: editForm.statut || null,
+        commentaire: editForm.commentaire.trim() || null,
       });
       setEditionId(null);
+      setEditForm(null);
     } finally {
       setBusy(false);
     }
+  };
+
+  const ouvrirEdition = (d: PspDevis) => {
+    setEditionId(d.id ?? null);
+    setEditForm({
+      entreprise: d.entreprise,
+      date_devis: d.date_devis ?? "",
+      montant: String(d.montant || ""),
+      statut: d.statut ?? "recu",
+      commentaire: d.commentaire ?? "",
+    });
+  };
+
+  const annulerEdition = () => {
+    setEditionId(null);
+    setEditForm(null);
   };
 
   const devisRecu = operation.devis.some(
@@ -141,30 +165,33 @@ export default function PspDevisPanel({
               key={d.id ?? `${d.entreprise}-${d.montant}`}
               className="rounded-md border bg-card p-2"
             >
-              {editionId === d.id ? (
+              {editionId === d.id && editForm ? (
                 <div className="space-y-1.5">
                   <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
                     <Input
-                      defaultValue={d.entreprise}
-                      onChange={(e) => (d.entreprise = e.target.value)}
+                      value={editForm.entreprise}
+                      onChange={(e) => setEditForm({ ...editForm, entreprise: e.target.value })}
                       placeholder="Entreprise"
                       className="h-7 text-xs"
                     />
                     <Input
                       type="date"
-                      defaultValue={d.date_devis ?? ""}
-                      onChange={(e) => (d.date_devis = e.target.value || null)}
+                      value={editForm.date_devis}
+                      onChange={(e) => setEditForm({ ...editForm, date_devis: e.target.value })}
                       className="h-7 text-xs"
                     />
                     <Input
                       type="number"
                       min={0}
-                      defaultValue={d.montant || ""}
-                      onChange={(e) => (d.montant = Number(e.target.value) || 0)}
+                      value={editForm.montant}
+                      onChange={(e) => setEditForm({ ...editForm, montant: e.target.value })}
                       placeholder="Montant"
                       className="h-7 text-xs"
                     />
-                    <Select value={d.statut ?? "recu"} onValueChange={(v) => (d.statut = v)}>
+                    <Select
+                      value={editForm.statut}
+                      onValueChange={(v) => setEditForm({ ...editForm, statut: v })}
+                    >
                       <SelectTrigger className="h-7 text-xs">
                         <SelectValue />
                       </SelectTrigger>
@@ -178,26 +205,16 @@ export default function PspDevisPanel({
                     </Select>
                   </div>
                   <Input
-                    defaultValue={d.commentaire ?? ""}
-                    onChange={(e) => (d.commentaire = e.target.value || null)}
+                    value={editForm.commentaire}
+                    onChange={(e) => setEditForm({ ...editForm, commentaire: e.target.value })}
                     placeholder="Commentaire"
                     className="h-7 text-xs"
                   />
                   <div className="flex items-center gap-1">
-                    <Button
-                      size="sm"
-                      className="h-7"
-                      disabled={busy}
-                      onClick={() => void sauver(d)}
-                    >
+                    <Button size="sm" className="h-7" disabled={busy} onClick={() => void sauver()}>
                       <Check className="size-3" /> Enregistrer
                     </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-7"
-                      onClick={() => setEditionId(null)}
-                    >
+                    <Button variant="ghost" size="sm" className="h-7" onClick={annulerEdition}>
                       <X className="size-3" /> Annuler
                     </Button>
                   </div>
@@ -231,7 +248,7 @@ export default function PspDevisPanel({
                           size="icon"
                           className="size-6 text-muted-foreground hover:text-primary"
                           title="Modifier"
-                          onClick={() => setEditionId(d.id ?? null)}
+                          onClick={() => ouvrirEdition(d)}
                         >
                           <Pencil className="size-3" />
                         </Button>
