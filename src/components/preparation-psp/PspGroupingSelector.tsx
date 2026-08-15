@@ -1,9 +1,9 @@
-import { Layers, List, Users } from "lucide-react";
+import { Flag, Layers, List, Users } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
-/** Modes d'affichage du module (V1). */
-export type ModeAffichage = "tranche" | "charge" | "detail";
+/** Modes d'affichage du module (V2 + V3). */
+export type ModeAffichage = "tranche" | "charge" | "detail" | "reports";
 
 const MODES: Array<{
   valeur: ModeAffichage;
@@ -13,6 +13,7 @@ const MODES: Array<{
   { valeur: "tranche", label: "Par tranche", icone: Layers },
   { valeur: "charge", label: "Par chargé de clientèle", icone: Users },
   { valeur: "detail", label: "Détail", icone: List },
+  { valeur: "reports", label: "Revue des reports", icone: Flag },
 ];
 
 /**

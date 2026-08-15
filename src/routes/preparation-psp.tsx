@@ -13,6 +13,7 @@ import PspHeader from "@/components/preparation-psp/PspHeader";
 import PspKpi from "@/components/preparation-psp/PspKpi";
 import PspOperationDetail from "@/components/preparation-psp/PspOperationDetail";
 import PspOperationForm from "@/components/preparation-psp/PspOperationForm";
+import PspRevueReports from "@/components/preparation-psp/PspRevueReports";
 import PspTable from "@/components/preparation-psp/PspTable";
 import { Button } from "@/components/ui/button";
 import {
@@ -47,6 +48,19 @@ import {
   type ReferencePatrimoine,
 } from "@/lib/psp.prep.data";
 import { getPspReferencePatrimoine } from "@/lib/psp.prep.data.functions";
+import {
+  HISTORIQUE_MODIFICATIONS_MOCK,
+  PSP_PROGRAMMATION_2026,
+  SUIVI_2026_MOCK,
+  cleModification,
+  detecterModificationsLigne,
+  extraireConfirmationsHistorique,
+  ligneSuiviDepuisCommande,
+  type LigneArbitrage,
+  type LigneSuivi,
+  type ModificationSuivi,
+} from "@/lib/psp.prep.suivi";
+import { getTravauxDashboard } from "@/lib/travaux.dashboard.functions";
 
 export const Route = createFileRoute("/preparation-psp")({
   head: () => ({
@@ -102,6 +116,113 @@ function PreparationPspPage() {
     setReference(ref);
     setOperations((prev) => enrichirOperationsAvecReference(prev, ref));
   }, [refBrute]);
+
+  // ── Revue des reports : consomme les RÉSULTATS du moteur d'import annuel ──
+  // (getTravauxDashboard est la lecture agrégée existante du suivi : commandes,
+  // historique des modifications, imports — aucune nouvelle lecture parallèle).
+  const fetchDashboard = useServerFn(getTravauxDashboard);
+  const { data: dash } = useQuery({
+    queryKey: ["psp-suivi-annuel"],
+    queryFn: () => fetchDashboard(),
+    staleTime: 1000 * 60 * 60,
+    retry: 1,
+  });
+
+  /** Lignes du suivi de l'exercice N-1 (2026), ou mock si indisponibles. */
+  const suivi = useMemo<LigneSuivi[]>(() => {
+    if (dash) {
+      const cmds = dash.commandes.filter((c) => c.annee_exercice === 2026);
+      if (cmds.length > 0) return cmds.map((c) => ligneSuiviDepuisCommande(c));
+    }
+    return SUIVI_2026_MOCK;
+  }, [dash]);
+
+  /** Historique des conflits/modifications produit par le moteur d'import. */
+  const historique = useMemo(() => {
+    if (dash && dash.historique.length > 0) {
+      return dash.historique
+        .filter((h) => h.operation === "conflit")
+        .map((h) => ({
+          avant: h.avant as Record<string, unknown> | null,
+          apres: h.apres as Record<string, unknown> | null,
+          resolu: h.resolu,
+          ligne: h.commande_id ?? "?",
+        }));
+    }
+    return HISTORIQUE_MODIFICATIONS_MOCK as unknown as Array<{
+      avant: Record<string, unknown> | null;
+      apres: Record<string, unknown> | null;
+      resolu: boolean;
+      ligne: string;
+    }>;
+  }, [dash]);
+
+  /** Alertes de modifications (ligne, ancienne/nouvelle valeur, type, date, source). */
+  const modifications = useMemo<ModificationSuivi[]>(() => {
+    const liste: ModificationSuivi[] = [];
+    for (const h of historique) {
+      const avant = h.avant ?? {};
+      const apres = h.apres ?? {};
+      const ligneLabel = String(avant["tranche_code"] ?? apres["tranche_code"] ?? "?");
+      for (const m of detecterModificationsLigne(avant, apres, ligneLabel)) {
+        liste.push({ ...m, date: null, source: "import suivi annuel" });
+      }
+    }
+    return liste;
+  }, [historique]);
+
+  const [confirmeesLocales, setConfirmeesLocales] = useState<Set<string>>(new Set());
+  /** Mémoire de confirmation = historique resolu=true + décisions locales. */
+  const confirmees = useMemo(() => {
+    const set = extraireConfirmationsHistorique(historique.map((h) => ({ ...h, ligne: h.ligne })));
+    confirmeesLocales.forEach((cle) => set.add(cle));
+    return set;
+  }, [historique, confirmeesLocales]);
+
+  /** Décisions locales de la revue des reports (brouillon courant uniquement). */
+  const [decisions, setDecisions] = useState<Map<string, string>>(new Map());
+
+  const handleReporter = (ligne: LigneArbitrage, anneeCible: number) => {
+    const saisie: SaisieOperation = {
+      tranche: ligne.tranche,
+      categorie: ligne.categorie,
+      charge_clientele: reference?.tranches.get(ligne.tranche)?.charge_clientele ?? "",
+      charge_operation: "",
+      corps_etat: "",
+      adresse: reference?.tranches.get(ligne.tranche)?.adresse_reference ?? "",
+      ville: reference?.tranches.get(ligne.tranche)?.ville ?? "",
+      nature_travaux: ligne.nature_travaux,
+      annee: anneeCible as PspAnnee,
+      programme: PSP_ANNEES.map((a) => (a === anneeCible ? ligne.montant_programme : 0)),
+      remarques: `Report de ${ligne.annee_initiale} (programmation ${ligne.annee_initiale} non engagée)`,
+    };
+    const id = `report-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+    setOperations((prev) => ajouterOperationListe(prev, saisie, id));
+    setDecisions((prev) =>
+      new Map(prev).set(`${ligne.tranche}|${ligne.categorie}`, `Report ${anneeCible}`),
+    );
+    toast.success(`Opération reportée en ${anneeCible} (brouillon local).`);
+  };
+
+  const handleAnnuler = (ligne: LigneArbitrage) => {
+    setDecisions((prev) => new Map(prev).set(`${ligne.tranche}|${ligne.categorie}`, "Annulée"));
+    toast.info("Opération annulée dans le brouillon (aucune écriture).");
+  };
+
+  const handleConserver = (ligne: LigneArbitrage) => {
+    setDecisions((prev) => new Map(prev).set(`${ligne.tranche}|${ligne.categorie}`, "Conservée"));
+    toast.info("Opération conservée (décision locale).");
+  };
+
+  const handleReevaluer = (ligne: LigneArbitrage) => {
+    setDecisions((prev) => new Map(prev).set(`${ligne.tranche}|${ligne.categorie}`, "À réévaluer"));
+    toast.info("Opération à réévaluer (décision locale).");
+  };
+
+  const handleConfirmerModification = (modification: ModificationSuivi) => {
+    setConfirmeesLocales((prev) => new Set(prev).add(cleModification(modification)));
+    toast.success("Modification confirmée localement — ne sera pas redemandée.");
+  };
 
   const kpi = useMemo(() => kpiGlobal(operations), [operations]);
   const selectedOp = useMemo(
@@ -251,13 +372,29 @@ function PreparationPspPage() {
           </p>
         </div>
 
-        <PspTable
-          mode={mode}
-          operations={operations}
-          filters={filters}
-          onFiltersChange={setFilters}
-          onOpenOperation={(op) => setSelectedOpId(op.id)}
-        />
+        {mode === "reports" ? (
+          <PspRevueReports
+            programmees={PSP_PROGRAMMATION_2026}
+            suivi={suivi}
+            exercice={2027}
+            modifications={modifications}
+            confirmees={confirmees}
+            decisions={decisions}
+            onReporter={handleReporter}
+            onAnnuler={handleAnnuler}
+            onConserver={handleConserver}
+            onReevaluer={handleReevaluer}
+            onConfirmerModification={handleConfirmerModification}
+          />
+        ) : (
+          <PspTable
+            mode={mode}
+            operations={operations}
+            filters={filters}
+            onFiltersChange={setFilters}
+            onOpenOperation={(op) => setSelectedOpId(op.id)}
+          />
+        )}
       </main>
 
       <PspOperationDetail
