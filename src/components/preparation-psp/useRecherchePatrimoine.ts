@@ -11,6 +11,8 @@ import {
 import {
   construirePerimetres,
   estLotGarage,
+  libelleCcManquant,
+  resumeSelectionAdresse,
   sansGarages,
   type PerimetreLigne,
 } from "@/lib/psp.prep.v7";
@@ -101,6 +103,22 @@ export function useRecherchePatrimoine(options: {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const referenceTranche = tranche ? reference?.tranches.get(tranche) : undefined;
+
+  /**
+   * V7.6 §3-4 — Résumé de la sélection d'adresse (toujours visible dans la
+   * cellule « Adresse / périmètre », y compris panneau fermé) : la rue reste
+   * affichée tant qu'une sélection existe.
+   */
+  const resumeSelection = useMemo(
+    () => ({
+      rue,
+      detail: resumeSelectionAdresse({ rue, adresses: adressesChoisies, lots: lotsChoisis }),
+    }),
+    [rue, adressesChoisies, lotsChoisis],
+  );
+
+  /** V7.6 §9 — alerte quand le sous-secteur n'a pas de CC dans le référentiel. */
+  const alerteCc = useMemo(() => libelleCcManquant(referenceTranche), [referenceTranche]);
 
   /** Périmètre effectif : initial tant que l'utilisateur n'a rien modifié. */
   const perimetres = useMemo<PerimetreLigne[]>(() => {
@@ -312,6 +330,30 @@ export function useRecherchePatrimoine(options: {
     setAdressePanelOuvert(true);
   };
 
+  /** V7.6 §3-4 — rouvre le panneau au niveau « numéros » pour modifier la sélection. */
+  const reouvrirNumeros = () => {
+    setNiveauAdresse("numeros");
+    setAdressePanelOuvert(true);
+  };
+
+  /**
+   * V7.6 §4 — supprime UNIQUEMENT la sélection d'adresse (rue/numéros/lots).
+   * La TR et le CC sont CONSERVÉS ; le périmètre repasse au niveau « tranche ».
+   * La fermeture du panneau ne reset JAMAIS la sélection — c'est ce bouton ✕
+   * qui est la seule façon de l'effacer.
+   */
+  const effacerAdresse = () => {
+    setRue(null);
+    setNumeros([]);
+    setAdressesChoisies([]);
+    setLotsDeAdresse(new Map());
+    setLotsChoisis([]);
+    setQLot("");
+    setSugLotsTranche([]);
+    setNiveauAdresse("rues");
+    setModifie(true);
+  };
+
   /** « Toute la rue » proposée EN PREMIÈRE position des rues → périmètre tranche entière. */
   const choisirTouteLaRue = () => {
     setRue(null);
@@ -387,6 +429,7 @@ export function useRecherchePatrimoine(options: {
     tranche,
     cc,
     referenceTranche,
+    alerteCc,
     choisirTranche,
     effacerTranche,
     choisirLotGlobal,
@@ -408,6 +451,8 @@ export function useRecherchePatrimoine(options: {
     lotsChoisis,
     choisirRue,
     retourRues,
+    reouvrirNumeros,
+    effacerAdresse,
     choisirTouteLaRue,
     touteLaRue,
     basculerAdresse,
@@ -421,5 +466,6 @@ export function useRecherchePatrimoine(options: {
     // périmètre
     perimetres,
     modifie,
+    resumeSelection,
   };
 }

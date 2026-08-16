@@ -83,15 +83,17 @@ console.log("\n=== 2. RÉFÉRENTIEL CHARGÉ CLIENTÈLE ===");
   );
   const tr9999 = ref.tranches.get("9999");
   check(
-    "sous-secteur sans référentiel actif → repli commandes (null)",
+    "sous-secteur sans référentiel actif → CC null (aucune fréquence commandes)",
     tr9999?.charge_clientele === null,
     String(tr9999?.charge_clientele),
   );
-  // Sans référentiel passé : comportement historique (fréquence) conservé.
+  // V7.6 §8 — le CC n'est JAMAIS déduit des commandes historiques : sans
+  // référentiel couvrant le sous-secteur → CC non renseigné (null).
   const refSansReferentiel = construireReferencePatrimoine(tranches, lots, commandes, []);
   check(
-    "repli : sans référentiel → fréquence commandes (CANTONY)",
-    refSansReferentiel.tranches.get("1950")?.charge_clientele === "CANTONY",
+    "V7.6 : sans référentiel → CC null (plus jamais fréquence commandes CANTONY)",
+    refSansReferentiel.tranches.get("1950")?.charge_clientele === null,
+    String(refSansReferentiel.tranches.get("1950")?.charge_clientele),
   );
 }
 

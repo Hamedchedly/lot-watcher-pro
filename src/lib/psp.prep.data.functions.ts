@@ -4,7 +4,8 @@
  * Trois requêtes (aucun N+1) :
  *  - `tranches`            → localité / sous-secteur / secteur S11 / nb logements ;
  *  - `lots`                → adresse / ville de référence par TR (paginé 1000) ;
- *  - `travaux_commandes`   → chargé de clientèle par TR (paginé 1000).
+ *  - `travaux_commandes`   → historique des commandes (jamais utilisé comme
+ *    source du CC actuel — V7.6 §8 : le CC vient du référentiel sous-secteur).
  *
  * Aucune écriture : uniquement des `.select(...)` sur des tables existantes.
  * La référence est construite côté client (`psp.prep.data.ts`) à partir des

@@ -13,7 +13,13 @@
  *  · formate l'adresse d'export depuis les relations structurées
  *    (psp_ligne_patrimoine) — la chaîne n'est jamais stockée.
  */
-import { PSP_ANNEES, type PspAnnee, type PspCategorie, type PspOperation } from "./psp.prep.ts";
+import {
+  PSP_ANNEES,
+  totalOperation,
+  type PspAnnee,
+  type PspCategorie,
+  type PspOperation,
+} from "./psp.prep.ts";
 import { entreeDe, rueDe } from "./adresses.ts";
 
 // ── 1. Corps d'état → catégorie (mapping centralisé, réutilisable) ──────────────
@@ -383,7 +389,165 @@ export function detecterRecherchePatrimoine(q: string): TypeRecherchePatrimoine 
   return "mixte";
 }
 
-// ── 11. Diff d'historique (psp_ligne_historique) pour la fiche opération ───────
+// ── 12. V7.6 — Référentiels métier, brouillon et complétude d'export ───────────
+/**
+ * Entrée du RÉFÉRENTIEL corps d'état (table `psp_corps_etats` — V7.6).
+ * Le référentiel est l'autorité des corps disponibles et de leur catégorie ;
+ * l'historique des commandes n'a servi qu'à l'initialiser.
+ */
+export type CorpsEtatReferentiel = {
+  id?: string;
+  code: string | null;
+  libelle: string;
+  categorie: PspCategorie;
+  actif: boolean;
+};
+
+/**
+ * V7.6 — Catégorie GE/GT/CP d'un corps d'état depuis le RÉFÉRENTIEL
+ * (`psp_corps_etats`), avec repli sur le mapping historique si le corps n'y est
+ * pas encore (valeurs libres saisies dans un brouillon). Jamais de second mapping.
+ */
+export function categorieCorpsEtatReferentiel(
+  corps: string | null | undefined,
+  referentiel: CorpsEtatReferentiel[],
+): PspCategorie {
+  if (corps) {
+    const entree = referentiel.find((r) => r.libelle === corps && r.actif);
+    if (entree) return entree.categorie;
+  }
+  return categorieDepuisCorpsEtat(corps);
+}
+
+/** V7.6 — Corps d'état groupés GE/GT/CP depuis le RÉFÉRENTIEL (actifs), avec recherche. */
+export function corpsEtatsGroupesReferentiel(
+  referentiel: CorpsEtatReferentiel[],
+  q = "",
+): Array<{ categorie: PspCategorie; items: string[] }> {
+  const filtre = q.trim().toLowerCase();
+  const actifs = referentiel
+    .filter((r) => r.actif)
+    .filter((r) => !filtre || r.libelle.toLowerCase().includes(filtre))
+    .map((r) => r.libelle);
+  return (["GE", "GT", "CP"] as PspCategorie[])
+    .map((categorie) => ({
+      categorie,
+      items: actifs
+        .filter((libelle) => categorieCorpsEtatReferentiel(libelle, referentiel) === categorie)
+        .sort((a, b) => a.localeCompare(b, "fr")),
+    }))
+    .filter((g) => g.items.length > 0);
+}
+
+/**
+ * V7.6 §1 — Règle brouillon : la TR seule suffit pour ENREGISTRER une ligne.
+ * Corps d'état, montant et année sont FACULTATIFS à la saisie (vérifiés à
+ * l'export). Restent bloquantes les incohérences structurelles (conflit de TR).
+ */
+export function brouillonEnregistrable(tranche: string | null, conflit?: string | null): boolean {
+  return Boolean(tranche) && !conflit;
+}
+
+/**
+ * V7.6 — Ligne incomplète pour l'export (champs obligatoires manquants). */
+export type LigneIncompleteExport = {
+  id: string;
+  tranche: string;
+  manquants: string[];
+};
+
+/**
+ * V7.6 — Analyse de complétude AVANT export. Les champs obligatoires de
+ * l'export direction sont repris des colonnes déjà définies du CSV :
+ *  · TR            (toujours présent — une ligne a forcément un TR) ;
+ *  · Corps d'état  ;
+ *  · Nature travaux ;
+ *  · Adresse / périmètre ;
+ *  · au moins une année programmée avec montant > 0 ;
+ *  · Catégorie (GE/GT/CP — toujours calculée, contrôlée par précaution).
+ * Le brouillon reste PERMISSIF : ces champs ne sont exigés qu'ici.
+ */
+export function analyserCompletudeExport(ops: PspOperation[]): LigneIncompleteExport[] {
+  const incompletes: LigneIncompleteExport[] = [];
+  for (const op of ops) {
+    const manquants: string[] = [];
+    // « — » est la convention de placeholder de `creerOperation` (corps vide) —
+    // considéré comme manquant à l'export.
+    const corps = (op.corps_etat ?? "").trim();
+    if (!corps || corps === "—") manquants.push("Corps d'état");
+    if (!(op.nature_travaux ?? "").trim()) manquants.push("Nature travaux");
+    if (!(op.adresse ?? "").trim() && !(op.ville ?? "").trim()) {
+      manquants.push("Adresse / périmètre");
+    }
+    if (totalOperation(op) <= 0) manquants.push("Montant programmé (au moins une année)");
+    if (!op.categorie) manquants.push("Catégorie");
+    if (manquants.length > 0) {
+      incompletes.push({ id: op.id, tranche: op.tranche, manquants });
+    }
+  }
+  return incompletes;
+}
+
+/**
+ * V7.6 — Résumé de la sélection d'adresse pour la cellule « Adresse / périmètre » :
+ *  · rue seule            → « Toute la rue » ;
+ *  · rues + numéros       → « 3, 5, 7 » ;
+ *  · lots (ER)            → « ER.123 / ER.456 ».
+ * La rue reste TOUJOURS affichée tant qu'une sélection d'adresse existe.
+ */
+export function resumeSelectionAdresse(input: {
+  rue: string | null;
+  adresses: string[];
+  lots: Array<{ code_patrimoine: string | null }>;
+}): string | null {
+  if (!input.rue) return null;
+  const lots = input.lots.map((l) => l.code_patrimoine).filter((c): c is string => Boolean(c));
+  if (lots.length > 0) return lots.join(" / ");
+  if (input.adresses.length > 0) return input.adresses.join(", ");
+  return "Toute la rue";
+}
+
+/**
+ * V7.6 — Message CC manquant (référentiel non renseigné pour le sous-secteur).
+ * Le CC n'est JAMAIS déduit par fréquence des commandes (règle V7.6 §8).
+ */
+export function libelleCcManquant(
+  ref:
+    | {
+        sous_secteur: string | null;
+        charge_clientele: string | null;
+      }
+    | undefined,
+): string | null {
+  if (!ref) return null;
+  if (ref.charge_clientele) return null;
+  if (ref.sous_secteur) {
+    return `Chargé clientèle non renseigné pour le sous-secteur ${ref.sous_secteur}.`;
+  }
+  return "Chargé clientèle non renseigné (sous-secteur inconnu dans le référentiel).";
+}
+
+/**
+ * V7.6 — Upsert PUR du référentiel CC (une ligne par sous-secteur). Un même
+ * chargé peut gérer plusieurs sous-secteurs : la clé reste `sous_secteur`.
+ */
+export function applicerReferentielCcUpsert<T extends { sous_secteur: string }>(
+  lignes: T[],
+  entree: {
+    sous_secteur: string;
+    charge_clientele: string;
+    identifiant_personnel: string | null;
+    actif: boolean;
+  },
+): T[] {
+  const present = lignes.some((l) => l.sous_secteur === entree.sous_secteur);
+  if (present) {
+    return lignes.map((l) => (l.sous_secteur === entree.sous_secteur ? { ...l, ...entree } : l));
+  }
+  return [...lignes, entree as unknown as T];
+}
+
+// ── 13. Diff d'historique (psp_ligne_historique) pour la fiche opération ───────
 export type LigneDiffHistorique = {
   champ: string;
   avant: string;

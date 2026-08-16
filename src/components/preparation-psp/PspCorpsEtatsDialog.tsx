@@ -1,13 +1,11 @@
 /**
- * V7.5 §8 + V7.6 §9-11 — RÉFÉRENTIEL CHARGÉ CLIENTÈLE (sous_secteur → CC → ID → actif).
- *  · consultation (lecture) ;
- *  · modification / ajout / désactivation (écriture via `savePspChargeClientele`, service_role) ;
- *  · un même CC peut gérer plusieurs sous-secteurs (la clé est `sous_secteur`) ;
- *  · le code sous-secteur reste celui du fichier patrimoine (jamais modifié) ;
- *  · signale les sous-secteurs du patrimoine sans CC renseigné (« non renseigné »).
+ * V7.6 §12-13 — RÉFÉRENTIEL CORPS D'ÉTAT (consultation + modification + ajout
+ * + désactivation). Table `psp_corps_etats` : code → libellé → GE/GT/CP → actif.
+ * L'historique des commandes n'a servi qu'au seed initial — ce référentiel est
+ * désormais la seule autorité des corps disponibles et de leur catégorie.
  */
 import { useEffect, useState } from "react";
-import { Users, X } from "lucide-react";
+import { Layers, Plus, X } from "lucide-react";
 import { useServerFn } from "@tanstack/react-start";
 
 import { Badge } from "@/components/ui/badge";
@@ -22,6 +20,13 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Table,
   TableBody,
   TableCell,
@@ -29,37 +34,36 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { getPspChargesClientele } from "@/lib/psp.prep.data.functions";
-import type { ChargesClienteleReferentiel } from "@/lib/psp.prep.data";
-import { savePspChargeClientele } from "@/lib/psp.prep.supabase.functions";
+import { getCorpsEtats, savePspCorpsEtat } from "@/lib/psp.prep.supabase.functions";
+import type { CorpsEtatReferentiel } from "@/lib/psp.prep.v7";
+import type { PspCategorie } from "@/lib/psp.prep";
 
 type LigneEditable = {
-  sousSecteur: string;
-  chargeClientele: string;
-  identifiantPersonnel: string;
+  id: string | null;
+  code: string;
+  libelle: string;
+  categorie: PspCategorie;
   actif: boolean;
 };
 
 const LIGNE_VIDE = (): LigneEditable => ({
-  sousSecteur: "",
-  chargeClientele: "",
-  identifiantPersonnel: "",
+  id: null,
+  code: "",
+  libelle: "",
+  categorie: "GT",
   actif: true,
 });
 
-export default function PspChargesClienteleDialog({
+export default function PspCorpsEtatsDialog({
   open,
   onClose,
-  sousSecteursConnus = [],
 }: {
   open: boolean;
   onClose: () => void;
-  /** Sous-secteurs présents dans le fichier patrimoine (distincts) — V7.6 §9. */
-  sousSecteursConnus?: string[];
 }) {
-  const fetchFn = useServerFn(getPspChargesClientele);
-  const saveFn = useServerFn(savePspChargeClientele);
-  const [lignes, setLignes] = useState<ChargesClienteleReferentiel[]>([]);
+  const fetchFn = useServerFn(getCorpsEtats);
+  const saveFn = useServerFn(savePspCorpsEtat);
+  const [lignes, setLignes] = useState<CorpsEtatReferentiel[]>([]);
   const [charge, setCharge] = useState(false);
   const [edition, setEdition] = useState<LigneEditable | null>(null);
   const [saving, setSaving] = useState(false);
@@ -68,8 +72,8 @@ export default function PspChargesClienteleDialog({
   const recharger = () => {
     setCharge(true);
     setMessage(null);
-    void fetchFn().then((data) => {
-      setLignes((data ?? []) as ChargesClienteleReferentiel[]);
+    void fetchFn({ data: { q: "", tout: true } }).then((data) => {
+      setLignes((data ?? []) as CorpsEtatReferentiel[]);
       setCharge(false);
     });
   };
@@ -82,12 +86,8 @@ export default function PspChargesClienteleDialog({
 
   const enregistrer = async () => {
     if (!edition) return;
-    if (!edition.sousSecteur.trim()) {
-      setMessage("Le sous-secteur est obligatoire.");
-      return;
-    }
-    if (!edition.chargeClientele.trim()) {
-      setMessage("Le chargé clientèle est obligatoire.");
+    if (!edition.libelle.trim()) {
+      setMessage("Le corps d'état (libellé) est obligatoire.");
       return;
     }
     setSaving(true);
@@ -95,9 +95,10 @@ export default function PspChargesClienteleDialog({
     try {
       await saveFn({
         data: {
-          sousSecteur: edition.sousSecteur.trim(),
-          chargeClientele: edition.chargeClientele.trim(),
-          identifiantPersonnel: edition.identifiantPersonnel.trim() || null,
+          id: edition.id ?? undefined,
+          code: edition.code.trim() || null,
+          libelle: edition.libelle.trim(),
+          categorie: edition.categorie,
           actif: edition.actif,
         },
       });
@@ -110,15 +111,16 @@ export default function PspChargesClienteleDialog({
     }
   };
 
-  const basculerActif = async (l: ChargesClienteleReferentiel) => {
+  const basculerActif = async (l: CorpsEtatReferentiel) => {
     setSaving(true);
     setMessage(null);
     try {
       await saveFn({
         data: {
-          sousSecteur: l.sous_secteur,
-          chargeClientele: l.charge_clientele,
-          identifiantPersonnel: l.identifiant_personnel ?? null,
+          id: l.id,
+          code: l.code,
+          libelle: l.libelle,
+          categorie: l.categorie,
           actif: !l.actif,
         },
       });
@@ -129,44 +131,33 @@ export default function PspChargesClienteleDialog({
       setSaving(false);
     }
   };
-
-  const manquants = sousSecteursConnus
-    .filter((ss) => !lignes.some((l) => l.sous_secteur === ss && l.actif))
-    .sort((a, b) => a.localeCompare(b, "fr", { numeric: true }));
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="w-[min(94vw,700px)]">
+      <DialogContent className="w-[min(94vw,760px)]">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Users className="size-4 text-primary" />
-            Référentiel chargé clientèle
+            <Layers className="size-4 text-primary" />
+            Référentiel corps d'état
           </DialogTitle>
           <DialogDescription>
-            Sous-secteur → chargé de clientèle ACTUEL (`psp_charges_clientele`). Résolution :
-            tranches.sous_secteur → CC. Le CC n'est JAMAIS déduit des commandes historiques. Un même
-            CC peut gérer plusieurs sous-secteurs.
+            Source de vérité des corps disponibles et de leur catégorie GE / GT / CP (table
+            `psp_corps_etats`). L'historique des commandes n'a servi qu'à l'initialiser — il est
+            désormais indépendant.
           </DialogDescription>
         </DialogHeader>
-
-        {manquants.length > 0 ? (
-          <p className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-[10px] font-bold leading-tight text-amber-800">
-            Sous-secteur(s) du patrimoine sans chargé clientèle renseigné : {manquants.join(", ")}.
-            Ajoutez-les ci-dessous.
-          </p>
-        ) : null}
 
         <div className="max-h-[55vh] overflow-auto rounded-lg border">
           <Table>
             <TableHeader>
               <TableRow className="bg-muted/50">
+                <TableHead className="w-16 text-[10px] font-black uppercase tracking-widest">
+                  Code
+                </TableHead>
+                <TableHead className="text-[10px] font-black uppercase tracking-widest">
+                  Corps d'état
+                </TableHead>
                 <TableHead className="w-20 text-[10px] font-black uppercase tracking-widest">
-                  Sous-secteur
-                </TableHead>
-                <TableHead className="text-[10px] font-black uppercase tracking-widest">
-                  Chargé clientèle
-                </TableHead>
-                <TableHead className="text-[10px] font-black uppercase tracking-widest">
-                  ID personnel
+                  Catégorie
                 </TableHead>
                 <TableHead className="w-16 text-[10px] font-black uppercase tracking-widest">
                   Actif
@@ -187,7 +178,7 @@ export default function PspChargesClienteleDialog({
               {!charge && lignes.length === 0 && !edition ? (
                 <TableRow>
                   <TableCell colSpan={5} className="py-3 text-center text-xs text-muted-foreground">
-                    Aucune entrée — le référentiel n'est pas encore renseigné.
+                    Aucun corps d'état — ajoutez-en un.
                   </TableCell>
                 </TableRow>
               ) : null}
@@ -195,29 +186,38 @@ export default function PspChargesClienteleDialog({
                 <TableRow className="bg-primary/5">
                   <TableCell>
                     <Input
-                      value={edition.sousSecteur}
-                      onChange={(e) => setEdition({ ...edition, sousSecteur: e.target.value })}
-                      placeholder="2"
-                      className="h-7 w-16 font-mono text-xs"
+                      value={edition.code}
+                      onChange={(e) => setEdition({ ...edition, code: e.target.value })}
+                      placeholder="d"
+                      className="h-7 w-14 font-mono text-xs"
                     />
                   </TableCell>
                   <TableCell>
                     <Input
-                      value={edition.chargeClientele}
-                      onChange={(e) => setEdition({ ...edition, chargeClientele: e.target.value })}
-                      placeholder="CMICHEL"
-                      className="h-7 text-xs uppercase"
+                      value={edition.libelle}
+                      onChange={(e) => setEdition({ ...edition, libelle: e.target.value })}
+                      placeholder="(d) Couverture"
+                      className="h-7 text-xs"
                     />
                   </TableCell>
                   <TableCell>
-                    <Input
-                      value={edition.identifiantPersonnel}
-                      onChange={(e) =>
-                        setEdition({ ...edition, identifiantPersonnel: e.target.value })
+                    <Select
+                      value={edition.categorie}
+                      onValueChange={(v) =>
+                        setEdition({ ...edition, categorie: v as PspCategorie })
                       }
-                      placeholder="CMICHEL"
-                      className="h-7 text-xs uppercase"
-                    />
+                    >
+                      <SelectTrigger className="h-7 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(["GE", "GT", "CP"] as PspCategorie[]).map((c) => (
+                          <SelectItem key={c} value={c}>
+                            {c}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </TableCell>
                   <TableCell>
                     <input
@@ -250,11 +250,21 @@ export default function PspChargesClienteleDialog({
               ) : null}{" "}
               {!charge &&
                 lignes.map((l) => (
-                  <TableRow key={l.sous_secteur}>
-                    <TableCell className="font-mono text-xs font-bold">{l.sous_secteur}</TableCell>
-                    <TableCell className="text-xs">{l.charge_clientele}</TableCell>
-                    <TableCell className="font-mono text-xs">
-                      {l.identifiant_personnel ?? "—"}
+                  <TableRow key={l.id ?? l.libelle}>
+                    <TableCell className="font-mono text-xs font-bold">{l.code ?? "—"}</TableCell>
+                    <TableCell className="text-xs">{l.libelle}</TableCell>
+                    <TableCell>
+                      <Badge
+                        className={
+                          l.categorie === "GE"
+                            ? "border-blue-200 bg-blue-50 text-blue-700"
+                            : l.categorie === "CP"
+                              ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                              : "border-amber-200 bg-amber-50 text-amber-700"
+                        }
+                      >
+                        {l.categorie}
+                      </Badge>
                     </TableCell>
                     <TableCell>
                       {l.actif ? (
@@ -273,9 +283,10 @@ export default function PspChargesClienteleDialog({
                           className="h-7 text-[10px]"
                           onClick={() =>
                             setEdition({
-                              sousSecteur: l.sous_secteur,
-                              chargeClientele: l.charge_clientele,
-                              identifiantPersonnel: l.identifiant_personnel ?? "",
+                              id: l.id ?? null,
+                              code: l.code ?? "",
+                              libelle: l.libelle,
+                              categorie: l.categorie,
                               actif: l.actif,
                             })
                           }
@@ -315,7 +326,7 @@ export default function PspChargesClienteleDialog({
               "Annuler l'ajout"
             ) : (
               <>
-                <Users className="size-3.5" /> Ajouter un sous-secteur
+                <Plus className="size-3.5" /> Ajouter un corps d'état
               </>
             )}
           </Button>

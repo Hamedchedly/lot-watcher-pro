@@ -2,11 +2,12 @@ import { useEffect, useMemo, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { AlertTriangle, FlaskConical, Plus, Users } from "lucide-react";
+import { AlertTriangle, FlaskConical, Layers, Plus, Users } from "lucide-react";
 import { toast } from "sonner";
 
 import PspAncienneProgrammation from "@/components/preparation-psp/PspAncienneProgrammation";
 import PspChargesClienteleDialog from "@/components/preparation-psp/PspChargesClienteleDialog";
+import PspCorpsEtatsDialog from "@/components/preparation-psp/PspCorpsEtatsDialog";
 import PspEnveloppesDialog from "@/components/preparation-psp/PspEnveloppesDialog";
 import PspGroupingSelector, {
   type ModeAffichage,
@@ -23,9 +24,18 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { money0 } from "@/lib/formats";
 import {
   FILTRES_VIDES,
@@ -82,8 +92,10 @@ import {
   type PspPerimetrePersist,
 } from "@/lib/psp.prep.supabase.functions";
 import {
+  analyserCompletudeExport,
   type EnveloppeMap,
   libelleAdressePerimetre,
+  type LigneIncompleteExport,
   type LotInfo,
   type PerimetreLigne,
 } from "@/lib/psp.prep.v7";
@@ -119,6 +131,10 @@ function PreparationPspPage() {
   const [enveloppes, setEnveloppes] = useState<EnveloppeMap>({});
   const [enveloppesDialogOuvert, setEnveloppesDialogOuvert] = useState(false);
   const [ccDialogOuvert, setCcDialogOuvert] = useState(false);
+  /** V7.6 §12 — console de gestion du référentiel corps d'état. */
+  const [corpsDialogOuvert, setCorpsDialogOuvert] = useState(false);
+  /** V7.6 §2 — lignes incomplètes détectées avant export (null = aucun contrôle affiché). */
+  const [exportIncompletes, setExportIncompletes] = useState<LigneIncompleteExport[] | null>(null);
   const [perimetresParLigne, setPerimetresParLigne] = useState<Map<string, PerimetreLigne[]>>(
     new Map(),
   );
@@ -456,6 +472,21 @@ function PreparationPspPage() {
     [operations, selectedOpId],
   );
 
+  /** V7.6 §9 — sous-secteurs présents dans le fichier patrimoine (pour la console CC). */
+  const sousSecteursConnus = useMemo(
+    () =>
+      reference
+        ? [
+            ...new Set(
+              [...reference.tranches.values()]
+                .map((t) => t.sous_secteur)
+                .filter((s): s is string => Boolean(s)),
+            ),
+          ]
+        : [],
+    [reference],
+  );
+
   // ── V7 : filtre annuel CUMULATIF (visuel uniquement — ne modifie jamais la
   // programmation ni la base). Opération visible si une année sélectionnée est programmée.
   const operationsFiltrees = useMemo(() => {
@@ -519,7 +550,20 @@ function PreparationPspPage() {
       });
       return libelle && libelle !== "—" ? { ...o, adresse: libelle } : o;
     });
-    const csv = construireCsvProgrammation(enrichies);
+    // V7.6 §2 — contrôle de complétude AVANT export : les lignes incomplètes
+    // bloquent l'export officiel par défaut (brouillon permissif, export strict).
+    const incompletes = analyserCompletudeExport(enrichies);
+    if (incompletes.length > 0) {
+      setExportIncompletes(incompletes);
+      return;
+    }
+    telechargerCsv(enrichies);
+    toast.success("Export CSV généré (données locales).");
+  };
+
+  /** V7.6 §2 — export « malgré tout » (choix explicite de l'utilisateur). */
+  const telechargerCsv = (ops: PspOperation[]) => {
+    const csv = construireCsvProgrammation(ops);
     const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -527,7 +571,19 @@ function PreparationPspPage() {
     a.download = "programmation-psp-2027-2031.csv";
     a.click();
     URL.revokeObjectURL(url);
-    toast.success("Export CSV généré (données locales).");
+  };
+
+  const exporterMalgreTout = () => {
+    const enrichies = operations.map((o) => {
+      const libelle = libelleAdressePerimetre(perimetresParLigne.get(o.id) ?? [], lotsParId, {
+        adresse: o.adresse,
+        ville: o.ville,
+      });
+      return libelle && libelle !== "—" ? { ...o, adresse: libelle } : o;
+    });
+    setExportIncompletes(null);
+    telechargerCsv(enrichies);
+    toast.info("Export généré malgré les lignes incomplètes (aucune donnée inventée).");
   };
 
   const analyser = () =>
@@ -943,10 +999,20 @@ function PreparationPspPage() {
                   size="sm"
                   className="h-8 text-[11px]"
                   onClick={() => setCcDialogOuvert(true)}
-                  title="Consulter le référentiel sous-secteur → chargé de clientèle"
+                  title="Consulter / modifier le référentiel sous-secteur → chargé de clientèle"
                 >
                   <Users className="size-3.5" />
                   Référentiel CC
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 text-[11px]"
+                  onClick={() => setCorpsDialogOuvert(true)}
+                  title="Consulter / modifier le référentiel corps d'état (GE / GT / CP)"
+                >
+                  <Layers className="size-3.5" />
+                  Référentiel corps d'état
                 </Button>
               </div>
               <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
@@ -1024,7 +1090,62 @@ function PreparationPspPage() {
         onSave={handleSaveEnveloppes}
       />
 
-      <PspChargesClienteleDialog open={ccDialogOuvert} onClose={() => setCcDialogOuvert(false)} />
+      <PspChargesClienteleDialog
+        open={ccDialogOuvert}
+        onClose={() => setCcDialogOuvert(false)}
+        sousSecteursConnus={sousSecteursConnus}
+      />
+
+      <PspCorpsEtatsDialog open={corpsDialogOuvert} onClose={() => setCorpsDialogOuvert(false)} />
+
+      {/* V7.6 §2 — alerte export : lignes incomplètes (champs obligatoires manquants) */}
+      <Dialog
+        open={exportIncompletes !== null}
+        onOpenChange={(o) => !o && setExportIncompletes(null)}
+      >
+        <DialogContent className="w-[min(92vw,620px)]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="size-4 text-destructive" />
+              Certaines lignes sont incomplètes et ne peuvent pas être exportées.
+            </DialogTitle>
+            <DialogDescription>
+              Le brouillon accepte ces lignes ; l'export officiel exige les champs des colonnes
+              direction. Complétez les lignes ci-dessous ou exportez malgré tout (choix explicite).
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[45vh] overflow-auto rounded-lg border">
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-muted/50">
+                  <TableHead className="w-20 text-[10px] font-black uppercase tracking-widest">
+                    TR
+                  </TableHead>
+                  <TableHead className="text-[10px] font-black uppercase tracking-widest">
+                    Champs manquants
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {(exportIncompletes ?? []).map((l) => (
+                  <TableRow key={l.id}>
+                    <TableCell className="font-mono text-xs font-bold">{l.tranche}</TableCell>
+                    <TableCell className="text-xs">{l.manquants.join(", ")}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setExportIncompletes(null)}>
+              Retourner aux lignes à compléter
+            </Button>
+            <Button variant="destructive" size="sm" onClick={exporterMalgreTout}>
+              Exporter malgré les lignes incomplètes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <PspOperationForm
         open={formOuvert}

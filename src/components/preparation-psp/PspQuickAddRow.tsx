@@ -19,6 +19,7 @@ import PspAdressePanel from "@/components/preparation-psp/PspAdressePanel";
 import PspCorpsEtatSelect from "@/components/preparation-psp/PspCorpsEtatSelect";
 import PspSecteurBadge from "@/components/preparation-psp/PspSecteurBadge";
 import { useRecherchePatrimoine } from "@/components/preparation-psp/useRecherchePatrimoine";
+import { useReferentielCorpsEtats } from "@/components/preparation-psp/useReferentielCorpsEtats";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -35,7 +36,7 @@ import {
   createPspOperationComplete,
   rechercherFournisseursDevis,
 } from "@/lib/psp.prep.supabase.functions";
-import { PRIORITE_LABELS, STATUT_LABELS, categorieDepuisCorpsEtat } from "@/lib/psp.prep.v7";
+import { PRIORITE_LABELS, STATUT_LABELS } from "@/lib/psp.prep.v7";
 import type { ReferencePatrimoine } from "@/lib/psp.prep.data";
 
 const CHARGE_OPERATION = "HCHEDLY";
@@ -59,6 +60,8 @@ export default function PspQuickAddRow({
 }) {
   const rec = useRecherchePatrimoine({ reference });
   const fournisseursFn = useServerFn(rechercherFournisseursDevis);
+  /** V7.6 §13 — catégorie C dérivée du RÉFÉRENTIEL corps d'état (autorité). */
+  const { categorieDe } = useReferentielCorpsEtats();
 
   const [corpsEtat, setCorpsEtat] = useState("");
   const [nature, setNature] = useState("");
@@ -75,14 +78,18 @@ export default function PspQuickAddRow({
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
 
-  const categorie: PspCategorie = categorieDepuisCorpsEtat(corpsEtat);
+  const categorie: PspCategorie = categorieDe(corpsEtat);
   const total = useMemo(
     () => PSP_ANNEES.reduce((s, a) => s + (montants[String(a)] ?? 0), 0),
     [montants],
   );
   const anneeValide = PSP_ANNEES.some((a) => (montants[String(a)] ?? 0) > 0);
-  /** V7.4 §3 — actif dès que les données MINIMALES sont valides (jamais bloqué par un panneau ouvert). */
-  const donneesMinimalesValides = Boolean(rec.tranche) && Boolean(corpsEtat) && anneeValide;
+  /**
+   * V7.6 §1 — le brouillon est PERMISSIF : la TR seule suffit. Corps d'état,
+   * montant et année sont FACULTATIFS à la saisie (contrôlés à l'export).
+   * Restent bloquantes les incohérences structurelles (conflit de TR).
+   */
+  const donneesMinimalesValides = Boolean(rec.tranche) && !rec.conflit;
 
   // Fournisseurs (devis) — recherche progressive nom OU code/alias.
   useEffect(() => {
@@ -103,7 +110,7 @@ export default function PspQuickAddRow({
   }, [devisCoche, fournisseurQ]);
 
   const enregistrer = async () => {
-    if (figee || !rec.tranche || !corpsEtat || !anneeValide) return;
+    if (figee || !rec.tranche || rec.conflit) return;
     setSaving(true);
     try {
       const programme: Record<string, number> = {};
@@ -258,9 +265,17 @@ export default function PspQuickAddRow({
         )}
       </TableCell>
 
-      {/* CC — calculé automatiquement */}
+      {/* CC — calculé automatiquement (référentiel sous-secteur → CC, V7.6 §8) */}
       <TableCell className="min-w-[90px] py-1.5">
         <Input value={rec.cc} readOnly placeholder="auto" className="h-8 text-xs" />
+        {rec.alerteCc ? (
+          <p
+            className="mt-0.5 max-w-[150px] text-[8px] font-bold leading-tight text-amber-600"
+            title={rec.alerteCc}
+          >
+            {rec.alerteCc}
+          </p>
+        ) : null}
       </TableCell>
 
       {/* Adresse / périmètre — hiérarchie TR → rues → numéros → lots (V7.4) */}
@@ -442,9 +457,10 @@ export default function PspQuickAddRow({
             )}
             Enregistrer
           </Button>
-          {!anneeValide && rec.tranche ? (
-            <p className="max-w-[180px] text-[9px] font-bold leading-tight text-amber-600">
-              Indiquez au moins une année de programmation avec un montant supérieur à 0.
+          {rec.tranche && !anneeValide ? (
+            <p className="max-w-[180px] text-[9px] leading-tight text-muted-foreground">
+              Brouillon : corps d'état, montant et année facultatifs — la complétude est vérifiée au
+              moment de l'export.
             </p>
           ) : null}
           {rec.conflit ? (

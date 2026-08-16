@@ -7,7 +7,7 @@
 //  1. deux lignes même TR + même catégorie → OK ;
 //  2. ligne montant 2028 → visible en 2028 ;
 //  3. ligne 2028+2029 → visible dans les deux (filtre cumulatif) ;
-//  4. zéro montant sur toutes les années → REJET sans résidu (atomicité) ;
+//  4. brouillon TR seule (zéro montant, sans corps d'état) → ACCEPTÉ (V7.6) ;
 //  5. recherche TR par numéro ; 6. recherche TR par ville ;
 //  8. recherche ER ; 9. recherche locataire ;
 // 10. sélection rue SANS ER → OK ; 12. plusieurs adresses → OK ;
@@ -203,8 +203,10 @@ async function main() {
     check("3. visible en 2029", Number(ligne29.programme?.["2029"]) === 4000);
   }
 
-  // ── 4. ZÉRO MONTANT → REJET + AUCUN RÉSIDU (atomicité) ──
-  console.log("\n=== 4. ANNÉE OBLIGATOIRE + ATOMICITÉ ===");
+  // ── 4. ZÉRO MONTANT → ACCEPTÉ (brouillon V7.6 §1 : TR seule suffit) ──
+  // Le contrôle « au moins une année > 0 » a été DÉPLACÉ à l'export (analyse
+  // de complétude) ; la saisie brouillon reste permissive.
+  console.log("\n=== 4. BROUILLON : ZÉRO MONTANT ACCEPTÉ ===");
   const zero = await run(() =>
     db.rpc("create_psp_operation", {
       p_programmation_id: P1.id,
@@ -212,7 +214,7 @@ async function main() {
       p_categorie: "GT",
       p_corps_etat_code: null,
       p_corps_etat: null,
-      p_nature_travaux: "aucun montant",
+      p_nature_travaux: null,
       p_programme: { 2027: 0, 2028: 0, 2029: 0, 2030: 0, 2031: 0 },
       p_ligne_budget: null,
       p_remarques: MARQUEUR,
@@ -223,16 +225,16 @@ async function main() {
       p_devis: null,
     }),
   );
-  check("4. zéro montant → REJET", !!zero.error, zero.msg);
+  check("4. brouillon TR seule (zéro montant, sans corps) → ACCEPTÉ", !zero.error, zero.msg);
+  if (zero.data?.id) created.lignes.push(zero.data.id);
   {
     const n = await run(() =>
       db
         .from("psp_lignes")
-        .select("id")
-        .eq("nature_travaux", "aucun montant")
-        .eq("remarques", MARQUEUR),
+        .select("id, programme")
+        .eq("id", zero.data?.id ?? "00000000-0000-0000-0000-000000000000"),
     );
-    check("4. aucun résidu après échec (0 ligne)", (n.data ?? []).length === 0, n.msg);
+    check("4. ligne présente et persistée (programme vide)", (n.data ?? []).length === 1, n.msg);
   }
 
   // ── 5/6. RECHERCHE TR par numéro / par ville ──

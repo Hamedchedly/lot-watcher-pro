@@ -40,20 +40,39 @@ export default function PspAdressePanel({ rec }: { rec: Rec }) {
 
   return (
     <div ref={racineRef} className="relative space-y-1">
-      {/* Niveau RUES : recherche progressive (ou chip de la rue sélectionnée) */}
-      {rec.rue && rec.niveauAdresse === "numeros" ? (
-        <div className="flex items-center justify-between gap-1 rounded-md border border-primary/40 bg-primary/10 px-2 py-1">
-          <span className="flex items-center gap-1 text-[10px] font-bold">
-            <MapPin className="size-3 text-primary" />
-            {rec.rue}
-          </span>
-          <button
-            onClick={rec.retourRues}
-            className="text-[9px] font-bold text-muted-foreground hover:text-primary"
-            title="Revenir à la liste des rues"
-          >
-            ← Rues
-          </button>
+      {/* Rue sélectionnée — TOUJOURS affichée (chip + résumé) tant qu'une sélection existe.
+          La fermeture du panneau ne reset JAMAIS la sélection (V7.6 §3-4). */}
+      {rec.rue ? (
+        <div className="rounded-md border border-primary/40 bg-primary/10 px-2 py-1">
+          <div className="flex items-center justify-between gap-1">
+            <span className="flex min-w-0 items-center gap-1 text-[10px] font-bold">
+              <MapPin className="size-3 shrink-0 text-primary" />
+              <span className="truncate">{rec.rue}</span>
+            </span>
+            <span className="flex shrink-0 items-center gap-1.5">
+              <button
+                type="button"
+                onClick={rec.reouvrirNumeros}
+                className="text-[9px] font-bold text-muted-foreground hover:text-primary"
+                title="Modifier la sélection (numéros / lots)"
+              >
+                Modifier
+              </button>
+              <button
+                type="button"
+                onClick={rec.effacerAdresse}
+                className="text-muted-foreground hover:text-destructive"
+                title="Supprimer uniquement la sélection d'adresse (la TR est conservée)"
+              >
+                <X className="size-3" />
+              </button>
+            </span>
+          </div>
+          {rec.resumeSelection.detail ? (
+            <p className="mt-0.5 truncate text-[9px] font-medium text-muted-foreground">
+              {rec.resumeSelection.detail}
+            </p>
+          ) : null}
         </div>
       ) : (
         <div className="relative">
@@ -106,6 +125,14 @@ export default function PspAdressePanel({ rec }: { rec: Rec }) {
       {rec.adressePanelOuvert && rec.rue && rec.niveauAdresse === "numeros" ? (
         <div className="mt-1 max-h-40 overflow-auto rounded-md border bg-card p-1">
           <div className="flex items-center justify-between gap-2 border-b border-dashed pb-1">
+            <button
+              type="button"
+              onClick={rec.retourRues}
+              className="text-[9px] font-bold text-muted-foreground hover:text-primary"
+              title="Changer de rue"
+            >
+              ← Rues
+            </button>
             <label className="flex items-center gap-1.5 rounded px-1 py-0.5 text-[10px] font-bold text-primary hover:bg-accent">
               <input
                 type="checkbox"

@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { Wand2, X } from "lucide-react";
+import { AlertTriangle, Wand2, X } from "lucide-react";
 
 import PspAdressePanel from "@/components/preparation-psp/PspAdressePanel";
 import PspCorpsEtatSelect from "@/components/preparation-psp/PspCorpsEtatSelect";
 import PspSecteurBadge from "@/components/preparation-psp/PspSecteurBadge";
 import { useRecherchePatrimoine } from "@/components/preparation-psp/useRecherchePatrimoine";
+import { useReferentielCorpsEtats } from "@/components/preparation-psp/useReferentielCorpsEtats";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -33,12 +34,7 @@ import {
   type SaisieOperation,
 } from "@/lib/psp.prep";
 import type { ReferencePatrimoine } from "@/lib/psp.prep.data";
-import {
-  PRIORITE_LABELS,
-  STATUT_LABELS,
-  categorieDepuisCorpsEtat,
-  type PerimetreLigne,
-} from "@/lib/psp.prep.v7";
+import { PRIORITE_LABELS, STATUT_LABELS, type PerimetreLigne } from "@/lib/psp.prep.v7";
 
 /** Chargé d'opération FIXE pour la programmation — jamais saisi. */
 const CHARGE_OPERATION = "HCHEDLY";
@@ -85,6 +81,8 @@ export default function PspOperationForm({
       perimetres: perimetresLigne ?? [],
     },
   });
+  /** V7.6 §13 — catégorie C dérivée du RÉFÉRENTIEL corps d'état (autorité). */
+  const { categorieDe } = useReferentielCorpsEtats();
 
   useEffect(() => {
     if (!open && !embedded) return;
@@ -110,12 +108,14 @@ export default function PspOperationForm({
     [programme],
   );
 
-  /** Catégorie dérivée du corps d'état — jamais saisie manuellement. */
-  const categorie: PspCategorie = categorieDepuisCorpsEtat(corpsEtat);
+  /** Catégorie dérivée du corps d'état (référentiel GE/GT/CP) — jamais saisie manuellement. */
+  const categorie: PspCategorie = categorieDe(corpsEtat);
 
   const enregistrer = () => {
     if (saving) return;
-    if (!anneeValide || !corpsEtat) return;
+    // V7.6 §1 — brouillon PERMISSIF : la TR seule suffit (corps d'état, montant,
+    // année facultatifs). Restent bloquantes les incohérences structurelles.
+    if (!rec.tranche || rec.conflit) return;
     setSaving(true);
     onSave({
       tranche: rec.tranche ?? "",
@@ -137,7 +137,7 @@ export default function PspOperationForm({
   };
 
   const anneeValide = programme.some((v) => Number(v) > 0);
-  const valide = Boolean(rec.tranche) && Boolean(corpsEtat) && anneeValide;
+  const valide = Boolean(rec.tranche) && !rec.conflit;
 
   const corpsFormulaire = (
     <div className="mt-4 space-y-3">
@@ -244,6 +244,12 @@ export default function PspOperationForm({
           </span>
         </div>
       ) : null}
+      {rec.alerteCc ? (
+        <p className="flex items-start gap-1.5 rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-[10px] font-bold leading-tight text-amber-800">
+          <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+          {rec.alerteCc}
+        </p>
+      ) : null}
 
       {/* Périmètre patrimonial — hiérarchie TR → rues → numéros → lots (V7.4) */}
       <div className="rounded-lg border bg-surface/60 p-2.5">
@@ -316,8 +322,9 @@ export default function PspOperationForm({
           Total : {money0(total)}
         </p>
         {!anneeValide ? (
-          <p className="mt-1 rounded border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-bold text-amber-800">
-            Indiquez au moins une année de programmation avec un montant supérieur à 0.
+          <p className="mt-1 rounded border border-dashed border-muted px-2 py-1 text-[10px] text-muted-foreground">
+            Brouillon : les montants / années sont facultatifs à la saisie — la complétude est
+            vérifiée au moment de l'export.
           </p>
         ) : null}
       </div>

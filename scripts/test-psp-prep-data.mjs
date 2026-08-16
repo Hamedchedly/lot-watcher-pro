@@ -59,7 +59,14 @@ const commandes = [
   { tranche_code: "9999", charge_clientele: "CBELAIR" },
 ];
 
-const reference = construireReferencePatrimoine(tranches, lots, commandes);
+// V7.6 §8 — le CC provient UNIQUEMENT du référentiel sous-secteur → CC
+// (jamais la fréquence des commandes historiques).
+const referentiel = [
+  { sous_secteur: "2", charge_clientele: "SKILIDJIAN", identifiant_personnel: "SKILIDJIAN", actif: true },
+  { sous_secteur: "4", charge_clientele: "JDUPUIS", identifiant_personnel: "JDUPUIS", actif: true },
+];
+
+const reference = construireReferencePatrimoine(tranches, lots, commandes, referentiel);
 assert("référence : 2 tranches indexées", reference.tranches.size === 2);
 assert(
   "référence : totaux bruts conservés",
@@ -67,7 +74,7 @@ assert(
 );
 
 const ref1976 = resoudreTranche(reference, "1976");
-assert("TR→CC : SKILIDJIAN (mode des commandes 1976)", ref1976?.charge_clientele === "SKILIDJIAN");
+assert("TR→CC : SKILIDJIAN (référentiel sous-secteur 2)", ref1976?.charge_clientele === "SKILIDJIAN");
 assert(
   "TR→adresse : 32 RUE CORNILLIOT (mode des lots 1976)",
   ref1976?.adresse_reference === "32 RUE CORNILLIOT",
@@ -75,6 +82,13 @@ assert(
 assert("TR→ville : THORIGNY-SUR-MARNE", ref1976?.ville === "THORIGNY-SUR-MARNE");
 assert("TR→sous-secteur : 2", ref1976?.sous_secteur === "2");
 assert("TR inconnu → null", resoudreTranche(reference, "9999") === null);
+
+// V7.6 §8 — sans référentiel, le CC n'est JAMAIS déduit des commandes.
+const refSansReferentiel = construireReferencePatrimoine(tranches, lots, commandes, []);
+assert(
+  "V7.6 : sans référentiel → CC null (plus jamais fréquence commandes)",
+  refSansReferentiel.tranches.get("1976")?.charge_clientele === null,
+);
 
 // ── 2. Enrichissement des opérations par la référence réelle ───────────────
 const enrichies = enrichirOperationsAvecReference(PSP_OPERATIONS, reference);

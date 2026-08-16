@@ -19,11 +19,14 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 import {
+  categorieDepuisCorpsEtat,
   detecterRecherchePatrimoine,
   lotsDeAdresse,
   numerosDeRue,
   ruesDeTranche,
+  type CorpsEtatReferentiel,
 } from "./psp.prep.v7.ts";
+import type { ChargesClienteleReferentiel } from "./psp.prep.data.ts";
 
 export type PspLignePersist = {
   id: string;
@@ -675,43 +678,158 @@ export const rechercherPatrimoineGlobal = createServerFn({ method: "POST" })
     return result;
   });
 
-/** Liste des corps d'état connus (DISTINCT travaux_commandes.corps_etat) — suggestions. */
+/**
+ * Corps d'état disponibles — RÉFÉRENTIEL `psp_corps_etats` (V7.6 §12-13).
+ *  · `tout=true`  → toutes les lignes (référentiel, y compris inactifs) — pour
+ *    la console « Référentiel corps d'état » ;
+ *  · `tout=false` → uniquement les corps ACTIFS + les valeurs déjà saisies dans
+ *    `psp_lignes` (continuité des brouillons — jamais un second référentiel).
+ * L'historique des commandes ne sert qu'au seed initial de la migration.
+ */
 export const getCorpsEtats = createServerFn({ method: "POST" })
-  .validator((d: unknown) => z.object({ q: z.string().max(40).default("") }).parse(d))
+  .validator((d: unknown) =>
+    z
+      .object({ q: z.string().max(40).default(""), tout: z.boolean().optional().default(false) })
+      .parse(d),
+  )
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
     const db = supabaseAdmin as any;
-    const PAGE = 1000;
-    const set = new Set<string>();
-    const ajouter = (rows: Array<Record<string, unknown>>) => {
-      for (const r of rows) {
-        const v = String(r["corps_etat"] ?? "").trim();
-        if (v) set.add(v);
-      }
-    };
-    // V7.5 §9 — toutes les commandes (plus de cap 500 qui pouvait cacher des corps).
-    for (let from = 0; ; from += PAGE) {
-      const { data: rows, error } = await db
-        .from("travaux_commandes")
-        .select("corps_etat")
-        .not("corps_etat", "is", null)
-        .range(from, from + PAGE - 1);
-      if (error) throw new Error(`Lecture des corps d'état : ${error.message}`);
-      const page = (rows ?? []) as Array<Record<string, unknown>>;
-      ajouter(page);
-      if (page.length < PAGE) break;
-    }
-    // Union : corps déjà saisis dans les lignes PSP (source légitime actuelle —
-    // aucun corps masqué, pas de seconde table).
-    const { data: lignes, error: errLignes } = await db
+    const resultat: CorpsEtatReferentiel[] = [];
+
+    // 1. Référentiel réel (psp_corps_etats) — autorité.
+    let referentielQuery = db
+      .from("psp_corps_etats")
+      .select("id, code, libelle, categorie, actif")
+      .order("libelle", { ascending: true });
+    if (!data.tout) referentielQuery = referentielQuery.eq("actif", true);
+    const { data: lignesReferentiel, error: errRef } = await referentielQuery;
+    if (errRef) throw new Error(`Lecture du référentiel corps d'état : ${errRef.message}`);
+    resultat.push(
+      ...(lignesReferentiel ?? []).map((r: Record<string, unknown>) => ({
+        id: String(r["id"] ?? ""),
+        code: (r["code"] as string | null) ?? null,
+        libelle: String(r["libelle"] ?? ""),
+        categorie: (String(r["categorie"] ?? "GT") === "GE"
+          ? "GE"
+          : String(r["categorie"] ?? "GT") === "CP"
+            ? "CP"
+            : "GT") as CorpsEtatReferentiel["categorie"],
+        actif: Boolean(r["actif"]),
+      })),
+    );
+
+    // 2. Union : corps déjà saisis dans les brouillons (psp_lignes) non encore
+    //    présents dans le référentiel — les brouillons existants restent éditables.
+    const { data: lignesPsp, error: errLignes } = await db
       .from("psp_lignes")
       .select("corps_etat")
       .not("corps_etat", "is", null);
     if (errLignes) throw new Error(`Lecture des corps d'état : ${errLignes.message}`);
-    ajouter((lignes ?? []) as Array<Record<string, unknown>>);
+    const connus = new Set(resultat.map((r) => r.libelle));
+    for (const l of (lignesPsp ?? []) as Array<Record<string, unknown>>) {
+      const v = String(l["corps_etat"] ?? "").trim();
+      if (!v || connus.has(v)) continue;
+      connus.add(v);
+      resultat.push({
+        code: null,
+        libelle: v,
+        categorie: categorieDepuisCorpsEtat(v),
+        actif: true,
+      });
+    }
+
     const q = data.q.trim().toLowerCase();
-    const liste = [...set].sort((a, b) => a.localeCompare(b));
-    return q ? liste.filter((c) => c.toLowerCase().includes(q)).slice(0, 20) : liste.slice(0, 40);
+    const filtree = q
+      ? resultat.filter((r) => r.libelle.toLowerCase().includes(q)).slice(0, 20)
+      : resultat.slice(0, 40);
+    return filtree;
+  });
+
+/**
+ * V7.6 §12-13 — Écriture du référentiel corps d'état (service_role) :
+ * modifier / ajouter / désactiver une ligne, rattacher le corps à GE / GT / CP.
+ * L'historique des commandes n'est JAMAIS écrit — il ne sert qu'au seed initial.
+ */
+export const savePspCorpsEtat = createServerFn({ method: "POST" })
+  .validator((d: unknown) =>
+    z
+      .object({
+        id: z.string().uuid().nullish(),
+        code: z.string().trim().nullish(),
+        libelle: z.string().trim().min(1),
+        categorie: z.enum(["GE", "GT", "CP"]),
+        actif: z.boolean().optional().default(true),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
+    const db = supabaseAdmin as any;
+    const valeurs = {
+      code: data.code ?? null,
+      libelle: data.libelle,
+      categorie: data.categorie,
+      actif: data.actif ?? true,
+      updated_at: new Date().toISOString(),
+    };
+    let resultat;
+    if (data.id) {
+      const { data: ligne, error } = await db
+        .from("psp_corps_etats")
+        .update(valeurs)
+        .eq("id", data.id)
+        .select("id, code, libelle, categorie, actif")
+        .single();
+      if (error) throw new Error(`Modification du référentiel corps d'état : ${error.message}`);
+      resultat = ligne;
+    } else {
+      const { data: ligne, error } = await db
+        .from("psp_corps_etats")
+        .upsert(valeurs, { onConflict: "libelle" })
+        .select("id, code, libelle, categorie, actif")
+        .single();
+      if (error) throw new Error(`Ajout au référentiel corps d'état : ${error.message}`);
+      resultat = ligne;
+    }
+    return (resultat ?? null) as CorpsEtatReferentiel | null;
+  });
+
+/**
+ * V7.6 §9-11 — Écriture du référentiel chargé clientèle (service_role) :
+ * modifier / ajouter / désactiver une ligne. La clé reste le code sous-secteur
+ * du fichier patrimoine (jamais modifié) ; un même CC gère plusieurs sous-secteurs.
+ */
+export const savePspChargeClientele = createServerFn({ method: "POST" })
+  .validator((d: unknown) =>
+    z
+      .object({
+        sousSecteur: z.string().min(1),
+        chargeClientele: z.string().trim().min(1),
+        identifiantPersonnel: z.string().nullish(),
+        actif: z.boolean().optional().default(true),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
+    const db = supabaseAdmin as any;
+    const { data: ligne, error } = await db
+      .from("psp_charges_clientele")
+      .upsert(
+        {
+          sous_secteur: data.sousSecteur,
+          charge_clientele: data.chargeClientele,
+          identifiant_personnel: data.identifiantPersonnel ?? null,
+          actif: data.actif ?? true,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "sous_secteur" },
+      )
+      .select("sous_secteur, charge_clientele, identifiant_personnel, actif")
+      .single();
+    if (error) throw new Error(`Enregistrement du référentiel CC : ${error.message}`);
+    return (ligne ?? null) as ChargesClienteleReferentiel | null;
   });
 
 /** Recherche progressive de lots (ER / locataire / adresse) — réutilise le moteur ciblé. */

@@ -5,8 +5,8 @@
  * table, aucune migration) :
  *  - table `tranches`      → localité, sous-secteur, secteur S11, nb logements ;
  *  - table `lots`          → adresse / ville de référence d'un TR ;
- *  - table `travaux_commandes` → chargé de clientèle (mode par TR) + C
- *    (catégorie budgétaire GE/GT/CP).
+ *  - référentiel `psp_charges_clientele` → chargé de clientèle ACTUEL par
+ *    sous-secteur (autorité — V7.6 §8, plus jamais la fréquence des commandes).
  *
  * Règles :
  *  - le TR (tranche) est la clé patrimoniale PRIORITAIRE — l'adresse Excel
@@ -106,10 +106,10 @@ const modeDe = (valeurs: Array<string | null>): string | null => {
  * Construit la référence patrimoniale réelle (pur, sans accès base).
  * - adresse de référence : adresse la plus fréquente des lots du TR ;
  * - ville : ville la plus fréquente des lots du TR, sinon `tranches.localite` ;
- * - chargé de clientèle : RÉFÉRENTIEL EXPLICITE `chargesClientele` (V7.5)
- *   résolu via `tranches.sous_secteur` ; à défaut, repli sur la charge la plus
- *   fréquente des commandes du TR (jamais utilisé comme autorité si le
- *   référentiel existe).
+ * - chargé de clientèle : RÉFÉRENTIEL EXPLICITE `chargesClientele` (V7.5),
+ *   résolu via `tranches.sous_secteur` — AUTORITÉ UNIQUE (V7.6 §8). Le CC n'est
+ *   jamais déduit par fréquence des commandes historiques (source historique
+ *   uniquement) ; sous-secteur non renseigné → CC null (« non renseigné »).
  */
 export const construireReferencePatrimoine = (
   tranches: TrancheRaw[],
@@ -128,14 +128,9 @@ export const construireReferencePatrimoine = (
     villes.push(lot.ville);
     villesParTranche.set(lot.tranche_code, villes);
   }
-  const chargesParTranche = new Map<string, Array<string | null>>();
-  for (const c of commandes) {
-    if (!c.tranche_code) continue;
-    const charges = chargesParTranche.get(c.tranche_code) ?? [];
-    charges.push(c.charge_clientele);
-    chargesParTranche.set(c.tranche_code, charges);
-  }
-  // Référentiel explicite sous_secteur → CC actuel (autorité, si disponible).
+  // Référentiel explicite sous_secteur → CC actuel (AUTORITÉ unique, V7.6 §8).
+  // Le CC n'est JAMAIS déduit par fréquence des commandes historiques : celles-ci
+  // restent une source historique uniquement.
   const referentielParSousSecteur = new Map<string, ChargesClienteleReferentiel>();
   for (const r of chargesClientele) {
     if (!r.actif) continue;
@@ -154,8 +149,7 @@ export const construireReferencePatrimoine = (
       sous_secteur: t.sous_secteur,
       secteur: t.secteur,
       nb_logements: t.nb_logements,
-      charge_clientele:
-        referentiel?.charge_clientele ?? modeDe(chargesParTranche.get(t.code) ?? []),
+      charge_clientele: referentiel?.charge_clientele ?? null,
       identifiant_personnel: referentiel?.identifiant_personnel ?? null,
       adresse_reference: adresseReference,
       ville: villeLots ?? t.localite,

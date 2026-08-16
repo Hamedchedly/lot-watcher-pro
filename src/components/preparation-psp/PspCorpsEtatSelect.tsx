@@ -5,15 +5,14 @@
  *    (mapping unique — jamais de second mapping corps d'état → catégorie) ;
  *  · le badge C est dérivé automatiquement.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Check, ChevronDown, Plus, Search } from "lucide-react";
-import { useServerFn } from "@tanstack/react-start";
 
 import PspSecteurBadge from "@/components/preparation-psp/PspSecteurBadge";
+import { useReferentielCorpsEtats } from "@/components/preparation-psp/useReferentielCorpsEtats";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { categorieDepuisCorpsEtat, corpsEtatsGroupes } from "@/lib/psp.prep.v7";
-import { getCorpsEtats } from "@/lib/psp.prep.supabase.functions";
+import { corpsEtatsGroupesReferentiel } from "@/lib/psp.prep.v7";
 import { cn } from "@/lib/utils";
 
 export default function PspCorpsEtatSelect({
@@ -23,30 +22,13 @@ export default function PspCorpsEtatSelect({
   value: string;
   onValueChange: (v: string) => void;
 }) {
-  const corpsEtatsFn = useServerFn(getCorpsEtats);
+  const { referentiel, categorieDe } = useReferentielCorpsEtats();
   const [ouvert, setOuvert] = useState(false);
-  const [corpsEtats, setCorpsEtats] = useState<string[]>([]);
   const [q, setQ] = useState("");
 
-  useEffect(() => {
-    let actif = true;
-    void corpsEtatsFn({ data: { q: "" } }).then((liste) => {
-      if (actif) setCorpsEtats((liste ?? []) as string[]);
-    });
-    return () => {
-      actif = false;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const groupes = useMemo(() => corpsEtatsGroupesReferentiel(referentiel, q), [referentiel, q]);
 
-  const groupes = useMemo(() => {
-    const liste = q.trim()
-      ? corpsEtats.filter((c) => c.toLowerCase().includes(q.trim().toLowerCase()))
-      : corpsEtats;
-    return corpsEtatsGroupes(liste);
-  }, [corpsEtats, q]);
-
-  const categorie = categorieDepuisCorpsEtat(value);
+  const categorie = categorieDe(value);
 
   return (
     <Popover open={ouvert} onOpenChange={setOuvert}>
