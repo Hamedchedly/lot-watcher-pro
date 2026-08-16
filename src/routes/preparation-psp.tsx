@@ -2,13 +2,10 @@ import { useEffect, useMemo, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { AlertTriangle, FlaskConical, Layers, Plus, Users } from "lucide-react";
+import { AlertTriangle, FlaskConical, Plus, Settings2 } from "lucide-react";
 import { toast } from "sonner";
 
 import PspAncienneProgrammation from "@/components/preparation-psp/PspAncienneProgrammation";
-import PspChargesClienteleDialog from "@/components/preparation-psp/PspChargesClienteleDialog";
-import PspCorpsEtatsDialog from "@/components/preparation-psp/PspCorpsEtatsDialog";
-import PspEnveloppesDialog from "@/components/preparation-psp/PspEnveloppesDialog";
 import PspGroupingSelector, {
   type ModeAffichage,
 } from "@/components/preparation-psp/PspGroupingSelector";
@@ -16,6 +13,10 @@ import PspHeader from "@/components/preparation-psp/PspHeader";
 import PspKpi from "@/components/preparation-psp/PspKpi";
 import PspOperationDetail from "@/components/preparation-psp/PspOperationDetail";
 import PspOperationForm from "@/components/preparation-psp/PspOperationForm";
+import PspSettingsDialog, {
+  type OngletParametres,
+} from "@/components/preparation-psp/PspSettingsDialog";
+import PspSecteurBadge from "@/components/preparation-psp/PspSecteurBadge";
 import type { DevisEdit } from "@/components/preparation-psp/PspDevisPanel";
 import PspRevueReports from "@/components/preparation-psp/PspRevueReports";
 import PspTable from "@/components/preparation-psp/PspTable";
@@ -37,14 +38,14 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { money0 } from "@/lib/formats";
+import * as XLSX from "xlsx";
 import {
+  construireDonneesExportXlsx,
   FILTRES_VIDES,
   PSP_ANNEES,
   PSP_BUDGET_DISPONIBLE_PAR_ANNEE,
   PSP_OPERATIONS,
   ajouterOperationListe,
-  construireCsvProgrammation,
-  kpiGlobal,
   modifierOperationListe,
   supprimerOperationListe,
   type FiltresDetail,
@@ -93,11 +94,13 @@ import {
 } from "@/lib/psp.prep.supabase.functions";
 import {
   analyserCompletudeExport,
+  calculEnveloppe,
   type EnveloppeMap,
   libelleAdressePerimetre,
   type LigneIncompleteExport,
   type LotInfo,
   type PerimetreLigne,
+  programmeParAnneeCategorie,
 } from "@/lib/psp.prep.v7";
 
 export const Route = createFileRoute("/preparation-psp")({
@@ -129,10 +132,9 @@ function PreparationPspPage() {
   // ── V7.1 : filtre annuel cumulatif (répartition cliquable), enveloppes ──
   const [anneesFiltre, setAnneesFiltre] = useState<PspAnnee[]>([]);
   const [enveloppes, setEnveloppes] = useState<EnveloppeMap>({});
-  const [enveloppesDialogOuvert, setEnveloppesDialogOuvert] = useState(false);
-  const [ccDialogOuvert, setCcDialogOuvert] = useState(false);
-  /** V7.6 §12 — console de gestion du référentiel corps d'état. */
-  const [corpsDialogOuvert, setCorpsDialogOuvert] = useState(false);
+  /** V7.7 §7 — UN SEUL dialogue « Paramètres PSP » (CC / corps d'état / enveloppes). */
+  const [settingsOuvert, setSettingsOuvert] = useState(false);
+  const [settingsOnglet, setSettingsOnglet] = useState<OngletParametres>("charges");
   /** V7.6 §2 — lignes incomplètes détectées avant export (null = aucun contrôle affiché). */
   const [exportIncompletes, setExportIncompletes] = useState<LigneIncompleteExport[] | null>(null);
   const [perimetresParLigne, setPerimetresParLigne] = useState<Map<string, PerimetreLigne[]>>(
@@ -227,6 +229,7 @@ function PreparationPspPage() {
       budget: PSP_ANNEES.reduce((s, a) => s + (l.programme?.[String(a)] ?? 0), 0),
       programme: l.programme ?? {},
       remarques: l.remarques,
+      ligne_budget: l.ligne_budget ?? null,
       devis: (devisParLigne.get(l.id) ?? []).map((d) => ({
         id: String(d["id"] ?? ""),
         entreprise: String(d["entreprise"] ?? ""),
@@ -466,7 +469,6 @@ function PreparationPspPage() {
     toast.success("Modification confirmée localement — ne sera pas redemandée.");
   };
 
-  const kpi = useMemo(() => kpiGlobal(operations), [operations]);
   const selectedOp = useMemo(
     () => operations.find((o) => o.id === selectedOpId) ?? null,
     [operations, selectedOpId],
@@ -541,15 +543,7 @@ function PreparationPspPage() {
         : null;
 
   const exporter = () => {
-    // V7.3 §21 — l'adresse exportée reflète le périmètre patrimonial réel
-    // (lot → « adresse - ER.xxx », rue entière, adresses multiples, tranche).
-    const enrichies = operations.map((o) => {
-      const libelle = libelleAdressePerimetre(perimetresParLigne.get(o.id) ?? [], lotsParId, {
-        adresse: o.adresse,
-        ville: o.ville,
-      });
-      return libelle && libelle !== "—" ? { ...o, adresse: libelle } : o;
-    });
+    const enrichies = operationsAvecAdresseExport();
     // V7.6 §2 — contrôle de complétude AVANT export : les lignes incomplètes
     // bloquent l'export officiel par défaut (brouillon permissif, export strict).
     const incompletes = analyserCompletudeExport(enrichies);
@@ -557,32 +551,43 @@ function PreparationPspPage() {
       setExportIncompletes(incompletes);
       return;
     }
-    telechargerCsv(enrichies);
-    toast.success("Export CSV généré (données locales).");
+    telechargerXlsx(enrichies);
+    toast.success("Export Excel généré (données locales).");
   };
 
-  /** V7.6 §2 — export « malgré tout » (choix explicite de l'utilisateur). */
-  const telechargerCsv = (ops: PspOperation[]) => {
-    const csv = construireCsvProgrammation(ops);
-    const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "programmation-psp-2027-2031.csv";
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const exporterMalgreTout = () => {
-    const enrichies = operations.map((o) => {
+  /** V7.3 §21 + V7.7 §2 — opérations avec adresse = périmètre réellement sélectionné. */
+  const operationsAvecAdresseExport = (): PspOperation[] =>
+    operations.map((o) => {
       const libelle = libelleAdressePerimetre(perimetresParLigne.get(o.id) ?? [], lotsParId, {
         adresse: o.adresse,
         ville: o.ville,
       });
       return libelle && libelle !== "—" ? { ...o, adresse: libelle } : o;
     });
+
+  /** V7.7 §1 — export VRAI fichier Excel .xlsx (13 colonnes exactes). */
+  const telechargerXlsx = (ops: PspOperation[]) => {
+    const donnees = construireDonneesExportXlsx(ops, {
+      // Arl/sect : secteur du patrimoine (tranches.secteur) — jamais inventé.
+      secteurDeTranche: (tranche) => reference?.tranches.get(tranche)?.secteur ?? null,
+    });
+    const feuille = XLSX.utils.aoa_to_sheet([donnees.entetes, ...donnees.lignes]);
+    feuille["!cols"] = donnees.entetes.map((e) =>
+      e === "NATURE TRAVAUX" || e === "ADRESSE"
+        ? { wch: 40 }
+        : e === "CORPS D'ETAT"
+          ? { wch: 28 }
+          : { wch: 12 },
+    );
+    const classeur = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(classeur, feuille, "Programmation PSP");
+    XLSX.writeFile(classeur, "programmation-psp-2027-2031.xlsx");
+  };
+
+  const exporterMalgreTout = () => {
+    const enrichies = operationsAvecAdresseExport();
     setExportIncompletes(null);
-    telechargerCsv(enrichies);
+    telechargerXlsx(enrichies);
     toast.info("Export généré malgré les lignes incomplètes (aucune donnée inventée).");
   };
 
@@ -973,7 +978,10 @@ function PreparationPspPage() {
           anneesFiltre={anneesFiltre}
           onToggleAnnee={toggleAnnee}
           enveloppes={enveloppes}
-          onOuvrirEnveloppes={() => setEnveloppesDialogOuvert(true)}
+          onOuvrirEnveloppes={() => {
+            setSettingsOnglet("enveloppes");
+            setSettingsOuvert(true);
+          }}
           figee={figee}
         />
 
@@ -998,21 +1006,14 @@ function PreparationPspPage() {
                   variant="outline"
                   size="sm"
                   className="h-8 text-[11px]"
-                  onClick={() => setCcDialogOuvert(true)}
-                  title="Consulter / modifier le référentiel sous-secteur → chargé de clientèle"
+                  onClick={() => {
+                    setSettingsOnglet("charges");
+                    setSettingsOuvert(true);
+                  }}
+                  title="Paramètres PSP : chargés clientèle, corps d'état, enveloppes budgétaires"
                 >
-                  <Users className="size-3.5" />
-                  Référentiel CC
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-8 text-[11px]"
-                  onClick={() => setCorpsDialogOuvert(true)}
-                  title="Consulter / modifier le référentiel corps d'état (GE / GT / CP)"
-                >
-                  <Layers className="size-3.5" />
-                  Référentiel corps d'état
+                  <Settings2 className="size-3.5" />
+                  Paramètres PSP
                 </Button>
               </div>
               <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
@@ -1083,20 +1084,20 @@ function PreparationPspPage() {
         onDevisDelete={handleDevisDelete}
       />
 
-      <PspEnveloppesDialog
-        open={enveloppesDialogOuvert}
-        onClose={() => setEnveloppesDialogOuvert(false)}
-        enveloppes={enveloppes}
-        onSave={handleSaveEnveloppes}
-      />
-
-      <PspChargesClienteleDialog
-        open={ccDialogOuvert}
-        onClose={() => setCcDialogOuvert(false)}
+      <PspSettingsDialog
+        open={settingsOuvert}
+        onClose={() => setSettingsOuvert(false)}
+        ongletInitial={settingsOnglet}
         sousSecteursConnus={sousSecteursConnus}
+        enveloppes={enveloppes}
+        onSaveEnveloppes={handleSaveEnveloppes}
+        onChangedCC={() =>
+          void queryClient.invalidateQueries({ queryKey: ["psp-reference-patrimoine"] })
+        }
+        onChangedCorps={() =>
+          void queryClient.invalidateQueries({ queryKey: ["psp-referentiel-corps-etats"] })
+        }
       />
-
-      <PspCorpsEtatsDialog open={corpsDialogOuvert} onClose={() => setCorpsDialogOuvert(false)} />
 
       {/* V7.6 §2 — alerte export : lignes incomplètes (champs obligatoires manquants) */}
       <Dialog
@@ -1166,7 +1167,8 @@ function PreparationPspPage() {
       <SimulationDialog
         open={simulationOuverte}
         onClose={() => setSimulationOuverte(false)}
-        kpi={kpi}
+        operations={operations}
+        enveloppes={enveloppes}
       />
     </div>
   );
@@ -1175,62 +1177,140 @@ function PreparationPspPage() {
 function SimulationDialog({
   open,
   onClose,
-  kpi,
+  operations,
+  enveloppes,
 }: {
   open: boolean;
   onClose: () => void;
-  kpi: { disponible: number; programme: number; ecart: number; parAnnee: Record<string, number> };
+  operations: PspOperation[];
+  enveloppes: EnveloppeMap;
 }) {
+  // V7.7 §11 — la simulation utilise EXACTEMENT les mêmes fonctions que la
+  // préparation : calculEnveloppe + programmeParAnneeCategorie (aucun moteur parallèle).
+  const programmePar = programmeParAnneeCategorie(operations);
+  const totalProgramme = PSP_ANNEES.reduce(
+    (s, a) =>
+      s +
+      (programmePar[`${a}|GE`] ?? 0) +
+      (programmePar[`${a}|GT`] ?? 0) +
+      (programmePar[`${a}|CP`] ?? 0),
+    0,
+  );
+  const categories = ["GE", "GT", "CP"] as const;
+
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="w-[min(92vw,560px)] sm:max-w-[560px]">
+      <DialogContent className="w-[min(94vw,640px)] sm:max-w-[640px]">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <FlaskConical className="size-4 text-muted-foreground" />
-            Simulation de programmation
+            Simulation — avancement budgétaire
           </DialogTitle>
           <DialogDescription>
-            Répartition théorique du programme 2027-2031 sur les enveloppes disponibles
-            (BUDGET_SOURCE = MOCK tant que la dotation officielle n'est pas définie).
+            Même calcul budgétaire que la préparation PSP : pour chaque année puis par GE / GT / CP
+            — enveloppe, programmé, restant, % et dépassement éventuel.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-1.5">
+        <div className="max-h-[60vh] space-y-3 overflow-auto pr-1">
           {PSP_ANNEES.map((annee) => {
-            const programme = kpi.parAnnee[String(annee)] ?? 0;
-            const disponible = PSP_BUDGET_DISPONIBLE_PAR_ANNEE[String(annee)] ?? 0;
-            const taux = disponible > 0 ? (programme / disponible) * 100 : 0;
+            const programme =
+              (programmePar[`${annee}|GE`] ?? 0) +
+              (programmePar[`${annee}|GT`] ?? 0) +
+              (programmePar[`${annee}|CP`] ?? 0);
+            const envAnnee = categories.reduce((s, c) => s + (enveloppes[`${annee}|${c}`] ?? 0), 0);
+            const disponible =
+              envAnnee > 0 ? envAnnee : (PSP_BUDGET_DISPONIBLE_PAR_ANNEE[String(annee)] ?? 0);
+            const restant = disponible - programme;
+            const taux = disponible > 0 ? Math.min(1, programme / disponible) : 0;
             return (
               <div key={annee} className="rounded-lg border bg-surface/60 p-2.5">
-                <div className="flex items-center justify-between text-xs">
+                <div className="flex items-center justify-between gap-2 text-xs">
                   <span className="font-mono font-black">{annee}</span>
-                  <span className="tabnum font-semibold">
-                    {money0(programme)} / {money0(disponible)}
+                  <span className="text-muted-foreground">
+                    Budget disponible :{" "}
+                    <span className="tabnum font-bold">{money0(disponible)}</span>
                   </span>
-                  <span className="tabnum font-black text-primary">{taux.toFixed(0)} %</span>
+                </div>
+                <div className="mt-1 flex items-center justify-between gap-2 text-xs">
+                  <span className="text-muted-foreground">
+                    Programmé : <span className="tabnum font-bold">{money0(programme)}</span>
+                  </span>
+                  <span className="text-muted-foreground">
+                    Restant :{" "}
+                    <span
+                      className={`tabnum font-black ${restant >= 0 ? "text-emerald-600" : "text-destructive"}`}
+                    >
+                      {money0(restant)}
+                    </span>
+                  </span>
                 </div>
                 <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-border">
                   <div
-                    className="h-full rounded-full bg-primary/70"
-                    style={{ width: `${Math.min(100, taux)}%` }}
+                    className={`h-full rounded-full ${restant < 0 ? "bg-destructive" : "bg-primary/70"}`}
+                    style={{ width: `${Math.max(2, taux * 100)}%` }}
                   />
+                </div>
+
+                <div className="mt-2 space-y-1.5 border-t border-dashed pt-2">
+                  {categories.map((cat) => {
+                    const enveloppe = enveloppes[`${annee}|${cat}`] ?? 0;
+                    const prog = programmePar[`${annee}|${cat}`] ?? 0;
+                    const calc = calculEnveloppe(enveloppe, prog);
+                    const pct = calc.pourcentage == null ? null : Math.min(1, calc.pourcentage);
+                    return (
+                      <div key={cat} className="text-[11px]">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="flex items-center gap-1.5">
+                            <PspSecteurBadge categorie={cat} />
+                            <span className="font-bold">{cat}</span>
+                            <span className="tabnum text-muted-foreground">
+                              Enveloppe : {money0(enveloppe)} · Programmé : {money0(prog)} · Restant
+                              :{" "}
+                              <span
+                                className={
+                                  calc.depassement
+                                    ? "font-black text-destructive"
+                                    : "font-black text-emerald-600"
+                                }
+                              >
+                                {money0(calc.restant)}
+                              </span>
+                            </span>
+                          </span>
+                          <span
+                            className={`tabnum font-black ${calc.depassement ? "text-destructive" : "text-primary"}`}
+                          >
+                            {calc.pourcentage == null
+                              ? "—"
+                              : `${Math.round(calc.pourcentage * 100)} %`}
+                          </span>
+                        </div>
+                        <div className="mt-0.5 h-1.5 overflow-hidden rounded-full bg-border">
+                          <div
+                            className={`h-full rounded-full ${calc.depassement ? "bg-destructive" : "bg-primary/70"}`}
+                            style={{ width: `${Math.max(2, (pct ?? 0) * 100)}%` }}
+                          />
+                        </div>
+                        {calc.depassement ? (
+                          <p className="mt-0.5 flex items-center gap-0.5 text-[9px] font-bold text-destructive">
+                            <AlertTriangle className="size-2.5" />
+                            Dépassement {money0(-calc.restant)} par rapport à l'enveloppe {cat}{" "}
+                            {annee}
+                          </p>
+                        ) : null}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             );
           })}
         </div>
 
-        <div className="flex items-start gap-2 rounded-lg border border-info/30 bg-info/5 p-2.5 text-xs text-info-foreground">
-          <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
-          <span>
-            Simulation purement indicative en V2. Le moteur d'analyse et le rééquilibrage entre
-            exercices seront connectés à Supabase dans une phase ultérieure.
-          </span>
-        </div>
-
         <div className="flex items-center justify-between border-t pt-3">
           <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
-            Programme total : {money0(kpi.programme)}
+            Programme total : {money0(totalProgramme)}
           </p>
           <Button variant="outline" size="sm" onClick={onClose}>
             Fermer

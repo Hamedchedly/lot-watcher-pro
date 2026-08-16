@@ -173,7 +173,8 @@ export default function PspOperationForm({
                 placeholder="1976 · ER.123 · DUPONT…"
                 className="h-8 text-xs"
               />
-              {rec.trPanelOuvert && (rec.sugTranches.length > 0 || rec.sugLots.length > 0) ? (
+              {rec.trPanelOuvert &&
+              (rec.sugTranches.length > 0 || rec.sugLotsVisibles.length > 0) ? (
                 <div className="absolute z-40 mt-1 max-h-44 w-full overflow-auto rounded-lg border bg-popover p-1 shadow-lg">
                   {rec.sugTranches.map((t) => (
                     <button
@@ -185,7 +186,7 @@ export default function PspOperationForm({
                       <span className="text-muted-foreground">{t.localite ?? t.libelle}</span>
                     </button>
                   ))}
-                  {rec.sugLots.map((l) => (
+                  {rec.sugLotsVisibles.map((l) => (
                     <button
                       key={l.id}
                       className="flex w-full justify-between gap-2 rounded px-2 py-1 text-left text-xs hover:bg-accent"

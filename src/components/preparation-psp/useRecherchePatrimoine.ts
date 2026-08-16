@@ -105,6 +105,44 @@ export function useRecherchePatrimoine(options: {
   const referenceTranche = tranche ? reference?.tranches.get(tranche) : undefined;
 
   /**
+   * V7.7 §6 — filtrage GARAGES cohérent sur TOUTES les recherches : les listes
+   * exposées aux composants sont TOUJOURS filtrées par `sansGarages` selon
+   * `afficherGarages` (défaut : masqués). Une seule mécanique, réutilisée.
+   */
+  const sugLotsVisibles = useMemo(
+    () => sansGarages(sugLots, afficherGarages),
+    [sugLots, afficherGarages],
+  );
+  const sugLotsTrancheVisibles = useMemo(
+    () => sansGarages(sugLotsTranche, afficherGarages),
+    [sugLotsTranche, afficherGarages],
+  );
+  const lotsDeAdresseVisibles = useMemo(
+    () =>
+      new Map(
+        [...lotsDeAdresse.entries()].map(([entree, lots]) => [
+          entree,
+          sansGarages(lots, afficherGarages),
+        ]),
+      ),
+    [lotsDeAdresse, afficherGarages],
+  );
+
+  /**
+   * V7.7 §6 — décoché après avoir coché : les garages déjà retenus sont retirés
+   * de la sélection (aucun garage/box tant que « Afficher les garages » est vide).
+   */
+  useEffect(() => {
+    if (afficherGarages) return;
+    setLotsChoisis((prev) => sansGarages(prev, false));
+    setLotsDeAdresse((prev) => {
+      const suivant = new Map<string, SuggestionLot[]>();
+      for (const [entree, lots] of prev) suivant.set(entree, sansGarages(lots, false));
+      return suivant;
+    });
+  }, [afficherGarages]);
+
+  /**
    * V7.6 §3-4 — Résumé de la sélection d'adresse (toujours visible dans la
    * cellule « Adresse / périmètre », y compris panneau fermé) : la rue reste
    * affichée tant qu'une sélection existe.
@@ -448,6 +486,7 @@ export function useRecherchePatrimoine(options: {
     numeros,
     adressesChoisies,
     lotsDeAdresse,
+    lotsDeAdresseVisibles,
     lotsChoisis,
     choisirRue,
     retourRues,
@@ -462,7 +501,10 @@ export function useRecherchePatrimoine(options: {
     qLot,
     setQLot,
     sugLotsTranche,
+    sugLotsTrancheVisibles,
     choisirLotTranche,
+    // recherche globale
+    sugLotsVisibles,
     // périmètre
     perimetres,
     modifie,

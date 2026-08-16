@@ -205,7 +205,7 @@ export default function PspQuickAddRow({
               className="h-8 pl-6 text-xs"
             />
             <Search className="pointer-events-none absolute left-2 top-2 size-3 text-muted-foreground" />
-            {rec.trPanelOuvert && (rec.sugTranches.length > 0 || rec.sugLots.length > 0) ? (
+            {rec.trPanelOuvert && (rec.sugTranches.length > 0 || rec.sugLotsVisibles.length > 0) ? (
               <div className="absolute z-40 mt-1 max-h-52 w-72 overflow-auto rounded-lg border bg-popover p-1 shadow-lg">
                 <div className="flex items-center justify-between px-1 py-0.5">
                   <span className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">
@@ -235,10 +235,10 @@ export default function PspQuickAddRow({
                     ))}
                   </>
                 ) : null}
-                {rec.sugLots.length > 0 ? (
+                {rec.sugLotsVisibles.length > 0 ? (
                   <>
                     <p className="px-1 text-[9px] font-black uppercase text-primary">Lots</p>
-                    {rec.sugLots.map((l) => (
+                    {rec.sugLotsVisibles.map((l) => (
                       <button
                         key={l.id}
                         className="flex w-full justify-between gap-2 rounded px-2 py-1 text-left text-xs hover:bg-accent"

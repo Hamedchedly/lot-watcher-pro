@@ -96,6 +96,8 @@ export type PspOperation = {
   reportee: boolean;
   ancienne_annee: number | null;
   ancien_montant: number | null;
+  /** Ligne budgétaire réellement disponible (psp_lignes.ligne_budget) — V7.7 : jamais inventée à l'export. */
+  ligne_budget?: string | null;
   /** Statut structuré (psp_lignes.statut) : a_definir | attente_agence | attente_confirmation. */
   statut?: string;
   /** Priorité (psp_lignes.priorite) : prioritaire | normale | non_prioritaire. */
@@ -428,6 +430,68 @@ export const construireCsvProgrammation = (ops: PspOperation[]): string => {
       .join(";"),
   );
   return [entete.map(cell).join(";"), ...lignes].join("\r\n");
+};
+
+// ── Export XLSX (V7.7) — 13 colonnes exactes, pur et testable ──────────────────
+/**
+ * Colonnes EXACTES de l'export Excel direction (V7.7 §1) — ordre et intitulés
+ * imposés, aucune autre colonne : TR | Arl/sect | ADRESSE | C | CORPS D'ETAT |
+ * Ch. Op. | Ligne budgétaire | NATURE TRAVAUX | 2027 → 2031.
+ */
+export const ENTETES_EXPORT_XLSX: string[] = [
+  "TR",
+  "Arl/sect",
+  "ADRESSE",
+  "C",
+  "CORPS D'ETAT",
+  "Ch. Op.",
+  "Ligne budgétaire",
+  "NATURE TRAVAUX",
+  ...PSP_ANNEES.map(String),
+];
+
+export type DonneesExportXlsx = {
+  entetes: string[];
+  lignes: Array<Array<string | number>>;
+};
+
+/**
+ * V7.7 §1-2 — Construit les données de l'export Excel à partir des opérations du
+ * brouillon réel (adresse déjà enrichie du périmètre par l'appelant) :
+ *  · TR          → code tranche ;
+ *  · Arl/sect    → secteur du patrimoine (`secteurDeTranche`), jamais inventé ;
+ *  · ADRESSE     → périmètre réel (lot → « adresse - ER.xxx », rue entière…) ;
+ *  · C           → catégorie GE/GT/CP (référentiel corps d'état) ;
+ *  · CORPS D'ETAT→ valeur du référentiel (placeholder « — » → vide) ;
+ *  · Ch. Op.     → HCHEDLY par défaut (règle actuelle) ;
+ *  · Ligne budgétaire → valeur réellement disponible (jamais inventée) ;
+ *  · NATURE TRAVAUX → saisie de l'opération ;
+ *  · 2027-2031   → montants programmés.
+ */
+export const construireDonneesExportXlsx = (
+  ops: PspOperation[],
+  options: {
+    secteurDeTranche?: (tranche: string) => string | null;
+    chargeOperationDefaut?: string;
+  } = {},
+): DonneesExportXlsx => {
+  const secteurDe = options.secteurDeTranche ?? (() => null);
+  const chOpDefaut = options.chargeOperationDefaut ?? "HCHEDLY";
+  const lignes: Array<Array<string | number>> = ops.map((op) => {
+    const corps = (op.corps_etat ?? "").trim();
+    return [
+      op.tranche,
+      secteurDe(op.tranche) ?? "",
+      (op.adresse ?? "").trim(),
+      op.categorie,
+      corps === "—" ? "" : corps,
+      op.charge_operation || chOpDefaut,
+      op.ligne_budget ?? "",
+      (op.nature_travaux ?? "").trim(),
+      ...PSP_ANNEES.map((a) => montantAnnee(op, a)),
+    ];
+  });
+  return { entetes: ENTETES_EXPORT_XLSX, lignes };
 };
 
 // ── Données MOCK (prototype V1 — inspirées des fichiers Secteur 11) ─────────
@@ -1356,6 +1420,8 @@ export type SaisieOperation = {
   /** Statut / priorité (V7.2) — persistés dans psp_lignes. */
   statut?: string;
   priorite?: string;
+  /** Ligne budgétaire (V7.7) — réellement disponible, jamais inventée. */
+  ligne_budget?: string | null;
 };
 
 /**
@@ -1385,6 +1451,7 @@ export const creerOperation = (saisie: SaisieOperation, id: string): PspOperatio
     budget: total,
     programme,
     remarques: saisie.remarques,
+    ligne_budget: saisie.ligne_budget ?? null,
     devis: [],
     reportee: false,
     ancienne_annee: null,

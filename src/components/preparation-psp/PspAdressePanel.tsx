@@ -13,10 +13,7 @@ import { useEffect, useRef } from "react";
 import { Check, MapPin, Search, X } from "lucide-react";
 
 import { Input } from "@/components/ui/input";
-import {
-  sansGarages,
-  useRecherchePatrimoine,
-} from "@/components/preparation-psp/useRecherchePatrimoine";
+import { useRecherchePatrimoine } from "@/components/preparation-psp/useRecherchePatrimoine";
 
 type Rec = ReturnType<typeof useRecherchePatrimoine>;
 
@@ -35,8 +32,6 @@ export default function PspAdressePanel({ rec }: { rec: Rec }) {
     return () => document.removeEventListener("mousedown", fermer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rec.adressePanelOuvert]);
-
-  const sansGaragesLocaux = (lots: Rec["lotsChoisis"]) => sansGarages(lots, rec.afficherGarages);
 
   return (
     <div ref={racineRef} className="relative space-y-1">
@@ -151,7 +146,7 @@ export default function PspAdressePanel({ rec }: { rec: Rec }) {
             </label>
           </div>
           {rec.numeros.map((n) => {
-            const lots = sansGaragesLocaux(rec.lotsDeAdresse.get(n) ?? []);
+            const lots = rec.lotsDeAdresseVisibles.get(n) ?? [];
             return (
               <div key={n}>
                 <label className="flex items-center gap-1.5 rounded px-1 py-0.5 text-[10px] hover:bg-accent">
@@ -217,9 +212,9 @@ export default function PspAdressePanel({ rec }: { rec: Rec }) {
           className="h-7 pr-7 text-[10px]"
         />
         <Search className="pointer-events-none absolute left-2 top-2 size-3 text-muted-foreground" />
-        {sansGaragesLocaux(rec.sugLotsTranche).length > 0 ? (
+        {rec.sugLotsTrancheVisibles.length > 0 ? (
           <div className="absolute z-40 mt-1 max-h-36 w-72 overflow-auto rounded-lg border bg-popover p-1 shadow-lg">
-            {sansGaragesLocaux(rec.sugLotsTranche).map((l) => (
+            {rec.sugLotsTrancheVisibles.map((l) => (
               <button
                 key={l.id}
                 className="flex w-full justify-between gap-2 rounded px-2 py-1 text-left text-[10px] hover:bg-accent"
