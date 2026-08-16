@@ -5,8 +5,8 @@ import {
   rechercherLotsAdresse,
   rechercherLotsV7,
   rechercherNumerosRue,
+  rechercherPatrimoineGlobal,
   rechercherRuesTranche,
-  rechercherTranches,
 } from "@/lib/psp.prep.supabase.functions";
 import { construirePerimetres, type PerimetreLigne } from "@/lib/psp.prep.v7";
 import { entreeDe, rueDe } from "@/lib/adresses";
@@ -23,13 +23,16 @@ export type SuggestionLot = {
 };
 
 /**
- * V7.2 — Recherche patrimoine partagée (saisie directe + formulaire) :
- *  · recherche globale TR (chiffres) / ER / locataire (progressive, debouncée) ;
- *  · CC automatique depuis la référence (jamais saisi) ;
- *  · hiérarchie adresse TR → rues → numéros (multi) → lots (multi) + « Toute la rue » ;
- *  · contrainte UNE SEULE tranche par ligne (message explicite sinon) ;
- *  · périmètre structuré produit via `construirePerimetres` (règle unique).
- * Réutilise uniquement les fonctions existantes (aucun second moteur).
+ * V7.3 — Recherche patrimoine partagée (saisie directe + formulaire).
+ * Corrections apportées :
+ *  · `searchQuery` (texte temporaire) séparé de `selectedTranche` : la TR
+ *    sélectionnée reste visible (chip) et ne dépend pas du texte de recherche ;
+ *  · recherche globale détectée proprement (numéro/TR/ville/libellé → tranches ;
+ *    ER → lots ; texte libre → les deux, regroupés) via `rechercherPatrimoineGlobal` ;
+ *  · les panneaux de suggestions sont FERMABLES sans annuler la sélection ;
+ *  · recherche de lot (ER / locataire) dans la tranche courante ;
+ *  · contrainte UNE seule tranche par ligne ;
+ *  · périmètre construit via `construirePerimetres` (règle unique).
  */
 export function useRecherchePatrimoine(options: {
   reference: ReferencePatrimoine | null;
@@ -41,15 +44,17 @@ export function useRecherchePatrimoine(options: {
     [options.initial?.perimetres],
   );
 
-  const rechercheTranchesFn = useServerFn(rechercherTranches);
+  const rechercheGlobaleFn = useServerFn(rechercherPatrimoineGlobal);
   const rechercheLotsFn = useServerFn(rechercherLotsV7);
   const rechercheRuesFn = useServerFn(rechercherRuesTranche);
   const rechercheNumerosFn = useServerFn(rechercherNumerosRue);
   const rechercheLotsAdresseFn = useServerFn(rechercherLotsAdresse);
 
-  const [q, setQ] = useState("");
+  // ── TR : searchQuery (temporaire) vs selectedTranche (persistant) ──
+  const [searchQuery, setSearchQuery] = useState("");
   const [sugTranches, setSugTranches] = useState<SuggestionTranche[]>([]);
   const [sugLots, setSugLots] = useState<SuggestionLot[]>([]);
+  const [trPanelOuvert, setTrPanelOuvert] = useState(false);
   const [tranche, setTranche] = useState<string | null>(options.initial?.tranche ?? null);
   const [cc, setCc] = useState(
     (options.initial?.tranche
@@ -59,7 +64,8 @@ export function useRecherchePatrimoine(options: {
   const [alerteTranche, setAlerteTranche] = useState<string | null>(null);
   const [conflit, setConflit] = useState<string | null>(null);
 
-  // Hiérarchie adresse
+  // ── Hiérarchie adresse ──
+  const [adressePanelOuvert, setAdressePanelOuvert] = useState(false);
   const [qRue, setQRue] = useState("");
   const [rues, setRues] = useState<Array<{ rue: string; ville: string | null; nb_lots: number }>>(
     [],
@@ -73,6 +79,11 @@ export function useRecherchePatrimoine(options: {
   );
   const [lotsDeAdresse, setLotsDeAdresse] = useState<Map<string, SuggestionLot[]>>(new Map());
   const [lotsChoisis, setLotsChoisis] = useState<SuggestionLot[]>([]);
+
+  // ── Recherche de lot dans la tranche (ER / locataire) ──
+  const [qLot, setQLot] = useState("");
+  const [sugLotsTranche, setSugLotsTranche] = useState<SuggestionLot[]>([]);
+
   const [modifie, setModifie] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -89,11 +100,11 @@ export function useRecherchePatrimoine(options: {
     });
   }, [modifie, lotsChoisis, adressesChoisies, rue, initialPerimetres]);
 
-  // ── Recherche globale : chiffres → TR ; ER… / nom → lots ──
+  // ── Recherche GLOBALE (active tant qu'aucune TR n'est sélectionnée) ──
   useEffect(() => {
     if (timer.current) clearTimeout(timer.current);
-    const valeur = q.trim();
-    if (valeur.length < 2) {
+    const valeur = searchQuery.trim();
+    if (valeur.length < 2 || tranche) {
       setSugTranches([]);
       setSugLots([]);
       setAlerteTranche(null);
@@ -101,20 +112,17 @@ export function useRecherchePatrimoine(options: {
     }
     timer.current = setTimeout(async () => {
       try {
-        if (/^\d/.test(valeur)) {
-          const t = (await rechercheTranchesFn({ data: { q: valeur } })) ?? [];
-          setSugTranches(t as SuggestionTranche[]);
-          setSugLots([]);
-          setAlerteTranche(t.length === 0 ? `Tranche « ${valeur} » introuvable` : null);
-        } else {
-          setSugTranches([]);
-          setAlerteTranche(null);
-          const l =
-            (await rechercheLotsFn({
-              data: { q: valeur, tranche: tranche ?? undefined },
-            })) ?? [];
-          setSugLots(l as SuggestionLot[]);
-        }
+        const r = ((await rechercheGlobaleFn({ data: { q: valeur } })) ?? {
+          tranches: [],
+          lots: [],
+        }) as { tranches: SuggestionTranche[]; lots: SuggestionLot[] };
+        setSugTranches((r.tranches ?? []) as SuggestionTranche[]);
+        setSugLots((r.lots ?? []) as SuggestionLot[]);
+        setAlerteTranche(
+          r.tranches.length === 0 && r.lots.length === 0
+            ? `Aucune tranche ni lot pour « ${valeur} »`
+            : null,
+        );
       } catch {
         // la recherche ne bloque jamais la saisie
       }
@@ -123,9 +131,9 @@ export function useRecherchePatrimoine(options: {
       if (timer.current) clearTimeout(timer.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, tranche]);
+  }, [searchQuery, tranche]);
 
-  // ── Rues de la tranche sélectionnée ──
+  // ── Rues de la tranche sélectionnée (progressive) ──
   useEffect(() => {
     if (!tranche) {
       setRues([]);
@@ -143,14 +151,47 @@ export function useRecherchePatrimoine(options: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tranche, qRue]);
 
-  /** Sélection d'une tranche (TR). CC automatique, périmètre réinitialisé. */
+  // ── Recherche de lot dans la tranche (ER / locataire) — progressive ──
+  useEffect(() => {
+    if (!tranche || qLot.trim().length < 2) {
+      setSugLotsTranche([]);
+      return;
+    }
+    const t = setTimeout(async () => {
+      try {
+        const r = (await rechercheLotsFn({ data: { q: qLot, tranche } })) ?? [];
+        setSugLotsTranche(r as SuggestionLot[]);
+      } catch {
+        setSugLotsTranche([]);
+      }
+    }, 250);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qLot, tranche]);
+
+  /** Sélection d'une tranche → la valeur reste visible (chip), texte de recherche vidé. */
   const choisirTranche = (code: string) => {
     setTranche(code);
     setCc(reference?.tranches.get(code)?.charge_clientele ?? "");
-    setQ("");
+    setSearchQuery("");
     setSugTranches([]);
+    setSugLots([]);
+    setTrPanelOuvert(false);
     setAlerteTranche(null);
     setConflit(null);
+    setRue(null);
+    setNumeros([]);
+    setAdressesChoisies([]);
+    setLotsDeAdresse(new Map());
+    setLotsChoisis([]);
+    setAdressePanelOuvert(false);
+    setModifie(true);
+  };
+
+  /** Efface la TR sélectionnée (bouton X) — le texte de recherche réapparaît. */
+  const effacerTranche = () => {
+    setTranche(null);
+    setCc("");
     setRue(null);
     setNumeros([]);
     setAdressesChoisies([]);
@@ -159,7 +200,7 @@ export function useRecherchePatrimoine(options: {
     setModifie(true);
   };
 
-  /** Sélection d'un lot via la recherche globale (ER / locataire). */
+  /** Sélection d'un lot via la recherche globale (ER / locataire, sans TR encore choisie). */
   const choisirLotGlobal = (l: SuggestionLot) => {
     if (tranche && l.tranche_code !== tranche) {
       setConflit(
@@ -171,20 +212,37 @@ export function useRecherchePatrimoine(options: {
     setCc(reference?.tranches.get(l.tranche_code)?.charge_clientele ?? "");
     setConflit(null);
     if (!lotsChoisis.some((x) => x.id === l.id)) setLotsChoisis((prev) => [...prev, l]);
-    setQ("");
+    setSearchQuery("");
     setSugLots([]);
+    setTrPanelOuvert(false);
     setRue(rueDe(l.adresse));
     setAdressesChoisies([entreeDe(l.adresse)]);
     setModifie(true);
   };
 
-  /** Sélection d'une rue → chargement des numéros disponibles. */
+  /** Sélection d'un lot trouvé dans la tranche (recherche ER / locataire intra-tranche). */
+  const choisirLotTranche = (l: SuggestionLot) => {
+    if (l.tranche_code !== tranche) {
+      setConflit(
+        `Ce lot (${l.code_patrimoine}) appartient à la tranche ${l.tranche_code} — une ligne ne peut couvrir qu'une seule tranche.`,
+      );
+      return;
+    }
+    setModifie(true);
+    setConflit(null);
+    if (!lotsChoisis.some((x) => x.id === l.id)) setLotsChoisis((prev) => [...prev, l]);
+    setQLot("");
+    setSugLotsTranche([]);
+  };
+
+  /** Sélection d'une rue → numéros disponibles. Le panneau peut être fermé ensuite. */
   const choisirRue = (r: string) => {
     setRue(r);
     setAdressesChoisies([]);
     setLotsDeAdresse(new Map());
     setLotsChoisis([]);
     setModifie(true);
+    setAdressePanelOuvert(true);
     void rechercheNumerosFn({ data: { tranche: tranche ?? "", rue: r } }).then((n) =>
       setNumeros((n ?? []) as string[]),
     );
@@ -237,21 +295,26 @@ export function useRecherchePatrimoine(options: {
   const retirerLot = (id: string) => setLotsChoisis((prev) => prev.filter((x) => x.id !== id));
 
   return {
-    // recherche globale
-    q,
-    setQ,
+    // recherche TR globale (searchQuery ≠ selectedTranche)
+    searchQuery,
+    setSearchQuery,
+    trPanelOuvert,
+    setTrPanelOuvert,
     sugTranches,
     sugLots,
     alerteTranche,
     conflit,
     setConflit,
-    // tranche + CC
+    // tranche + CC (persistants)
     tranche,
     cc,
     referenceTranche,
     choisirTranche,
+    effacerTranche,
     choisirLotGlobal,
     // hiérarchie adresse
+    adressePanelOuvert,
+    setAdressePanelOuvert,
     qRue,
     setQRue,
     rues,
@@ -265,6 +328,11 @@ export function useRecherchePatrimoine(options: {
     basculerAdresse,
     basculerLot,
     retirerLot,
+    // recherche lot intra-tranche (ER / locataire)
+    qLot,
+    setQLot,
+    sugLotsTranche,
+    choisirLotTranche,
     // périmètre
     perimetres,
     modifie,

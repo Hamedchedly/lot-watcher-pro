@@ -323,7 +323,9 @@ let L2 = null;
   check("3. lecture ligne", !error && data?.id === L1?.id, error?.message);
 }
 {
-  // UNIQUE TR+C dans la même programmation
+  // V7.3 — PLUSIEURS opérations par tranche et par catégorie sont AUTORISÉES
+  // (la contrainte UNIQUE (programmation_id, tranche_code, categorie) a été
+  // supprimée par la migration 20260818_psp_operation_multi_tranche_atomique).
   const r = await run(() =>
     db
       .from(tbl.lignes)
@@ -336,10 +338,11 @@ let L2 = null;
       .select("id"),
   );
   check(
-    "3. UNIQUE TR+C bloque le doublon (même programmation)",
-    r.code === "23505",
+    "3. deux lignes même TR + même catégorie → OK (V7.3)",
+    !r.error && !!r.data?.[0]?.id,
     `${r.code} ${r.msg}`,
   );
+  if (r.data?.[0]?.id) created.lignes.push(r.data[0].id);
 }
 {
   // TR+C identique autorisé dans une AUTRE programmation

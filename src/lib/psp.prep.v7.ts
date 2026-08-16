@@ -326,3 +326,87 @@ export function programmeParAnneeCategorie(ops: PspOperation[]): Record<string, 
   }
   return m;
 }
+
+// ── 10. Détection du type de recherche patrimoine (TR vs ER/locataire) ─────────
+export type TypeRecherchePatrimoine = "tranche" | "lot" | "mixte";
+
+/**
+ * V7.3 — Détection PROPRE du type de recherche (plus uniquement /^\d/) :
+ *  · « ER.123 » / « ER123 »      → lot (code patrimoine) ;
+ *  · « 1976 », « 19 », « TR1976 » → tranche (code/numéro) ;
+ *  · tout autre texte (« REIMS », « CHESS », « DUPONT »…) → mixte : on cherche
+ *    les tranches (ville/libellé) ET les lots (locataire/adresse) en parallèle,
+ *    regroupés et étiquetés dans l'UI.
+ */
+export function detecterRecherchePatrimoine(q: string): TypeRecherchePatrimoine {
+  const texte = (q ?? "").trim();
+  if (!texte) return "mixte";
+  if (/^ER[.\s\d-]*$/i.test(texte) || /^ER[.\s\d-]/.test(texte)) return "lot";
+  if (/^\d/.test(texte)) return "tranche";
+  if (/^TR\s*\d/i.test(texte)) return "tranche";
+  return "mixte";
+}
+
+// ── 11. Diff d'historique (psp_ligne_historique) pour la fiche opération ───────
+export type LigneDiffHistorique = {
+  champ: string;
+  avant: string;
+  apres: string;
+};
+
+const LIBELLE_HISTORIQUE: Record<string, string> = {
+  tranche_code: "TR",
+  categorie: "Catégorie",
+  corps_etat: "Corps d'état",
+  nature_travaux: "Nature travaux",
+  programme: "Montants programmés",
+  remarques: "Notes",
+  statut: "Statut",
+  priorite: "Priorité",
+  ligne_budget: "Ligne budgétaire",
+};
+
+/**
+ * Compare les snapshots avant/après (jsonb rows) d'une entrée psp_ligne_historique
+ * et retourne les champs réellement modifiés (champ + ancienne + nouvelle valeur).
+ * Le programme (jsonb) est résumé en « 2027:15000, 2028:0, … ».
+ */
+export function diffHistorique(avant: unknown, apres: unknown): LigneDiffHistorique[] {
+  const a = (avant ?? {}) as Record<string, unknown>;
+  const b = (apres ?? {}) as Record<string, unknown>;
+  const cles = new Set([...Object.keys(a), ...Object.keys(b)]);
+  const result: LigneDiffHistorique[] = [];
+  for (const cle of cles) {
+    if (
+      cle === "id" ||
+      cle === "programmation_id" ||
+      cle === "created_at" ||
+      cle === "updated_at"
+    ) {
+      continue;
+    }
+    const va = a[cle];
+    const vb = b[cle];
+    const fmt = (v: unknown): string => {
+      if (v === null || v === undefined) return "—";
+      if (typeof v === "object") {
+        const obj = v as Record<string, unknown>;
+        return (
+          Object.entries(obj)
+            .filter(([, val]) => Number(val) > 0)
+            .map(([k, val]) => `${k}:${val}`)
+            .join(", ") || "—"
+        );
+      }
+      return String(v);
+    };
+    if (fmt(va) !== fmt(vb)) {
+      result.push({
+        champ: LIBELLE_HISTORIQUE[cle] ?? cle,
+        avant: fmt(va),
+        apres: fmt(vb),
+      });
+    }
+  }
+  return result;
+}

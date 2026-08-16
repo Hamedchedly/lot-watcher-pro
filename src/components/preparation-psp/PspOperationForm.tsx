@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Wand2 } from "lucide-react";
+import { Wand2, X } from "lucide-react";
 import { useServerFn } from "@tanstack/react-start";
 
 import PspSecteurBadge from "@/components/preparation-psp/PspSecteurBadge";
@@ -130,6 +130,7 @@ export default function PspOperationForm({
   }, [corpsEtat]);
 
   const enregistrer = () => {
+    if (!anneeValide) return;
     onSave({
       tranche: rec.tranche ?? "",
       categorie,
@@ -149,7 +150,8 @@ export default function PspOperationForm({
     onClose();
   };
 
-  const valide = Boolean(rec.tranche) && nature.trim() !== "";
+  const anneeValide = programme.some((v) => Number(v) > 0);
+  const valide = Boolean(rec.tranche) && anneeValide;
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
@@ -172,41 +174,61 @@ export default function PspOperationForm({
                 <Label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
                   TR (recherche)
                 </Label>
-                <div className="relative">
-                  <Input
-                    value={rec.q}
-                    onChange={(e) => rec.setQ(e.target.value)}
-                    placeholder="1976 · ER.123 · DUPONT…"
-                    className="h-8 text-xs"
-                  />
-                  {rec.sugTranches.length > 0 || rec.sugLots.length > 0 ? (
-                    <div className="absolute z-40 mt-1 max-h-44 w-full overflow-auto rounded-lg border bg-popover p-1 shadow-lg">
-                      {rec.sugTranches.map((t) => (
-                        <button
-                          key={t.code}
-                          className="flex w-full justify-between gap-2 rounded px-2 py-1 text-left text-xs hover:bg-accent"
-                          onClick={() => rec.choisirTranche(t.code)}
-                        >
-                          <span className="font-mono font-bold">{t.code}</span>
-                          <span className="text-muted-foreground">{t.localite ?? t.libelle}</span>
-                        </button>
-                      ))}
-                      {rec.sugLots.map((l) => (
-                        <button
-                          key={l.id}
-                          className="flex w-full justify-between gap-2 rounded px-2 py-1 text-left text-xs hover:bg-accent"
-                          onClick={() => rec.choisirLotGlobal(l)}
-                        >
-                          <span className="font-mono font-bold">{l.code_patrimoine}</span>
-                          <span className="truncate text-muted-foreground">
-                            {l.locataire_nom ? `${l.locataire_nom} · ` : ""}
-                            {l.adresse}
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                  ) : null}
-                </div>
+                {rec.tranche ? (
+                  <div className="flex items-center justify-between gap-1 rounded-md border border-primary/40 bg-primary/10 px-2 py-1.5">
+                    <span className="font-mono text-xs font-black">
+                      {rec.tranche}
+                      {rec.referenceTranche?.localite ? ` — ${rec.referenceTranche.localite}` : ""}
+                    </span>
+                    <button
+                      onClick={rec.effacerTranche}
+                      className="text-muted-foreground hover:text-destructive"
+                      title="Changer de TR"
+                    >
+                      <X className="size-3.5" />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="relative">
+                    <Input
+                      value={rec.searchQuery}
+                      onChange={(e) => {
+                        rec.setSearchQuery(e.target.value);
+                        rec.setTrPanelOuvert(true);
+                      }}
+                      onFocus={() => rec.setTrPanelOuvert(true)}
+                      placeholder="1976 · ER.123 · DUPONT…"
+                      className="h-8 text-xs"
+                    />
+                    {rec.trPanelOuvert && (rec.sugTranches.length > 0 || rec.sugLots.length > 0) ? (
+                      <div className="absolute z-40 mt-1 max-h-44 w-full overflow-auto rounded-lg border bg-popover p-1 shadow-lg">
+                        {rec.sugTranches.map((t) => (
+                          <button
+                            key={t.code}
+                            className="flex w-full justify-between gap-2 rounded px-2 py-1 text-left text-xs hover:bg-accent"
+                            onClick={() => rec.choisirTranche(t.code)}
+                          >
+                            <span className="font-mono font-bold">{t.code}</span>
+                            <span className="text-muted-foreground">{t.localite ?? t.libelle}</span>
+                          </button>
+                        ))}
+                        {rec.sugLots.map((l) => (
+                          <button
+                            key={l.id}
+                            className="flex w-full justify-between gap-2 rounded px-2 py-1 text-left text-xs hover:bg-accent"
+                            onClick={() => rec.choisirLotGlobal(l)}
+                          >
+                            <span className="font-mono font-bold">{l.code_patrimoine}</span>
+                            <span className="truncate text-muted-foreground">
+                              {l.locataire_nom ? `${l.locataire_nom} · ` : ""}
+                              {l.adresse}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                )}
                 {rec.alerteTranche ? (
                   <p className="text-[10px] font-bold text-amber-600">{rec.alerteTranche}</p>
                 ) : null}
@@ -422,6 +444,11 @@ export default function PspOperationForm({
               <p className="tabnum mt-1.5 text-right text-xs font-black text-primary">
                 Total : {money0(total)}
               </p>
+              {!anneeValide ? (
+                <p className="mt-1 rounded border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-bold text-amber-800">
+                  Indiquez au moins une année de programmation avec un montant supérieur à 0.
+                </p>
+              ) : null}
             </div>
 
             {/* Statut + Priorité */}

@@ -69,7 +69,7 @@ import { getTravauxDashboard } from "@/lib/travaux.dashboard.functions";
 import {
   createPspDevis,
   createPspLigne,
-  createPspPerimetres,
+  createPspOperationComplete,
   createPspProgrammation,
   deletePspDevis,
   deletePspLigne,
@@ -78,10 +78,16 @@ import {
   updatePspDevis,
   updatePspLigne,
   updatePspLigneStatutPriorite,
+  updatePspOperationComplete,
   type PspLignePersist,
   type PspPerimetrePersist,
 } from "@/lib/psp.prep.supabase.functions";
-import { type EnveloppeMap, type LotInfo, type PerimetreLigne } from "@/lib/psp.prep.v7";
+import {
+  type EnveloppeMap,
+  libelleAdressePerimetre,
+  type LotInfo,
+  type PerimetreLigne,
+} from "@/lib/psp.prep.v7";
 
 export const Route = createFileRoute("/preparation-psp")({
   head: () => ({
@@ -114,6 +120,9 @@ function PreparationPspPage() {
   const [perimetresParLigne, setPerimetresParLigne] = useState<Map<string, PerimetreLigne[]>>(
     new Map(),
   );
+  const [historiqueParLigne, setHistoriqueParLigne] = useState<
+    Map<string, Array<Record<string, unknown>>>
+  >(new Map());
   const [lotsParId, setLotsParId] = useState<Map<string, LotInfo>>(new Map());
 
   // Source des opérations : mock V1 par défaut, fichier esquisse 2027 si chargé.
@@ -177,6 +186,14 @@ function PreparationPspPage() {
       ]);
     }
     setPerimetresParLigne(perimetres);
+    // Historique des lignes (V7.3) — pour la fiche opération.
+    const hist = new Map<string, Array<Record<string, unknown>>>();
+    for (const h of brouillon.historique ?? []) {
+      const cle = String(h["ligne_id"] ?? "");
+      if (!cle) continue;
+      hist.set(cle, [...(hist.get(cle) ?? []), h]);
+    }
+    setHistoriqueParLigne(hist);
     const ops: PspOperation[] = (brouillon.lignes ?? []).map((l: PspLignePersist) => ({
       id: l.id,
       annee: 2027 as PspAnnee,
@@ -487,7 +504,16 @@ function PreparationPspPage() {
         : null;
 
   const exporter = () => {
-    const csv = construireCsvProgrammation(operations);
+    // V7.3 §21 — l'adresse exportée reflète le périmètre patrimonial réel
+    // (lot → « adresse - ER.xxx », rue entière, adresses multiples, tranche).
+    const enrichies = operations.map((o) => {
+      const libelle = libelleAdressePerimetre(perimetresParLigne.get(o.id) ?? [], lotsParId, {
+        adresse: o.adresse,
+        ville: o.ville,
+      });
+      return libelle && libelle !== "—" ? { ...o, adresse: libelle } : o;
+    });
+    const csv = construireCsvProgrammation(enrichies);
     const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -515,7 +541,8 @@ function PreparationPspPage() {
   const updateLigneFn = useServerFn(updatePspLigne);
   const deleteLigneFn = useServerFn(deletePspLigne);
   const createProgFn = useServerFn(createPspProgrammation);
-  const createPerimetresFn = useServerFn(createPspPerimetres);
+  const createCompleteFn = useServerFn(createPspOperationComplete);
+  const updateCompleteFn = useServerFn(updatePspOperationComplete);
   const statutPrioriteFn = useServerFn(updatePspLigneStatutPriorite);
   const createDevisFn = useServerFn(createPspDevis);
   const updateDevisFn = useServerFn(updatePspDevis);
@@ -660,7 +687,7 @@ function PreparationPspPage() {
       programme[String(a)] = Number(saisie.programme[i]) || 0;
     });
     try {
-      const ligne = await createLigneFn({
+      const ligne = await createCompleteFn({
         data: {
           programmationId: programmation.id,
           trancheCode: saisie.tranche,
@@ -671,24 +698,18 @@ function PreparationPspPage() {
           programme,
           ligneBudget: null,
           remarques: saisie.remarques ?? null,
-          statut:
-            (saisie.statut as
-              "a_definir" | "attente_agence" | "attente_confirmation" | undefined) ?? undefined,
-          priorite:
-            (saisie.priorite as "prioritaire" | "normale" | "non_prioritaire" | undefined) ??
-            undefined,
+          statut: saisie.statut ?? null,
+          priorite: saisie.priorite ?? null,
           origine: "preparation",
+          perimetres: (saisie.perimetres ?? []).map((p) => ({
+            niveau: p.niveau as "tranche" | "rue" | "adresse" | "lot",
+            rue: p.rue,
+            numero: p.numero,
+            lotId: p.lot_id,
+          })),
+          devis: undefined,
         },
       });
-      if (saisie.perimetres && saisie.perimetres.length > 0) {
-        await createPerimetresFn({
-          data: {
-            pspLigneId: ligne.id,
-            trancheCode: saisie.tranche,
-            perimetres: saisie.perimetres,
-          },
-        });
-      }
       setOperations((prev) => prev.map((o) => (o.id === id ? { ...o, id: ligne.id } : o)));
       toast.success(`Opération persistée dans Supabase (brouillon v${programmation.version}).`);
     } catch (e) {
@@ -746,7 +767,7 @@ function PreparationPspPage() {
       ),
     );
     try {
-      await updateLigneFn({
+      const ligne = await updateCompleteFn({
         data: {
           id: formOperation.id,
           trancheCode: saisie.tranche,
@@ -755,31 +776,41 @@ function PreparationPspPage() {
           corpsEtat: saisie.corps_etat || null,
           natureTravaux: saisie.nature_travaux || null,
           programme,
-          ligneBudget: null,
           remarques: saisie.remarques ?? null,
-          statut:
-            (saisie.statut as
-              "a_definir" | "attente_agence" | "attente_confirmation" | undefined) ?? undefined,
-          priorite:
-            (saisie.priorite as "prioritaire" | "normale" | "non_prioritaire" | undefined) ??
-            undefined,
+          statut: saisie.statut ?? null,
+          priorite: saisie.priorite ?? null,
+          perimetres: (saisie.perimetres ?? []).map((p) => ({
+            niveau: p.niveau as "tranche" | "rue" | "adresse" | "lot",
+            rue: p.rue,
+            numero: p.numero,
+            lotId: p.lot_id,
+          })),
         },
       });
-      // Périmètre patrimonial : remplacé si l'utilisateur l'a modifié dans l'éditeur.
-      if (saisie.perimetres && saisie.perimetres.length > 0) {
-        await createPerimetresFn({
-          data: {
-            pspLigneId: formOperation.id,
-            trancheCode: saisie.tranche,
-            perimetres: saisie.perimetres,
-          },
-        });
-        setPerimetresParLigne((prev) => {
-          const next = new Map(prev);
-          next.set(formOperation.id, saisie.perimetres ?? []);
-          return next;
-        });
-      }
+      setPerimetresParLigne((prev) => {
+        const next = new Map(prev);
+        next.set(formOperation.id, saisie.perimetres ?? []);
+        return next;
+      });
+      setOperations((prev) =>
+        prev.map((o) =>
+          o.id === formOperation.id
+            ? {
+                ...o,
+                tranche: ligne.tranche_code,
+                categorie: (ligne.categorie as PspCategorie) ?? "GT",
+                corps_etat_code: ligne.corps_etat_code ?? "",
+                corps_etat: ligne.corps_etat ?? "",
+                nature_travaux: ligne.nature_travaux ?? "",
+                programme: ligne.programme ?? {},
+                budget: PSP_ANNEES.reduce((s, a) => s + (ligne.programme?.[String(a)] ?? 0), 0),
+                remarques: ligne.remarques,
+                statut: ligne.statut,
+                priorite: ligne.priorite,
+              }
+            : o,
+        ),
+      );
       toast.success("Opération modifiée — totaux recalculés et persistés.");
     } catch (e) {
       toast.error(`Échec de la persistance : ${(e as Error).message}`);
@@ -966,6 +997,7 @@ function PreparationPspPage() {
         operation={selectedOp}
         deplacements={deplacements}
         figee={figee}
+        historique={historiqueParLigne.get(selectedOp?.id ?? "") ?? []}
         onClose={() => setSelectedOpId(null)}
         onModifier={ouvrirModification}
         onDeplacer={handleDeplacer}

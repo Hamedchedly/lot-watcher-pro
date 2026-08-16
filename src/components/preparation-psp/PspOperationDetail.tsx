@@ -31,7 +31,7 @@ import {
   type PspAnnee,
   type PspOperation,
 } from "@/lib/psp.prep";
-import { PRIORITE_LABELS, STATUT_LABELS } from "@/lib/psp.prep.v7";
+import { PRIORITE_LABELS, STATUT_LABELS, diffHistorique } from "@/lib/psp.prep.v7";
 import { cn } from "@/lib/utils";
 
 /**
@@ -43,6 +43,7 @@ export default function PspOperationDetail({
   operation,
   deplacements,
   figee,
+  historique = [],
   onClose,
   onModifier,
   onDeplacer,
@@ -54,6 +55,8 @@ export default function PspOperationDetail({
   operation: PspOperation | null;
   deplacements: DeplacementMemo[];
   figee: boolean;
+  /** Historique des modifications (psp_ligne_historique) — V7.3. */
+  historique?: Array<Record<string, unknown>>;
   onClose: () => void;
   onModifier: (op: PspOperation) => void;
   onDeplacer: (id: string, cible: PspAnnee, motif: string | null) => void;
@@ -64,6 +67,7 @@ export default function PspOperationDetail({
 }) {
   const devisRef = useRef<HTMLDivElement>(null);
   const mouvementsRef = useRef<HTMLDivElement>(null);
+  const historiqueRef = useRef<HTMLDivElement>(null);
   const [cible, setCible] = useState<number>(2028);
   const [motif, setMotif] = useState<string>("");
 
@@ -272,6 +276,66 @@ export default function PspOperationDetail({
                 onDelete={onDevisDelete}
               />
             </div>
+
+            {/* V7.3 — Historique des modifications (psp_ligne_historique) */}
+            {historique && historique.length > 0 ? (
+              <div ref={historiqueRef} className="mt-3 rounded-lg border bg-card p-3">
+                <p className="mb-2 flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+                  <History className="size-3.5" />
+                  Historique des modifications
+                </p>
+                <ol className="space-y-2">
+                  {historique.map((h, i) => {
+                    const operationText = String(h["operation"] ?? "modification");
+                    const created = h["created_at"] as string | null;
+                    const date = created
+                      ? new Date(created).toLocaleDateString("fr-FR", {
+                          day: "2-digit",
+                          month: "2-digit",
+                          year: "numeric",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })
+                      : "";
+                    const diffs = diffHistorique(h["avant"], h["apres"]);
+                    return (
+                      <li key={i} className="rounded border bg-surface/60 p-2">
+                        <div className="flex flex-wrap items-center justify-between gap-1">
+                          <span
+                            className={
+                              operationText === "creation"
+                                ? "rounded bg-emerald-100 px-1.5 py-0.5 text-[9px] font-black uppercase text-emerald-800"
+                                : "rounded bg-blue-100 px-1.5 py-0.5 text-[9px] font-black uppercase text-blue-800"
+                            }
+                          >
+                            {operationText === "creation" ? "Création" : "Modification"}
+                          </span>
+                          <span className="text-[9px] text-muted-foreground">{date}</span>
+                        </div>
+                        {diffs.length > 0 ? (
+                          <ul className="mt-1.5 space-y-0.5">
+                            {diffs.map((d, j) => (
+                              <li key={j} className="text-[10px] leading-snug">
+                                <span className="font-bold">{d.champ}</span> :{" "}
+                                <span className="text-muted-foreground line-through">
+                                  {d.avant}
+                                </span>{" "}
+                                <span className="text-foreground">→</span>{" "}
+                                <span className="font-medium text-primary">{d.apres}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <p className="mt-1 text-[10px] text-muted-foreground">
+                            Détail non diffusable.
+                          </p>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ol>
+              </div>
+            ) : null}
 
             <DialogFooter className="mt-4 flex-col-reverse gap-2 sm:flex-row sm:justify-start">
               <Button variant="outline" size="sm" onClick={() => onModifier(operation)}>

@@ -135,41 +135,7 @@ export default function PspOperationRow({
         </span>
       </TableCell>
 
-      {/* Statut — badge + sélecteur inline */}
-      <TableCell className="py-2" onClick={(e) => e.stopPropagation()}>
-        {editing.statut ? (
-          <Select
-            value={statut}
-            onValueChange={(v) => {
-              onStatutPriorite(op.id, { statut: v });
-              setEditing({ ...editing, statut: false });
-            }}
-          >
-            <SelectTrigger className="h-7 w-[150px] text-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {Object.entries(STATUT_LABELS).map(([v, l]) => (
-                <SelectItem key={v} value={v}>
-                  {l}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        ) : (
-          <button
-            type="button"
-            onClick={() => setEditing({ ...editing, statut: true })}
-            title="Cliquer pour modifier le statut"
-          >
-            <Badge className={cn("font-bold", STATUT_STYLES[statut] ?? STATUT_STYLES["a_definir"])}>
-              {STATUT_LABELS[statut] ?? statut}
-            </Badge>
-          </button>
-        )}
-      </TableCell>
-
-      {/* Priorité — badge + sélecteur inline */}
+      {/* Priorité — AVANT Statut : badge + sélecteur inline */}
       <TableCell className="py-2" onClick={(e) => e.stopPropagation()}>
         {editing.priorite ? (
           <Select
@@ -205,8 +171,38 @@ export default function PspOperationRow({
         )}
       </TableCell>
 
-      {/* Notes — modifiables en ligne (psp_lignes.remarques) */}
-      <TableCell className="min-w-[140px] py-2" onClick={(e) => e.stopPropagation()}>
+      {/* Statut / Notes — UNE seule cellule : statut structuré + texte libre */}
+      <TableCell className="min-w-[180px] py-2" onClick={(e) => e.stopPropagation()}>
+        {editing.statut ? (
+          <Select
+            value={statut}
+            onValueChange={(v) => {
+              onStatutPriorite(op.id, { statut: v });
+              setEditing({ ...editing, statut: false });
+            }}
+          >
+            <SelectTrigger className="h-7 w-[150px] text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {Object.entries(STATUT_LABELS).map(([v, l]) => (
+                <SelectItem key={v} value={v}>
+                  {l}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setEditing({ ...editing, statut: true })}
+            title="Cliquer pour modifier le statut"
+          >
+            <Badge className={cn("font-bold", STATUT_STYLES[statut] ?? STATUT_STYLES["a_definir"])}>
+              {STATUT_LABELS[statut] ?? statut}
+            </Badge>
+          </button>
+        )}
         <Input
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
@@ -215,8 +211,8 @@ export default function PspOperationRow({
             const actuelle = (op.remarques ?? "").trim();
             if (value !== actuelle) onNotes(op.id, value);
           }}
-          placeholder="Notes…"
-          className="h-7 text-xs"
+          placeholder="Note libre…"
+          className="mt-1 h-7 text-xs"
         />
       </TableCell>
 

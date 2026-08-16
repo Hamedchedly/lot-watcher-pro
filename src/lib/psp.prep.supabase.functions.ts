@@ -18,7 +18,12 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
-import { lotsDeAdresse, numerosDeRue, ruesDeTranche } from "./psp.prep.v7.ts";
+import {
+  detecterRecherchePatrimoine,
+  lotsDeAdresse,
+  numerosDeRue,
+  ruesDeTranche,
+} from "./psp.prep.v7.ts";
 
 export type PspLignePersist = {
   id: string;
@@ -55,6 +60,8 @@ export type PspBrouillonComplet = {
   links: Array<Record<string, unknown>>;
   perimetres: PspPerimetrePersist[];
   enveloppes: PspEnveloppePersist[];
+  /** Historique des lignes (V7.3) — batch, pour la fiche opération. */
+  historique: Array<Record<string, unknown>>;
 };
 
 export type PspPerimetrePersist = {
@@ -230,6 +237,15 @@ export const getPspBrouillon = createServerFn({ method: "POST" })
       : [];
     const enveloppes =
       (await db.from("psp_enveloppes").select("*").eq("programmation_id", pid)).data ?? [];
+    const historique = ids.length
+      ? ((
+          await db
+            .from("psp_ligne_historique")
+            .select("*")
+            .in("ligne_id", ids)
+            .order("created_at", { ascending: false })
+        ).data ?? [])
+      : [];
 
     return {
       programmation: {
@@ -248,6 +264,7 @@ export const getPspBrouillon = createServerFn({ method: "POST" })
       links,
       perimetres: (perimetres ?? []) as PspPerimetrePersist[],
       enveloppes: (enveloppes ?? []) as PspEnveloppePersist[],
+      historique: historique ?? [],
     };
   });
 
@@ -577,7 +594,9 @@ export const rechercherTranches = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
     const db = supabaseAdmin as any;
-    const q = data.q.trim();
+    // « TR1976 » → « 1976 » : le préfixe TR n'est pas stocké dans tranches.code.
+    const brut = data.q.trim();
+    const q = brut.replace(/^TR\s*/i, "");
     let query = db
       .from("tranches")
       .select("code, libelle, localite, sous_secteur, nb_logements")
@@ -588,6 +607,72 @@ export const rechercherTranches = createServerFn({ method: "POST" })
     const { data: rows, error } = await query.order("code").limit(20);
     if (error) throw new Error(`Recherche de tranches : ${error.message}`);
     return rows ?? [];
+  });
+
+/**
+ * Recherche patrimoine GLOBALE (V7.3) : tranches (code / libellé / localité)
+ * ET lots (ER / locataire / adresse) en parallèle, regroupés et étiquetés.
+ * Le type est décidé par `detecterRecherchePatrimoine` :
+ *  · numérique / « TR… » → tranches uniquement ;
+ *  · « ER… »            → lots uniquement ;
+ *  · texte libre        → les deux (ville/libellé ↔ locataire/adresse).
+ */
+export const rechercherPatrimoineGlobal = createServerFn({ method: "POST" })
+  .validator((d: unknown) => rechercheTranchesInput.parse(d))
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
+    const db = supabaseAdmin as any;
+    const brut = data.q.trim();
+    const type = detecterRecherchePatrimoine(brut);
+    const q = brut.replace(/^TR\s*/i, "");
+    const result: {
+      tranches: Array<{
+        code: string;
+        libelle: string | null;
+        localite: string | null;
+        sous_secteur: string | null;
+        nb_logements: number | null;
+      }>;
+      lots: Array<{
+        id: string;
+        code_patrimoine: string;
+        tranche_code: string;
+        adresse: string | null;
+        ville: string | null;
+        locataire_nom: string | null;
+      }>;
+    } = { tranches: [], lots: [] };
+
+    const chercheTranches = type === "tranche" || type === "mixte";
+    const chercheLots = type === "lot" || type === "mixte";
+
+    if (chercheTranches) {
+      let query = db
+        .from("tranches")
+        .select("code, libelle, localite, sous_secteur, nb_logements")
+        .eq("actif", true);
+      if (q) {
+        query = query.or(`code.ilike.${q}%,libelle.ilike.%${q}%,localite.ilike.%${q}%`);
+      }
+      const { data: rows, error } = await query.order("code").limit(20);
+      if (!error) result.tranches = rows ?? [];
+    }
+
+    if (chercheLots) {
+      let query = db
+        .from("lots")
+        .select("id, code_patrimoine, tranche_code, adresse, ville, locataire_nom")
+        .eq("actif", true);
+      if (brut) {
+        query = query.or(
+          `code_patrimoine.ilike.%${brut}%,adresse.ilike.%${brut}%,locataire_nom.ilike.%${brut}%`,
+        );
+      }
+      const { data: rows, error } = await query.order("code_patrimoine").limit(25);
+      if (!error) result.lots = rows ?? [];
+    }
+
+    return result;
   });
 
 /** Liste des corps d'état connus (DISTINCT travaux_commandes.corps_etat) — suggestions. */
@@ -816,4 +901,200 @@ export const createPspCommandLink = createServerFn({ method: "POST" })
       .single();
     if (error) throw new Error(`Rattachement de la commande : ${error.message}`);
     return link;
+  });
+// ── V7.3 — fournisseurs, opérations ATOMIQUES, historique ──────────────────────
+
+/**
+ * Recherche progressive des fournisseurs (nom OU code/alias) pour le devis de la
+ * ligne de saisie. Réutilise `rechercherFournisseurs` (src/lib/fournisseurs.ts).
+ */
+export const rechercherFournisseursDevis = createServerFn({ method: "POST" })
+  .validator((d: unknown) => z.object({ q: z.string().max(40).default("") }).parse(d))
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
+    const db = supabaseAdmin as any;
+    const { data: fournisseurs, error } = await db
+      .from("fournisseurs")
+      .select("id, nom, ville")
+      .order("nom", { ascending: true });
+    if (error) throw new Error(`Lecture des fournisseurs : ${error.message}`);
+    const { data: aliasesData, error: eA } = await db
+      .from("fournisseur_aliases")
+      .select("fournisseur_id, source, identifiant_source");
+    if (eA) throw new Error(`Lecture des alias fournisseurs : ${eA.message}`);
+    const aliasesPar = new Map<string, Array<{ source: string; identifiant_source: string }>>();
+    for (const a of aliasesData ?? []) {
+      const id = String(a["fournisseur_id"] ?? "");
+      if (!id) continue;
+      aliasesPar.set(id, [
+        ...(aliasesPar.get(id) ?? []),
+        {
+          source: String(a["source"] ?? ""),
+          identifiant_source: String(a["identifiant_source"] ?? ""),
+        },
+      ]);
+    }
+    const liste = (fournisseurs ?? []) as Array<{ id: string; nom: string; ville: string | null }>;
+    const { rechercherFournisseurs } = await import("@/lib/fournisseurs");
+    const q = data.q.trim();
+    const trouves = rechercherFournisseurs(
+      liste,
+      aliasesPar as Map<string, import("@/lib/fournisseurs").FournisseurAlias[]>,
+      q,
+    ).slice(0, 20);
+    return trouves.map((f) => {
+      const codes = (aliasesPar.get(f.id) ?? []).map((a) => a.identifiant_source);
+      return { id: f.id, nom: f.nom, ville: f.ville, codes };
+    });
+  });
+
+/** Périmètre jsonb pour les RPC atomiques (niveau/rue/numero/lotId). */
+const perimetreInput = z.array(
+  z.object({
+    niveau: z.enum(["tranche", "rue", "adresse", "lot"]),
+    rue: z.string().nullish(),
+    numero: z.string().nullish(),
+    lotId: z.string().uuid().nullish(),
+  }),
+);
+
+/** Devis jsonb pour les RPC atomiques. */
+const devisRpcInput = z
+  .array(
+    z.object({
+      fournisseurId: z.string().uuid().nullish(),
+      entreprise: z.string().nullish(),
+      dateDevis: z.string().nullish(),
+      montant: z.number().nullish(),
+      statut: z.string().nullish(),
+      commentaire: z.string().nullish(),
+      documentReference: z.string().nullish(),
+    }),
+  )
+  .nullish();
+
+/**
+ * Création ATOMIQUE (V7.3) : ligne + périmètre + devis via le RPC
+ * public.create_psp_operation. Échec → aucun résidu (rollback plpgsql).
+ */
+export const createPspOperationComplete = createServerFn({ method: "POST" })
+  .validator((d: unknown) =>
+    z
+      .object({
+        programmationId: z.string().uuid(),
+        trancheCode: z.string().min(1),
+        categorie: z.enum(["GE", "GT", "CP"]),
+        corpsEtatCode: z.string().nullish(),
+        corpsEtat: z.string().nullish(),
+        natureTravaux: z.string().nullish(),
+        programme: z.record(z.string(), z.number()),
+        ligneBudget: z.string().nullish(),
+        remarques: z.string().nullish(),
+        statut: z.string().nullish(),
+        priorite: z.string().nullish(),
+        origine: z.string().nullish(),
+        perimetres: perimetreInput.default([]),
+        devis: devisRpcInput,
+      })
+      .parse(d),
+  )
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
+    const db = supabaseAdmin as any;
+    const perimetres = (data.perimetres ?? []).map((p) => ({
+      niveau: p.niveau,
+      rue: p.rue ?? null,
+      numero: p.numero ?? null,
+      lot_id: p.lotId ?? null,
+    }));
+    const devis = (data.devis ?? []).map((d) => ({
+      fournisseur_id: d.fournisseurId ?? null,
+      entreprise: d.entreprise ?? null,
+      date_devis: d.dateDevis ?? null,
+      montant: d.montant ?? null,
+      statut: d.statut ?? "recu",
+      commentaire: d.commentaire ?? null,
+      document_reference: d.documentReference ?? null,
+    }));
+    const { data: ligne, error } = await db.rpc("create_psp_operation", {
+      p_programmation_id: data.programmationId,
+      p_tranche_code: data.trancheCode,
+      p_categorie: data.categorie,
+      p_corps_etat_code: data.corpsEtatCode ?? null,
+      p_corps_etat: data.corpsEtat ?? null,
+      p_nature_travaux: data.natureTravaux ?? null,
+      p_programme: data.programme,
+      p_ligne_budget: data.ligneBudget ?? null,
+      p_remarques: data.remarques ?? null,
+      p_statut: data.statut ?? null,
+      p_priorite: data.priorite ?? null,
+      p_origine: data.origine ?? "preparation",
+      p_perimetres: perimetres,
+      p_devis: devis.length > 0 ? devis : null,
+    });
+    if (error) throw new Error(`Création de l'opération : ${error.message}`);
+    return ligne as PspLignePersist;
+  });
+/**
+ * Modification ATOMIQUE (V7.3) : ligne + remplacement du périmètre via le RPC
+ * public.update_psp_operation. Échec → aucun résidu.
+ */
+export const updatePspOperationComplete = createServerFn({ method: "POST" })
+  .validator((d: unknown) =>
+    z
+      .object({
+        id: z.string().uuid(),
+        trancheCode: z.string().min(1),
+        categorie: z.enum(["GE", "GT", "CP"]),
+        corpsEtatCode: z.string().nullish(),
+        corpsEtat: z.string().nullish(),
+        natureTravaux: z.string().nullish(),
+        programme: z.record(z.string(), z.number()),
+        remarques: z.string().nullish(),
+        statut: z.string().nullish(),
+        priorite: z.string().nullish(),
+        perimetres: perimetreInput.default([]),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
+    const db = supabaseAdmin as any;
+    const perimetres = (data.perimetres ?? []).map((p) => ({
+      niveau: p.niveau,
+      rue: p.rue ?? null,
+      numero: p.numero ?? null,
+      lot_id: p.lotId ?? null,
+    }));
+    const { data: ligne, error } = await db.rpc("update_psp_operation", {
+      p_id: data.id,
+      p_tranche_code: data.trancheCode,
+      p_categorie: data.categorie,
+      p_corps_etat_code: data.corpsEtatCode ?? null,
+      p_corps_etat: data.corpsEtat ?? null,
+      p_nature_travaux: data.natureTravaux ?? null,
+      p_programme: data.programme,
+      p_remarques: data.remarques ?? null,
+      p_statut: data.statut ?? null,
+      p_priorite: data.priorite ?? null,
+      p_perimetres: perimetres,
+    });
+    if (error) throw new Error(`Modification de l'opération : ${error.message}`);
+    return ligne as PspLignePersist;
+  });
+
+/** Historique des modifications des lignes (psp_ligne_historique, batch). */
+export const getPspLignesHistorique = createServerFn({ method: "POST" })
+  .validator((d: unknown) => z.object({ ids: z.array(z.string().uuid()) }).parse(d))
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
+    const db = supabaseAdmin as any;
+    if (data.ids.length === 0) return [];
+    const { data: rows, error } = await db
+      .from("psp_ligne_historique")
+      .select("*")
+      .in("ligne_id", data.ids)
+      .order("created_at", { ascending: false });
+    if (error) throw new Error(`Lecture de l'historique : ${error.message}`);
+    return rows ?? [];
   });

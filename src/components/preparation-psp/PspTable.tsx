@@ -52,8 +52,8 @@ const filtersActive = (f: FiltresDetail): boolean =>
 
 /** Colonnes descriptives (avant les années) : TR CC Adresse Corps C Nature. */
 const NB_COLS_DESCRIPTIVES = 6;
-/** Colonnes après Total : Devis, Statut, Priorité, Notes, Actions. */
-const NB_COLS_TRAILING = 5;
+/** Colonnes après Total : Devis, Priorité, Statut / Notes, Actions. */
+const NB_COLS_TRAILING = 4;
 
 const COLONNES: Array<{ cle: CleTri | null; label: string; align?: "right" }> = [
   { cle: "tranche", label: "TR" },
@@ -69,9 +69,8 @@ const COLONNES: Array<{ cle: CleTri | null; label: string; align?: "right" }> = 
   })),
   { cle: "total", label: "Total", align: "right" as const },
   { cle: null, label: "Devis" },
-  { cle: "statut", label: "Statut" },
   { cle: "priorite", label: "Priorité" },
-  { cle: null, label: "Notes" },
+  { cle: null, label: "Statut / Notes" },
   { cle: null, label: "Actions" },
 ];
 
