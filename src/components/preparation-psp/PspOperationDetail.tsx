@@ -1,10 +1,20 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowRight, FileText, History, MapPin, Pencil, Trash2 } from "lucide-react";
+import {
+  ArrowRight,
+  ChevronDown,
+  ChevronRight,
+  FileText,
+  History,
+  MapPin,
+  Pencil,
+  Trash2,
+} from "lucide-react";
 
 import PspDevisPanel, { type DevisEdit } from "@/components/preparation-psp/PspDevisPanel";
 import PspSecteurBadge from "@/components/preparation-psp/PspSecteurBadge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   Dialog,
   DialogContent,
@@ -33,6 +43,9 @@ import {
 } from "@/lib/psp.prep";
 import { PRIORITE_LABELS, STATUT_LABELS, diffHistorique } from "@/lib/psp.prep.v7";
 import { cn } from "@/lib/utils";
+
+/** Chargé d'opération FIXE pour la programmation courante (V7.4 §4). */
+const CHARGE_OPERATION = "HCHEDLY";
 
 /**
  * Fiche opération (panneau latéral style Dialog) : tous les champs métier,
@@ -70,6 +83,7 @@ export default function PspOperationDetail({
   const historiqueRef = useRef<HTMLDivElement>(null);
   const [cible, setCible] = useState<number>(2028);
   const [motif, setMotif] = useState<string>("");
+  const [historiqueOuvert, setHistoriqueOuvert] = useState(false);
 
   useEffect(() => {
     if (!operation) return undefined;
@@ -114,7 +128,10 @@ export default function PspOperationDetail({
             <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
               <Champ label="Tranche" valeur={operation.tranche} />
               <Champ label="Chargé clientèle" valeur={operation.charge_clientele} large />
-              <Champ label="Chargé opération" valeur={operation.charge_operation} />
+              <Champ
+                label="Chargé opération"
+                valeur={operation.charge_operation || CHARGE_OPERATION}
+              />
               <div className="rounded-lg border bg-surface/60 p-2.5">
                 <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
                   C — catégorie budgétaire
@@ -276,66 +293,88 @@ export default function PspOperationDetail({
                 onDelete={onDevisDelete}
               />
             </div>
-
-            {/* V7.3 — Historique des modifications (psp_ligne_historique) */}
-            {historique && historique.length > 0 ? (
-              <div ref={historiqueRef} className="mt-3 rounded-lg border bg-card p-3">
-                <p className="mb-2 flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest text-muted-foreground">
-                  <History className="size-3.5" />
-                  Historique des modifications
-                </p>
-                <ol className="space-y-2">
-                  {historique.map((h, i) => {
-                    const operationText = String(h["operation"] ?? "modification");
-                    const created = h["created_at"] as string | null;
-                    const date = created
-                      ? new Date(created).toLocaleDateString("fr-FR", {
-                          day: "2-digit",
-                          month: "2-digit",
-                          year: "numeric",
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })
-                      : "";
-                    const diffs = diffHistorique(h["avant"], h["apres"]);
-                    return (
-                      <li key={i} className="rounded border bg-surface/60 p-2">
-                        <div className="flex flex-wrap items-center justify-between gap-1">
-                          <span
-                            className={
-                              operationText === "creation"
-                                ? "rounded bg-emerald-100 px-1.5 py-0.5 text-[9px] font-black uppercase text-emerald-800"
-                                : "rounded bg-blue-100 px-1.5 py-0.5 text-[9px] font-black uppercase text-blue-800"
-                            }
-                          >
-                            {operationText === "creation" ? "Création" : "Modification"}
-                          </span>
-                          <span className="text-[9px] text-muted-foreground">{date}</span>
-                        </div>
-                        {diffs.length > 0 ? (
-                          <ul className="mt-1.5 space-y-0.5">
-                            {diffs.map((d, j) => (
-                              <li key={j} className="text-[10px] leading-snug">
-                                <span className="font-bold">{d.champ}</span> :{" "}
-                                <span className="text-muted-foreground line-through">
-                                  {d.avant}
-                                </span>{" "}
-                                <span className="text-foreground">→</span>{" "}
-                                <span className="font-medium text-primary">{d.apres}</span>
-                              </li>
-                            ))}
-                          </ul>
-                        ) : (
-                          <p className="mt-1 text-[10px] text-muted-foreground">
-                            Détail non diffusable.
-                          </p>
-                        )}
-                      </li>
-                    );
-                  })}
-                </ol>
-              </div>
-            ) : null}
+            {/* V7.4 — Historique des modifications (psp_ligne_historique) — bloc repliable */}
+            <div ref={historiqueRef} className="mt-3 rounded-lg border bg-card">
+              <Collapsible open={historiqueOuvert} onOpenChange={setHistoriqueOuvert}>
+                <CollapsibleTrigger asChild>
+                  <button
+                    type="button"
+                    className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left"
+                  >
+                    <span className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+                      <History className="size-3.5" />
+                      Historique des modifications
+                    </span>
+                    <span className="flex items-center gap-1 text-[10px] font-bold text-muted-foreground">
+                      {(historique ?? []).length > 0 ? `${historique.length} entrée(s)` : ""}
+                      {historiqueOuvert ? (
+                        <ChevronDown className="size-3.5" />
+                      ) : (
+                        <ChevronRight className="size-3.5" />
+                      )}
+                    </span>
+                  </button>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  {historique && historique.length > 0 ? (
+                    <ol className="space-y-2 border-t px-3 py-2">
+                      {historique.map((h, i) => {
+                        const operationText = String(h["operation"] ?? "modification");
+                        const created = h["created_at"] as string | null;
+                        const date = created
+                          ? new Date(created).toLocaleDateString("fr-FR", {
+                              day: "2-digit",
+                              month: "2-digit",
+                              year: "numeric",
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })
+                          : "";
+                        const diffs = diffHistorique(h["avant"], h["apres"]);
+                        return (
+                          <li key={i} className="rounded border bg-surface/60 p-2">
+                            <div className="flex flex-wrap items-center justify-between gap-1">
+                              <span
+                                className={
+                                  operationText === "creation"
+                                    ? "rounded bg-emerald-100 px-1.5 py-0.5 text-[9px] font-black uppercase text-emerald-800"
+                                    : "rounded bg-blue-100 px-1.5 py-0.5 text-[9px] font-black uppercase text-blue-800"
+                                }
+                              >
+                                {operationText === "creation" ? "Création" : "Modification"}
+                              </span>
+                              <span className="text-[9px] text-muted-foreground">{date}</span>
+                            </div>
+                            {diffs.length > 0 ? (
+                              <ul className="mt-1.5 space-y-0.5">
+                                {diffs.map((d, j) => (
+                                  <li key={j} className="text-[10px] leading-snug">
+                                    <span className="font-bold">{d.champ}</span> :{" "}
+                                    <span className="text-muted-foreground line-through">
+                                      {d.avant}
+                                    </span>{" "}
+                                    <span className="text-foreground">→</span>{" "}
+                                    <span className="font-medium text-primary">{d.apres}</span>
+                                  </li>
+                                ))}
+                              </ul>
+                            ) : (
+                              <p className="mt-1 text-[10px] text-muted-foreground">
+                                Détail non diffusable.
+                              </p>
+                            )}
+                          </li>
+                        );
+                      })}
+                    </ol>
+                  ) : (
+                    <p className="border-t px-3 py-2 text-[10px] text-muted-foreground">
+                      Aucune modification enregistrée.
+                    </p>
+                  )}
+                </CollapsibleContent>
+              </Collapsible>
+            </div>
 
             <DialogFooter className="mt-4 flex-col-reverse gap-2 sm:flex-row sm:justify-start">
               <Button variant="outline" size="sm" onClick={() => onModifier(operation)}>

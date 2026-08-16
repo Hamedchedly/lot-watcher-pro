@@ -66,6 +66,7 @@ export function useRecherchePatrimoine(options: {
 
   // ── Hiérarchie adresse ──
   const [adressePanelOuvert, setAdressePanelOuvert] = useState(false);
+  const [niveauAdresse, setNiveauAdresse] = useState<"rues" | "numeros">("rues");
   const [qRue, setQRue] = useState("");
   const [rues, setRues] = useState<Array<{ rue: string; ville: string | null; nb_lots: number }>>(
     [],
@@ -185,6 +186,7 @@ export function useRecherchePatrimoine(options: {
     setLotsDeAdresse(new Map());
     setLotsChoisis([]);
     setAdressePanelOuvert(false);
+    setNiveauAdresse("rues");
     setModifie(true);
   };
 
@@ -197,6 +199,7 @@ export function useRecherchePatrimoine(options: {
     setAdressesChoisies([]);
     setLotsDeAdresse(new Map());
     setLotsChoisis([]);
+    setNiveauAdresse("rues");
     setModifie(true);
   };
 
@@ -235,20 +238,41 @@ export function useRecherchePatrimoine(options: {
     setSugLotsTranche([]);
   };
 
-  /** Sélection d'une rue → numéros disponibles. Le panneau peut être fermé ensuite. */
+  /** Sélection d'une rue → passage au niveau NUMÉROS (le panneau ne reste pas sur les rues). */
   const choisirRue = (r: string) => {
     setRue(r);
     setAdressesChoisies([]);
     setLotsDeAdresse(new Map());
     setLotsChoisis([]);
     setModifie(true);
+    setNiveauAdresse("numeros");
     setAdressePanelOuvert(true);
     void rechercheNumerosFn({ data: { tranche: tranche ?? "", rue: r } }).then((n) =>
       setNumeros((n ?? []) as string[]),
     );
   };
 
-  /** « Toute la rue » : aucun numéro, aucun lot. */
+  /** Retour au niveau « rues » (la sélection de rue reste conservée). */
+  const retourRues = () => {
+    setNiveauAdresse("rues");
+    setAdressePanelOuvert(true);
+  };
+
+  /** « Toute la rue » proposée EN PREMIÈRE position des rues → périmètre tranche entière. */
+  const choisirTouteLaRue = () => {
+    setRue(null);
+    setNumeros([]);
+    setAdressesChoisies([]);
+    setLotsDeAdresse(new Map());
+    setLotsChoisis([]);
+    setModifie(true);
+    setNiveauAdresse("rues");
+    setAdressePanelOuvert(false);
+    setQRue("");
+    setRues([]);
+  };
+
+  /** « Toute la rue » du niveau NUMÉROS : rue entière (aucun numéro, aucun lot). */
   const touteLaRue = () => {
     setAdressesChoisies([]);
     setLotsDeAdresse(new Map());
@@ -315,6 +339,7 @@ export function useRecherchePatrimoine(options: {
     // hiérarchie adresse
     adressePanelOuvert,
     setAdressePanelOuvert,
+    niveauAdresse,
     qRue,
     setQRue,
     rues,
@@ -324,6 +349,8 @@ export function useRecherchePatrimoine(options: {
     lotsDeAdresse,
     lotsChoisis,
     choisirRue,
+    retourRues,
+    choisirTouteLaRue,
     touteLaRue,
     basculerAdresse,
     basculerLot,

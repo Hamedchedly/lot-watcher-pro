@@ -10,15 +10,16 @@ const MODES: Array<{
   label: string;
   icone: typeof Layers;
 }> = [
+  { valeur: "detail", label: "Détail", icone: List },
   { valeur: "tranche", label: "Par tranche", icone: Layers },
   { valeur: "charge", label: "Par chargé de clientèle", icone: Users },
-  { valeur: "detail", label: "Détail", icone: List },
   { valeur: "reports", label: "Revue des reports", icone: Flag },
 ];
 
 /**
- * Sélecteur des trois modes d'affichage :
- * [Par tranche] [Par chargé de clientèle] [Détail]
+ * Sélecteur des modes d'affichage (V7.4 — ordre métier) :
+ * [Détail] [Par tranche] [Par chargé de clientèle] [Revue des reports]
+ * Détail est le premier et le mode par défaut.
  */
 export default function PspGroupingSelector({
   mode,

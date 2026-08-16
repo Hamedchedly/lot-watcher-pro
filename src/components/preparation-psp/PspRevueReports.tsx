@@ -1,5 +1,15 @@
 import { useMemo, useState } from "react";
-import { AlertTriangle, ArrowRightLeft, CheckCircle2, Flag, Info, RefreshCw } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowDown,
+  ArrowRightLeft,
+  ArrowUp,
+  CheckCircle2,
+  ChevronsUpDown,
+  Flag,
+  Info,
+  RefreshCw,
+} from "lucide-react";
 
 import PspSecteurBadge from "@/components/preparation-psp/PspSecteurBadge";
 import { Badge } from "@/components/ui/badge";
@@ -22,11 +32,13 @@ import {
 } from "@/components/ui/table";
 import { money0 } from "@/lib/formats";
 import {
-  FILTRES_REVUE_VIDES,
+  FILTRES_REVUE_DEFAUT,
   analyserLignesReport,
   filtrerLignesArbitrage,
   modificationDejaConfirmee,
   resumeArbitrage,
+  trierLignesRevue,
+  type CleTriRevue,
   type FiltresRevue,
   type LigneArbitrage,
   type LigneProgrammee,
@@ -62,6 +74,18 @@ const STATUTS: Record<StatutArbitrage, { label: string; className: string }> = {
     className: "border-slate-200 bg-slate-50 text-slate-600",
   },
 };
+
+/** Colonnes triables du tableau de la revue (V7.4 §13). */
+const REVUE_COLONNES: Array<{ cle: CleTriRevue; label: string; align?: "right" }> = [
+  { cle: "tranche", label: "TR" },
+  { cle: "categorie", label: "C" },
+  { cle: "ligne_budget", label: "LB" },
+  { cle: "nature_travaux", label: "Nature travaux" },
+  { cle: "montant", label: "Montant programmé", align: "right" },
+  { cle: "commande", label: "Commande" },
+  { cle: "etat", label: "État" },
+  { cle: "annee", label: "Année initiale" },
+];
 
 /**
  * Vue « Opérations N à arbitrer » du préparateur PSP :
@@ -102,8 +126,82 @@ export default function PspRevueReports({
   );
   const resume = useMemo(() => resumeArbitrage(lignes), [lignes]);
   const [anneeCible, setAnneeCible] = useState<number>(2027);
-  const [filtres, setFiltres] = useState<FiltresRevue>(FILTRES_REVUE_VIDES);
+  const [filtres, setFiltres] = useState<FiltresRevue>(FILTRES_REVUE_DEFAUT);
+  const [triRevue, setTriRevue] = useState<{ cle: CleTriRevue; asc: boolean } | null>(null);
   const lignesFiltrees = useMemo(() => filtrerLignesArbitrage(lignes, filtres), [lignes, filtres]);
+  const lignesTriees = useMemo(
+    () =>
+      triRevue ? trierLignesRevue(lignesFiltrees, triRevue.cle, triRevue.asc) : lignesFiltrees,
+    [lignesFiltrees, triRevue],
+  );
+  const changerTriRevue = (cle: CleTriRevue) =>
+    setTriRevue((prev) => {
+      if (prev?.cle === cle) return { cle, asc: !prev.asc };
+      const numerique = cle === "montant" || cle === "annee";
+      return { cle, asc: !numerique };
+    });
+
+  /** KPI cliquables de la revue — calculés sur les données réelles (jamais codés en dur). */
+  const kpiItems: Array<{
+    cle: string;
+    label: string;
+    count: number;
+    actif: boolean;
+    className: string;
+  }> = [
+    {
+      cle: "programmees",
+      label: "Programmées",
+      count: resume.programmees,
+      actif: filtres.kpi === "programmees",
+      className: "border-slate-200 bg-slate-100 text-slate-700",
+    },
+    {
+      cle: "terminees",
+      label: "Terminées",
+      count: resume.terminees,
+      actif: filtres.kpi === "terminees",
+      className: "border-emerald-200 bg-emerald-50 text-emerald-700",
+    },
+    {
+      cle: "avecCommande",
+      label: "Avec commande",
+      count: resume.avecCommande,
+      actif: filtres.kpi === "avecCommande",
+      className: "border-blue-200 bg-blue-50 text-blue-700",
+    },
+    {
+      cle: "sansCommande",
+      label: "Sans commande",
+      count: resume.sansCommande,
+      actif: filtres.kpi === "sansCommande",
+      className: "border-amber-200 bg-amber-50 text-amber-700",
+    },
+    {
+      cle: "commandeNonTerminee",
+      label: "Commandes en cours",
+      count: resume.commandeNonTerminee,
+      actif: filtres.kpi === "commandeNonTerminee",
+      className: "border-blue-200 bg-blue-50 text-blue-700",
+    },
+    {
+      cle: "aReporter",
+      label: "À reporter",
+      count: resume.aReporter,
+      actif: filtres.kpi === "aReporter",
+      className: "border-orange-200 bg-orange-50 text-orange-700",
+    },
+    {
+      cle: "horsProgrammation",
+      label: "Hors programmation",
+      count: resume.horsProgrammation,
+      actif: filtres.kpi === "horsProgrammation",
+      className: "border-violet-200 bg-violet-50 text-violet-700",
+    },
+  ];
+
+  const basculerKpi = (cle: string) =>
+    setFiltres((prev) => ({ ...prev, kpi: prev.kpi === cle ? "" : cle }));
   const tranches = [...new Set(lignes.map((l) => l.tranche))].sort();
   const charges = [
     ...new Set(lignes.map((l) => l.charge_clientele).filter((c): c is string => Boolean(c))),
@@ -126,35 +224,27 @@ export default function PspRevueReports({
         </CardHeader>
         <CardContent>
           <div className="flex flex-wrap gap-1.5">
-            <Badge className="border-slate-200 bg-slate-100 text-slate-700">
-              {resume.programmees} programmées
-            </Badge>
-            <Badge className="border-emerald-200 bg-emerald-50 text-emerald-700">
-              {resume.terminees} terminées
-            </Badge>
-            <Badge className="border-blue-200 bg-blue-50 text-blue-700">
-              {resume.avecCommande} avec commande
-            </Badge>
-            <Badge className="border-amber-200 bg-amber-50 text-amber-700">
-              {resume.sansCommande} sans commande
-            </Badge>
-            <Badge className="border-blue-200 bg-blue-50 text-blue-700">
-              {resume.commandeNonTerminee} commandes en cours
-            </Badge>
-            <Badge className="border-orange-200 bg-orange-50 text-orange-700">
-              {resume.aReporter} à reporter
-            </Badge>
-            {resume.pasRealisees > 0 ? (
-              <Badge className="border-red-200 bg-red-50 text-red-600">
-                {resume.pasRealisees} non réalisées
-              </Badge>
-            ) : null}
-            {resume.horsProgrammation > 0 ? (
-              <Badge className="border-violet-200 bg-violet-50 text-violet-700">
-                {resume.horsProgrammation} hors programmation
-              </Badge>
-            ) : null}
+            {kpiItems.map((k) => (
+              <button
+                key={k.cle}
+                type="button"
+                onClick={() => basculerKpi(k.cle)}
+                title={k.actif ? "Désélectionner ce filtre" : `Filtrer : ${k.label.toLowerCase()}`}
+                className={cn(
+                  "rounded-full border px-2.5 py-0.5 text-[11px] font-bold transition-colors",
+                  k.className,
+                  k.actif && "ring-2 ring-primary ring-offset-1",
+                )}
+              >
+                {k.count} {k.label.toLowerCase()}
+              </button>
+            ))}
           </div>
+          <p className="mt-1.5 flex items-center gap-1.5 text-[10px] text-muted-foreground">
+            <Info className="size-3" />
+            Filtre actif : {kpiItems.find((k) => k.actif)?.label ?? "aucun"} — cliquer un indicateur
+            filtre le tableau, re-cliquer désélectionne.
+          </p>
 
           <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border bg-surface/40 p-2">
             <FiltreSelect
@@ -203,37 +293,36 @@ export default function PspRevueReports({
             <Table className="min-w-[1000px]">
               <TableHeader>
                 <TableRow className="bg-muted/50">
-                  <TableHead className="text-[10px] font-black uppercase tracking-widest">
-                    TR
-                  </TableHead>
-                  <TableHead className="text-[10px] font-black uppercase tracking-widest">
-                    C
-                  </TableHead>
-                  <TableHead className="text-[10px] font-black uppercase tracking-widest">
-                    LB
-                  </TableHead>
-                  <TableHead className="text-[10px] font-black uppercase tracking-widest">
-                    Nature travaux
-                  </TableHead>
-                  <TableHead className="text-right text-[10px] font-black uppercase tracking-widest">
-                    Montant programmé
-                  </TableHead>
-                  <TableHead className="text-[10px] font-black uppercase tracking-widest">
-                    Commande
-                  </TableHead>
-                  <TableHead className="text-[10px] font-black uppercase tracking-widest">
-                    État
-                  </TableHead>
-                  <TableHead className="text-[10px] font-black uppercase tracking-widest">
-                    Année initiale
-                  </TableHead>
+                  {REVUE_COLONNES.map((col) => (
+                    <TableHead
+                      key={col.cle}
+                      className={cn(
+                        "cursor-pointer select-none text-[10px] font-black uppercase tracking-widest hover:text-foreground",
+                        col.align === "right" && "text-right",
+                      )}
+                      onClick={() => changerTriRevue(col.cle)}
+                    >
+                      <span className="inline-flex items-center gap-1">
+                        {col.label}
+                        {triRevue?.cle === col.cle ? (
+                          triRevue.asc ? (
+                            <ArrowUp className="size-3" />
+                          ) : (
+                            <ArrowDown className="size-3" />
+                          )
+                        ) : (
+                          <ChevronsUpDown className="size-3 opacity-40" />
+                        )}
+                      </span>
+                    </TableHead>
+                  ))}
                   <TableHead className="text-right text-[10px] font-black uppercase tracking-widest">
                     Décision
                   </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {lignesFiltrees.map((l) => (
+                {lignesTriees.map((l) => (
                   <LigneReportRow
                     key={`${l.tranche}|${l.categorie}|${l.nature_travaux}`}
                     ligne={l}

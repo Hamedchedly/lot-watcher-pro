@@ -292,6 +292,8 @@ export type FiltresRevue = {
   charge_clientele: string;
   etat: string;
   commande: "toutes" | "avec" | "sans";
+  /** KPI actif de la revue (« programmees », « sansCommande », …) — V7.4. */
+  kpi: string;
 };
 
 export const FILTRES_REVUE_VIDES: FiltresRevue = {
@@ -300,6 +302,36 @@ export const FILTRES_REVUE_VIDES: FiltresRevue = {
   charge_clientele: "",
   etat: "",
   commande: "toutes",
+  kpi: "",
+};
+
+/** Filtre par défaut de la revue : « Sans commande » (V7.4 §11). */
+export const FILTRES_REVUE_DEFAUT: FiltresRevue = { ...FILTRES_REVUE_VIDES, kpi: "sansCommande" };
+
+/**
+ * Correspondance d'une ligne avec un KPI de la revue — MÊME logique que
+ * `resumeArbitrage` (jamais dupliquée) : un KPI = un prédicat sur statut/commande.
+ */
+export const ligneMatchKpi = (l: LigneArbitrage, kpi: string): boolean => {
+  const commandePresente = l.commande != null && String(l.commande) !== "";
+  switch (kpi) {
+    case "programmees":
+      return l.statut !== "hors_programmation";
+    case "terminees":
+      return l.statut === "terminee";
+    case "avecCommande":
+      return l.statut !== "hors_programmation" && commandePresente;
+    case "sansCommande":
+      return l.statut === "non_engagee";
+    case "commandeNonTerminee":
+      return l.statut === "commande_non_terminee";
+    case "aReporter":
+      return l.statut === "non_engagee" || l.statut === "pas_realisee";
+    case "horsProgrammation":
+      return l.statut === "hors_programmation";
+    default:
+      return true;
+  }
 };
 
 /** Applique les filtres de la revue (pur). */
@@ -308,6 +340,7 @@ export const filtrerLignesArbitrage = (
   filtres: FiltresRevue,
 ): LigneArbitrage[] =>
   lignes.filter((l) => {
+    if (filtres.kpi && !ligneMatchKpi(l, filtres.kpi)) return false;
     if (filtres.categorie && l.categorie !== filtres.categorie) return false;
     if (filtres.tranche && l.tranche !== filtres.tranche) return false;
     if (filtres.charge_clientele && (l.charge_clientele ?? "") !== filtres.charge_clientele)
@@ -317,6 +350,52 @@ export const filtrerLignesArbitrage = (
     if (filtres.commande === "sans" && l.commande) return false;
     return true;
   });
+
+/** Clés de tri du tableau de la revue des reports (V7.4 §13). */
+export type CleTriRevue =
+  | "tranche"
+  | "categorie"
+  | "ligne_budget"
+  | "nature_travaux"
+  | "montant"
+  | "commande"
+  | "etat"
+  | "annee";
+
+/** Tri stable de la revue (pur, réutilise la même règle que `trierOperationsDetail`). */
+export const trierLignesRevue = (
+  lignes: LigneArbitrage[],
+  cle: CleTriRevue,
+  asc: boolean,
+): LigneArbitrage[] => {
+  const valeur = (l: LigneArbitrage): string | number => {
+    switch (cle) {
+      case "tranche":
+        return l.tranche;
+      case "categorie":
+        return l.categorie;
+      case "ligne_budget":
+        return l.ligne_budget ?? "";
+      case "nature_travaux":
+        return l.nature_travaux ?? "";
+      case "montant":
+        return l.montant_programme ?? 0;
+      case "commande":
+        return l.commande ?? "";
+      case "etat":
+        return l.etat ?? l.statut;
+      case "annee":
+        return l.annee_initiale ?? 0;
+    }
+  };
+  const dir = asc ? 1 : -1;
+  return [...lignes].sort((a, b) => {
+    const va = valeur(a);
+    const vb = valeur(b);
+    if (typeof va === "number" && typeof vb === "number") return (va - vb) * dir;
+    return String(va).localeCompare(String(vb), "fr") * dir;
+  });
+};
 
 // ── Mapping depuis les données réelles du moteur d'import ───────────────────
 

@@ -11,10 +11,12 @@
  *  · au moins une année > 0 obligatoire ;
  *  · création ATOMIQUE via createPspOperationComplete (ligne + périmètre + devis).
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Check, Loader2, Search, X } from "lucide-react";
 import { useServerFn } from "@tanstack/react-start";
 
+import PspAdressePanel from "@/components/preparation-psp/PspAdressePanel";
+import PspCorpsEtatSelect from "@/components/preparation-psp/PspCorpsEtatSelect";
 import PspSecteurBadge from "@/components/preparation-psp/PspSecteurBadge";
 import { useRecherchePatrimoine } from "@/components/preparation-psp/useRecherchePatrimoine";
 import { Button } from "@/components/ui/button";
@@ -31,7 +33,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { PSP_ANNEES, type PspAnnee, type PspCategorie } from "@/lib/psp.prep";
 import {
   createPspOperationComplete,
-  getCorpsEtats,
   rechercherFournisseursDevis,
 } from "@/lib/psp.prep.supabase.functions";
 import { PRIORITE_LABELS, STATUT_LABELS, categorieDepuisCorpsEtat } from "@/lib/psp.prep.v7";
@@ -57,12 +58,9 @@ export default function PspQuickAddRow({
   figee: boolean;
 }) {
   const rec = useRecherchePatrimoine({ reference });
-  const corpsEtatsFn = useServerFn(getCorpsEtats);
   const fournisseursFn = useServerFn(rechercherFournisseursDevis);
-  const timerCorps = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [corpsEtat, setCorpsEtat] = useState("");
-  const [sugCorps, setSugCorps] = useState<string[]>([]);
   const [nature, setNature] = useState("");
   const [montants, setMontants] = useState<Record<string, number>>({});
   const [devisCoche, setDevisCoche] = useState(false);
@@ -83,27 +81,8 @@ export default function PspQuickAddRow({
     [montants],
   );
   const anneeValide = PSP_ANNEES.some((a) => (montants[String(a)] ?? 0) > 0);
-
-  // Corps d'état — sélection avec recherche (aucune saisie arbitraire).
-  useEffect(() => {
-    if (timerCorps.current) clearTimeout(timerCorps.current);
-    if (corpsEtat.trim().length < 2) {
-      setSugCorps([]);
-      return;
-    }
-    timerCorps.current = setTimeout(async () => {
-      try {
-        const r = (await corpsEtatsFn({ data: { q: corpsEtat } })) ?? [];
-        setSugCorps(r as string[]);
-      } catch {
-        setSugCorps([]);
-      }
-    }, 200);
-    return () => {
-      if (timerCorps.current) clearTimeout(timerCorps.current);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [corpsEtat]);
+  /** V7.4 §3 — actif dès que les données MINIMALES sont valides (jamais bloqué par un panneau ouvert). */
+  const donneesMinimalesValides = Boolean(rec.tranche) && Boolean(corpsEtat) && anneeValide;
 
   // Fournisseurs (devis) — recherche progressive nom OU code/alias.
   useEffect(() => {
@@ -124,7 +103,7 @@ export default function PspQuickAddRow({
   }, [devisCoche, fournisseurQ]);
 
   const enregistrer = async () => {
-    if (figee || !rec.tranche || !anneeValide) return;
+    if (figee || !rec.tranche || !corpsEtat || !anneeValide) return;
     setSaving(true);
     try {
       const programme: Record<string, number> = {};
@@ -269,184 +248,18 @@ export default function PspQuickAddRow({
         <Input value={rec.cc} readOnly placeholder="auto" className="h-8 text-xs" />
       </TableCell>
 
-      {/* Adresse / périmètre — hiérarchie TR → rues → numéros → lots (ER non obligatoire) */}
+      {/* Adresse / périmètre — hiérarchie TR → rues → numéros → lots (V7.4) */}
       <TableCell className="min-w-[240px] py-1.5">
         {rec.tranche ? (
-          <>
-            <div className="relative">
-              <Input
-                value={rec.qRue}
-                onChange={(e) => {
-                  rec.setQRue(e.target.value);
-                  rec.setAdressePanelOuvert(true);
-                }}
-                onFocus={() => rec.setAdressePanelOuvert(true)}
-                placeholder="RUE…"
-                className="h-8 pr-7 text-xs"
-              />
-              {rec.adressePanelOuvert ? (
-                <button
-                  onClick={() => rec.setAdressePanelOuvert(false)}
-                  className="absolute right-1.5 top-2 text-muted-foreground hover:text-destructive"
-                  title="Fermer les suggestions (la sélection est conservée)"
-                >
-                  <X className="size-3.5" />
-                </button>
-              ) : null}
-              {rec.adressePanelOuvert && rec.rues.length > 0 ? (
-                <div className="absolute z-40 mt-1 max-h-40 w-72 overflow-auto rounded-lg border bg-popover p-1 shadow-lg">
-                  {rec.rues.map((r) => (
-                    <button
-                      key={r.rue}
-                      className={`flex w-full justify-between gap-2 rounded px-2 py-1 text-left text-xs hover:bg-accent ${
-                        rec.rue === r.rue ? "bg-primary/10 font-bold" : ""
-                      }`}
-                      onClick={() => rec.choisirRue(r.rue)}
-                    >
-                      <span className="truncate">{r.rue}</span>
-                      <span className="text-muted-foreground">{r.nb_lots}</span>
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-
-            {rec.adressePanelOuvert && rec.rue ? (
-              <div className="mt-1 max-h-36 overflow-auto rounded-md border bg-card p-1">
-                <label className="flex items-center gap-1.5 rounded px-1 py-0.5 text-[10px] font-bold text-primary hover:bg-accent">
-                  <input
-                    type="checkbox"
-                    checked={rec.adressesChoisies.length === 0 && rec.lotsChoisis.length === 0}
-                    onChange={rec.touteLaRue}
-                  />
-                  Toute la rue
-                </label>
-                {rec.numeros.map((n) => (
-                  <div key={n}>
-                    <label className="flex items-center gap-1.5 rounded px-1 py-0.5 text-[10px] hover:bg-accent">
-                      <input
-                        type="checkbox"
-                        checked={rec.adressesChoisies.includes(n)}
-                        onChange={() => void rec.basculerAdresse(n)}
-                      />
-                      <span className="font-mono font-bold">{n}</span>
-                    </label>
-                    {(rec.lotsDeAdresse.get(n) ?? []).length > 0 &&
-                    rec.adressesChoisies.includes(n) ? (
-                      <div className="ml-4 border-l border-dashed pl-2">
-                        {(rec.lotsDeAdresse.get(n) ?? []).map((l) => (
-                          <label
-                            key={l.id}
-                            className="flex items-center gap-1.5 rounded px-1 py-0.5 text-[9px] hover:bg-accent"
-                          >
-                            <input
-                              type="checkbox"
-                              checked={rec.lotsChoisis.some((x) => x.id === l.id)}
-                              onChange={() => rec.basculerLot(l)}
-                            />
-                            <span className="font-mono font-bold">{l.code_patrimoine}</span>
-                            <span className="truncate text-muted-foreground">
-                              {l.locataire_nom ? `— ${l.locataire_nom}` : ""}
-                            </span>
-                          </label>
-                        ))}
-                      </div>
-                    ) : null}
-                  </div>
-                ))}
-                {rec.numeros.length === 0 ? (
-                  <p className="px-1 py-0.5 text-[9px] text-muted-foreground">
-                    Aucun numéro détaillé — toute la rue.
-                  </p>
-                ) : null}
-              </div>
-            ) : null}
-
-            {/* Recherche lot intra-tranche (ER / locataire) */}
-            <div className="relative mt-1">
-              <Input
-                value={rec.qLot}
-                onChange={(e) => rec.setQLot(e.target.value)}
-                placeholder="ER.123 · DUPONT (lot)"
-                className="h-7 pr-7 text-[10px]"
-              />
-              {rec.sugLotsTranche.length > 0 ? (
-                <button
-                  onClick={() => rec.setQLot("")}
-                  className="absolute right-1.5 top-1.5 text-muted-foreground hover:text-destructive"
-                >
-                  <X className="size-3" />
-                </button>
-              ) : null}
-              {rec.sugLotsTranche.length > 0 ? (
-                <div className="absolute z-40 mt-1 max-h-36 w-72 overflow-auto rounded-lg border bg-popover p-1 shadow-lg">
-                  {rec.sugLotsTranche.map((l) => (
-                    <button
-                      key={l.id}
-                      className="flex w-full justify-between gap-2 rounded px-2 py-1 text-left text-[10px] hover:bg-accent"
-                      onClick={() => rec.choisirLotTranche(l)}
-                    >
-                      <span className="font-mono font-bold">{l.code_patrimoine}</span>
-                      <span className="truncate text-muted-foreground">
-                        {l.locataire_nom ? `${l.locataire_nom} · ` : ""}
-                        {l.adresse}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-
-            {rec.lotsChoisis.length > 0 ? (
-              <div className="mt-1 flex flex-wrap items-center gap-1">
-                {rec.lotsChoisis.map((l) => (
-                  <span
-                    key={l.id}
-                    className="inline-flex items-center gap-1 rounded border border-primary/40 bg-primary/5 px-1.5 py-0.5 font-mono text-[9px] font-bold"
-                  >
-                    {l.code_patrimoine}
-                    <button
-                      onClick={() => rec.retirerLot(l.id)}
-                      className="text-muted-foreground hover:text-destructive"
-                    >
-                      <X className="size-2.5" />
-                    </button>
-                  </span>
-                ))}
-              </div>
-            ) : null}
-          </>
+          <PspAdressePanel rec={rec} />
         ) : (
           <p className="text-[10px] text-muted-foreground">choisissez un TR d'abord</p>
         )}
       </TableCell>
 
-      {/* Corps d'état — sélection avec recherche */}
-      <TableCell className="min-w-[150px] py-1.5">
-        <div className="relative">
-          <Input
-            value={corpsEtat}
-            onChange={(e) => setCorpsEtat(e.target.value)}
-            placeholder="elec…"
-            className="h-8 text-xs"
-          />
-          {sugCorps.length > 0 ? (
-            <div className="absolute z-40 mt-1 max-h-40 w-64 overflow-auto rounded-lg border bg-popover p-1 shadow-lg">
-              {sugCorps.map((c) => (
-                <button
-                  key={c}
-                  className="block w-full rounded px-2 py-1 text-left text-xs hover:bg-accent"
-                  onClick={() => {
-                    setCorpsEtat(c);
-                    setSugCorps([]);
-                  }}
-                >
-                  {c}
-                </button>
-              ))}
-            </div>
-          ) : null}
-        </div>
+      {/* Corps d'état — liste déroulante structurée GE / GT / CP (V7.4) */}
+      <TableCell className="min-w-[170px] py-1.5">
+        <PspCorpsEtatSelect value={corpsEtat} onValueChange={setCorpsEtat} />
       </TableCell>
 
       {/* C — calculée automatiquement */}
@@ -605,7 +418,7 @@ export default function PspQuickAddRow({
             size="sm"
             className="h-8"
             onClick={() => void enregistrer()}
-            disabled={!rec.tranche || !anneeValide || saving || figee}
+            disabled={!donneesMinimalesValides || saving || figee}
           >
             {saving ? (
               <Loader2 className="size-3.5 animate-spin" />
@@ -625,7 +438,7 @@ export default function PspQuickAddRow({
             </p>
           ) : null}
           <span className="text-[9px] text-muted-foreground">
-            Ch. Op. = {CHARGE_OPERATION} · cat. {categorie}
+            Ch. Op. : {CHARGE_OPERATION} · C : {categorie}
           </span>
         </div>
       </TableCell>

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { Wand2, X } from "lucide-react";
-import { useServerFn } from "@tanstack/react-start";
 
+import PspAdressePanel from "@/components/preparation-psp/PspAdressePanel";
+import PspCorpsEtatSelect from "@/components/preparation-psp/PspCorpsEtatSelect";
 import PspSecteurBadge from "@/components/preparation-psp/PspSecteurBadge";
 import { useRecherchePatrimoine } from "@/components/preparation-psp/useRecherchePatrimoine";
 import { Button } from "@/components/ui/button";
@@ -38,7 +39,6 @@ import {
   categorieDepuisCorpsEtat,
   type PerimetreLigne,
 } from "@/lib/psp.prep.v7";
-import { getCorpsEtats } from "@/lib/psp.prep.supabase.functions";
 
 /** Chargé d'opération FIXE pour la programmation — jamais saisi. */
 const CHARGE_OPERATION = "HCHEDLY";
@@ -46,9 +46,9 @@ const CHARGE_OPERATION = "HCHEDLY";
 /**
  * V7.2 — Édition d'une opération (modèle métier) :
  * TR + CC calculés (jamais saisis), périmètre patrimonial (hiérarchie
- * TR → rues → numéros → lots), corps d'état avec recherche → catégorie
- * automatique, nature large, montants 2027-2031, devis (fiche), statut,
- * priorité, notes. Ch. Op. = HCHEDLY. Pas d'année principale ni d'adresse libre.
+ * TR → rues → numéros → lots), corps d'état (liste structurée GE/GT/CP) →
+ * catégorie automatique, nature large, montants 2027-2031, devis (fiche),
+ * statut, priorité, notes. Ch. Op. = HCHEDLY. Pas d'année principale ni d'adresse libre.
  */
 export default function PspOperationForm({
   open,
@@ -67,14 +67,13 @@ export default function PspOperationForm({
   onSave: (saisie: SaisieOperation) => void;
   onClose: () => void;
 }) {
-  const corpsEtatsFn = useServerFn(getCorpsEtats);
   const [corpsEtat, setCorpsEtat] = useState("");
-  const [sugCorps, setSugCorps] = useState<string[]>([]);
   const [nature, setNature] = useState("");
   const [programme, setProgramme] = useState<number[]>([0, 0, 0, 0, 0]);
   const [statut, setStatut] = useState("a_definir");
   const [priorite, setPriorite] = useState("normale");
   const [remarques, setRemarques] = useState("");
+  const [saving, setSaving] = useState(false);
 
   const rec = useRecherchePatrimoine({
     reference,
@@ -111,26 +110,10 @@ export default function PspOperationForm({
   /** Catégorie dérivée du corps d'état — jamais saisie manuellement. */
   const categorie: PspCategorie = categorieDepuisCorpsEtat(corpsEtat);
 
-  // Recherche progressive des corps d'état.
-  useEffect(() => {
-    if (corpsEtat.trim().length < 2) {
-      setSugCorps([]);
-      return;
-    }
-    const t = setTimeout(async () => {
-      try {
-        const r = (await corpsEtatsFn({ data: { q: corpsEtat } })) ?? [];
-        setSugCorps(r as string[]);
-      } catch {
-        setSugCorps([]);
-      }
-    }, 200);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [corpsEtat]);
-
   const enregistrer = () => {
-    if (!anneeValide) return;
+    if (saving) return;
+    if (!anneeValide || !corpsEtat) return;
+    setSaving(true);
     onSave({
       tranche: rec.tranche ?? "",
       categorie,
@@ -151,7 +134,7 @@ export default function PspOperationForm({
   };
 
   const anneeValide = programme.some((v) => Number(v) > 0);
-  const valide = Boolean(rec.tranche) && anneeValide;
+  const valide = Boolean(rec.tranche) && Boolean(corpsEtat) && anneeValide;
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
@@ -250,7 +233,7 @@ export default function PspOperationForm({
 
               <div className="space-y-1">
                 <Label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
-                  Chargé opération
+                  Ch. Op.
                 </Label>
                 <Input
                   value={CHARGE_OPERATION}
@@ -272,95 +255,14 @@ export default function PspOperationForm({
               </div>
             ) : null}
 
-            {/* Périmètre patrimonial — hiérarchie TR → rues → numéros → lots */}
+            {/* Périmètre patrimonial — hiérarchie TR → rues → numéros → lots (V7.4) */}
             <div className="rounded-lg border bg-surface/60 p-2.5">
               <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
                 Périmètre patrimonial
               </p>
               <div className="relative mt-1">
-                <Input
-                  value={rec.qRue}
-                  onChange={(e) => rec.setQRue(e.target.value)}
-                  placeholder={rec.tranche ? "RUE…" : "choisissez un TR d'abord"}
-                  disabled={!rec.tranche}
-                  className="h-8 text-xs"
-                />
-                {rec.rues.length > 0 ? (
-                  <div className="absolute z-40 mt-1 max-h-40 w-full overflow-auto rounded-lg border bg-popover p-1 shadow-lg">
-                    {rec.rues.map((r) => (
-                      <button
-                        key={r.rue}
-                        className={`flex w-full justify-between gap-2 rounded px-2 py-1 text-left text-xs hover:bg-accent ${
-                          rec.rue === r.rue ? "bg-primary/10 font-bold" : ""
-                        }`}
-                        onClick={() => rec.choisirRue(r.rue)}
-                      >
-                        <span className="truncate">{r.rue}</span>
-                        <span className="text-muted-foreground">{r.nb_lots}</span>
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
+                <PspAdressePanel rec={rec} />
               </div>
-
-              {rec.rue ? (
-                <div className="mt-1 max-h-36 overflow-auto rounded-md border bg-card p-1">
-                  {rec.numeros.length > 0 ? (
-                    <label className="flex items-center gap-1.5 rounded px-1 py-0.5 text-[10px] font-bold text-primary hover:bg-accent">
-                      <input
-                        type="checkbox"
-                        checked={rec.adressesChoisies.length === 0 && rec.lotsChoisis.length === 0}
-                        onChange={rec.touteLaRue}
-                      />
-                      Toute la rue
-                    </label>
-                  ) : null}
-                  {rec.numeros.map((n) => (
-                    <div key={n}>
-                      <label className="flex items-center gap-1.5 rounded px-1 py-0.5 text-[10px] hover:bg-accent">
-                        <input
-                          type="checkbox"
-                          checked={rec.adressesChoisies.includes(n)}
-                          onChange={() => void rec.basculerAdresse(n)}
-                        />
-                        <span className="font-mono font-bold">{n}</span>
-                      </label>
-                      {(rec.lotsDeAdresse.get(n) ?? []).length > 0 &&
-                      rec.adressesChoisies.includes(n) ? (
-                        <div className="ml-4 border-l border-dashed pl-2">
-                          {(rec.lotsDeAdresse.get(n) ?? []).map((l) => (
-                            <label
-                              key={l.id}
-                              className="flex items-center gap-1.5 rounded px-1 py-0.5 text-[9px] hover:bg-accent"
-                            >
-                              <input
-                                type="checkbox"
-                                checked={rec.lotsChoisis.some((x) => x.id === l.id)}
-                                onChange={() => rec.basculerLot(l)}
-                              />
-                              <span className="font-mono font-bold">{l.code_patrimoine}</span>
-                              <span className="truncate text-muted-foreground">
-                                {l.locataire_nom ? `— ${l.locataire_nom}` : ""}
-                              </span>
-                            </label>
-                          ))}
-                        </div>
-                      ) : null}
-                    </div>
-                  ))}
-                  {rec.numeros.length === 0 ? (
-                    <p className="px-1 py-0.5 text-[9px] text-muted-foreground">
-                      Aucun numéro détaillé — toute la rue.
-                    </p>
-                  ) : null}
-                </div>
-              ) : null}
-
-              {rec.lotsChoisis.length > 0 ? (
-                <p className="mt-1 text-[10px] text-muted-foreground">
-                  {rec.lotsChoisis.length} lot(s) sélectionné(s) — tranche {rec.tranche ?? "…"}
-                </p>
-              ) : null}
               {rec.conflit ? (
                 <p className="mt-1 text-[10px] font-bold text-destructive">{rec.conflit}</p>
               ) : null}
@@ -370,38 +272,17 @@ export default function PspOperationForm({
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               <div className="space-y-1 sm:col-span-1">
                 <Label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
-                  Corps d'état (recherche)
+                  Corps d'état (GE / GT / CP)
                 </Label>
-                <div className="relative">
-                  <Input
-                    value={corpsEtat}
-                    onChange={(e) => setCorpsEtat(e.target.value)}
-                    placeholder="elec…"
-                    className="h-8 text-xs"
-                  />
-                  {sugCorps.length > 0 ? (
-                    <div className="absolute z-40 mt-1 max-h-40 w-full overflow-auto rounded-lg border bg-popover p-1 shadow-lg">
-                      {sugCorps.map((c) => (
-                        <button
-                          key={c}
-                          type="button"
-                          className="block w-full rounded px-2 py-1 text-left text-xs hover:bg-accent"
-                          onClick={() => setCorpsEtat(c)}
-                        >
-                          {c}
-                        </button>
-                      ))}
-                    </div>
-                  ) : null}
-                </div>
+                <PspCorpsEtatSelect value={corpsEtat} onValueChange={setCorpsEtat} />
                 <p className="text-[9px] text-muted-foreground">
-                  Sélection avec recherche — catégorie recalculée automatiquement.
+                  Catégorie C recalculée automatiquement.
                 </p>
               </div>
 
               <div className="space-y-1 sm:col-span-2">
                 <Label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
-                  Nature des travaux *
+                  Nature des travaux
                 </Label>
                 <Textarea
                   value={nature}
@@ -506,7 +387,7 @@ export default function PspOperationForm({
             <Button variant="ghost" size="sm" onClick={onClose}>
               Annuler
             </Button>
-            <Button size="sm" disabled={!valide} onClick={enregistrer}>
+            <Button size="sm" disabled={!valide || saving} onClick={enregistrer}>
               {mode === "ajout" ? "Ajouter l'opération" : "Enregistrer les modifications"}
             </Button>
           </DialogFooter>

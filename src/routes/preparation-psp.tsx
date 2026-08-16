@@ -987,6 +987,7 @@ function PreparationPspPage() {
                     : null
                 }
                 figee={figee}
+                reference={reference}
               />
             )}
           </>

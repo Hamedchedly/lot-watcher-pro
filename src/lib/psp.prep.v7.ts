@@ -42,6 +42,26 @@ export const CORPS_ETAT_CATEGORIE: Record<string, PspCategorie> = {
 
 export const CATEGORIE_CORPS_ETAT_DEFAUT: PspCategorie = "GT";
 
+/**
+ * V7.4 — Corps d'état structurés GE/GT/CP pour la liste déroulante (sélection
+ * UNIQUE). Réutilise `categorieDepuisCorpsEtat` — jamais de second mapping.
+ */
+export function corpsEtatsGroupes(
+  liste: string[],
+): Array<{ categorie: PspCategorie; items: string[] }> {
+  const groupes = new Map<PspCategorie, string[]>();
+  for (const c of liste) {
+    const cat = categorieDepuisCorpsEtat(c);
+    groupes.set(cat, [...(groupes.get(cat) ?? []), c]);
+  }
+  return (["GE", "GT", "CP"] as PspCategorie[])
+    .map((categorie) => ({
+      categorie,
+      items: [...(groupes.get(categorie) ?? [])].sort((a, b) => a.localeCompare(b, "fr")),
+    }))
+    .filter((g) => g.items.length > 0);
+}
+
 /** Extrait le code lettre d'un libellé corps d'état : « (u) Etanchéité » → « u ». */
 export function extraireCodeCorpsEtat(corpsEtat: string | null | undefined): string | null {
   const m = /\(([A-Za-zÀ-ÿ]+)\)/.exec(corpsEtat ?? "");
