@@ -232,6 +232,7 @@ function PreparationPspPage() {
       ligne_budget: l.ligne_budget ?? null,
       devis: (devisParLigne.get(l.id) ?? []).map((d) => ({
         id: String(d["id"] ?? ""),
+        fournisseur_id: (d["fournisseur_id"] as string | null) ?? null,
         entreprise: String(d["entreprise"] ?? ""),
         montant: Number(d["montant"] ?? 0),
         date_devis: (d["date_devis"] as string | null) ?? null,
@@ -565,11 +566,14 @@ function PreparationPspPage() {
       return libelle && libelle !== "—" ? { ...o, adresse: libelle } : o;
     });
 
-  /** V7.7 §1 — export VRAI fichier Excel .xlsx (13 colonnes exactes). */
+  /** V7.7 §1 + V7.8 §9 — export VRAI fichier Excel .xlsx (13 colonnes exactes). */
   const telechargerXlsx = (ops: PspOperation[]) => {
     const donnees = construireDonneesExportXlsx(ops, {
-      // Arl/sect : secteur du patrimoine (tranches.secteur) — jamais inventé.
-      secteurDeTranche: (tranche) => reference?.tranches.get(tranche)?.secteur ?? null,
+      // V7.8 §9 — Arl/sect = IDENTIFIANT PERSONNEL du référentiel CC
+      // (tranches.sous_secteur → psp_charges_clientele.identifiant_personnel).
+      // Jamais le nom du CC, jamais le sous-secteur, jamais inventé.
+      secteurDeTranche: (tranche) =>
+        reference?.tranches.get(tranche)?.identifiant_personnel ?? null,
     });
     const feuille = XLSX.utils.aoa_to_sheet([donnees.entetes, ...donnees.lignes]);
     feuille["!cols"] = donnees.entetes.map((e) =>
@@ -658,12 +662,13 @@ function PreparationPspPage() {
     const devis = await createDevisFn({
       data: {
         pspLigneId: ligneId,
+        fournisseurId: d.fournisseurId ?? null,
         entreprise: d.entreprise ?? "",
         dateDevis: d.dateDevis ?? null,
         montant: d.montant ?? 0,
         statut: (d.statut ?? "recu") as "recu",
         commentaire: d.commentaire ?? null,
-        documentReference: null,
+        documentReference: d.documentReference ?? null,
       },
     });
     const ligne = operations.find((o) => o.id === ligneId);
@@ -672,6 +677,7 @@ function PreparationPspPage() {
       ...list,
       {
         id: String(devis["id"] ?? ""),
+        fournisseur_id: (devis["fournisseur_id"] as string | null) ?? null,
         entreprise: String(devis["entreprise"] ?? ""),
         montant: Number(devis["montant"] ?? 0),
         date_devis: (devis["date_devis"] as string | null) ?? null,
@@ -689,6 +695,7 @@ function PreparationPspPage() {
     await updateDevisFn({
       data: {
         id,
+        fournisseurId: d.fournisseurId ?? null,
         entreprise: d.entreprise,
         dateDevis: d.dateDevis,
         montant: d.montant,

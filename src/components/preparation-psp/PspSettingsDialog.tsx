@@ -49,7 +49,8 @@ export default function PspSettingsDialog({
   onChangedCorps?: () => void;
 }) {
   const [onglet, setOnglet] = useState<OngletParametres>(ongletInitial);
-  const [valeurs, setValeurs] = useState<EnveloppeMap>(enveloppes);
+  /** V7.8 §4 — état local : nombres saisis OU chaîne vide (cellule non renseignée). */
+  const [valeurs, setValeurs] = useState<Record<string, number | string>>(enveloppes);
   const [savingEnv, setSavingEnv] = useState(false);
   const [messageEnv, setMessageEnv] = useState<string | null>(null);
 
@@ -63,15 +64,28 @@ export default function PspSettingsDialog({
   };
 
   const setMontant = (annee: PspAnnee, cat: string, value: string) => {
-    const n = Number(value.replace(/[^\d]/g, "")) || 0;
-    setValeurs((prev) => ({ ...prev, [`${annee}|${cat}`]: n }));
+    // V7.8 §4 — une cellule VIDÉE reste vide (n'écrase PAS la valeur existante) :
+    // seuls les nombres saisis sont pris en compte à l'enregistrement.
+    const brut = value.replace(/[^\d]/g, "");
+    if (brut === "") {
+      setValeurs((prev) => ({ ...prev, [`${annee}|${cat}`]: "" }));
+      return;
+    }
+    setValeurs((prev) => ({ ...prev, [`${annee}|${cat}`]: Number(brut) || 0 }));
   };
 
   const enregistrerEnveloppes = async () => {
     setSavingEnv(true);
     setMessageEnv(null);
     try {
-      await onSaveEnveloppes(valeurs);
+      // Ne conserve QUE les cellules réellement renseignées (les cellules vides
+      // ne doivent jamais écraser une enveloppe existante en base).
+      const nettoie: EnveloppeMap = {};
+      for (const [cle, v] of Object.entries(valeurs)) {
+        if (v === "" || v === undefined) continue;
+        nettoie[cle] = typeof v === "number" ? v : Number(v) || 0;
+      }
+      await onSaveEnveloppes(nettoie);
     } catch (e) {
       setMessageEnv(`Enregistrement impossible : ${(e as Error).message}`);
     } finally {
@@ -143,7 +157,7 @@ export default function PspSettingsDialog({
                             type="text"
                             inputMode="numeric"
                             className="tabnum h-8 text-right"
-                            value={valeurs[`${a}|${cat}`] ?? 0}
+                            value={valeurs[`${a}|${cat}`] ?? ""}
                             onChange={(e) => setMontant(a, cat, e.target.value)}
                           />
                         </td>

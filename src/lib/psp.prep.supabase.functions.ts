@@ -122,6 +122,7 @@ const idSchema = z.object({ id: z.string().uuid() });
 
 const devisInput = z.object({
   pspLigneId: z.string().uuid(),
+  fournisseurId: z.string().uuid().nullish(),
   entreprise: z.string().nullish(),
   dateDevis: z.string().nullish(),
   montant: z.number().positive().nullish(),
@@ -383,6 +384,7 @@ export const createPspDevis = createServerFn({ method: "POST" })
       .from("psp_devis")
       .insert({
         psp_ligne_id: data.pspLigneId,
+        fournisseur_id: data.fournisseurId ?? null,
         entreprise: data.entreprise ?? null,
         date_devis: data.dateDevis ?? null,
         montant: data.montant ?? null,
@@ -402,6 +404,7 @@ export const updatePspDevis = createServerFn({ method: "POST" })
     z
       .object({
         id: z.string().uuid(),
+        fournisseurId: z.string().uuid().nullish(),
         entreprise: z.string().nullish(),
         dateDevis: z.string().nullish(),
         montant: z.number().positive().nullish(),
@@ -426,6 +429,7 @@ export const updatePspDevis = createServerFn({ method: "POST" })
     const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
     const db = supabaseAdmin as any;
     const patch: Record<string, unknown> = {};
+    if (data.fournisseurId !== undefined) patch["fournisseur_id"] = data.fournisseurId ?? null;
     if (data.entreprise !== undefined) patch["entreprise"] = data.entreprise ?? null;
     if (data.dateDevis !== undefined) patch["date_devis"] = data.dateDevis ?? null;
     if (data.montant !== undefined) patch["montant"] = data.montant ?? null;

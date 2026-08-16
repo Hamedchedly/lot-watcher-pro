@@ -11,6 +11,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import PspFournisseurSearch, {
+  type FournisseurSelection,
+} from "@/components/preparation-psp/PspFournisseurSearch";
 import { money0 } from "@/lib/formats";
 import {
   PSP_ANNEES,
@@ -23,6 +26,7 @@ import { DEVIS_STATUT_LABELS } from "@/lib/psp.prep.v7";
 import { cn } from "@/lib/utils";
 
 export type DevisEdit = {
+  fournisseurId?: string | null;
   entreprise?: string;
   dateDevis?: string | null;
   montant?: number;
@@ -54,6 +58,7 @@ export default function PspDevisPanel({
   const [ajoutOuvert, setAjoutOuvert] = useState(false);
   const [editionId, setEditionId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<{
+    fournisseur_id: string | null;
     entreprise: string;
     date_devis: string;
     montant: string;
@@ -64,6 +69,7 @@ export default function PspDevisPanel({
   const [busy, setBusy] = useState(false);
 
   const [entre, setEntre] = useState("");
+  const [fournisseurSel, setFournisseurSel] = useState<FournisseurSelection | null>(null);
   const [date, setDate] = useState("");
   const [montant, setMontant] = useState("");
   const [statut, setStatut] = useState("recu");
@@ -77,6 +83,7 @@ export default function PspDevisPanel({
 
   const reinitFormulaire = () => {
     setEntre("");
+    setFournisseurSel(null);
     setDate("");
     setMontant("");
     setStatut("recu");
@@ -89,6 +96,7 @@ export default function PspDevisPanel({
     setBusy(true);
     try {
       await onAdd({
+        fournisseurId: fournisseurSel?.id ?? null,
         entreprise: entre.trim(),
         dateDevis: date || null,
         montant: Number(montant) || 0,
@@ -108,6 +116,7 @@ export default function PspDevisPanel({
     setBusy(true);
     try {
       await onUpdate(editionId, {
+        fournisseurId: editForm.fournisseur_id ?? null,
         entreprise: editForm.entreprise,
         dateDevis: editForm.date_devis || null,
         montant: Number(editForm.montant) || 0,
@@ -125,6 +134,7 @@ export default function PspDevisPanel({
   const ouvrirEdition = (d: PspDevis) => {
     setEditionId(d.id ?? null);
     setEditForm({
+      fournisseur_id: (d as PspDevis & { fournisseur_id?: string | null }).fournisseur_id ?? null,
       entreprise: d.entreprise,
       date_devis: d.date_devis ?? "",
       montant: String(d.montant || ""),
@@ -176,11 +186,16 @@ export default function PspDevisPanel({
               {editionId === d.id && editForm ? (
                 <div className="space-y-1.5">
                   <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
-                    <Input
+                    <PspFournisseurSearch
                       value={editForm.entreprise}
-                      onChange={(e) => setEditForm({ ...editForm, entreprise: e.target.value })}
-                      placeholder="Entreprise"
-                      className="h-7 text-xs"
+                      onSelect={(f) =>
+                        setEditForm({
+                          ...editForm,
+                          entreprise: f?.nom ?? "",
+                          fournisseur_id: f?.id ?? null,
+                        })
+                      }
+                      placeholder="Entreprise…"
                     />
                     <Input
                       type="date"
@@ -297,11 +312,13 @@ export default function PspDevisPanel({
           {ajoutOuvert ? (
             <div className="space-y-1.5 rounded-md border bg-card p-2">
               <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
-                <Input
+                <PspFournisseurSearch
                   value={entre}
-                  onChange={(e) => setEntre(e.target.value)}
-                  placeholder="Entreprise *"
-                  className="h-7 text-xs"
+                  onSelect={(f) => {
+                    setFournisseurSel(f);
+                    setEntre(f?.nom ?? "");
+                  }}
+                  placeholder="Rechercher une entreprise…"
                 />
                 <Input
                   type="date"

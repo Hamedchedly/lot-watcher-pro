@@ -81,12 +81,12 @@ console.log("\n=== 2. VALEURS EXPORTÉES ===");
     ),
   };
   const donnees = construireDonneesExportXlsx([opAdresse], {
-    secteurDeTranche: (t) => (t === "1977" ? "S11" : null),
+    secteurDeTranche: (t) => (t === "1977" ? "CMICHEL" : null),
   });
   check("une ligne exportée", donnees.lignes.length === 1);
   const ligne = donnees.lignes[0] ?? [];
   check("TR = 1977", ligne[0] === "1977");
-  check("Arl/sect = S11 (patrimoine)", ligne[1] === "S11");
+  check("Arl/sect = identifiant personnel CMICHEL (V7.8)", ligne[1] === "CMICHEL");
   check("ADRESSE = 3 RUE DE PARIS, COUPVRAY - ER.123456", ligne[2] === "3 RUE DE PARIS, COUPVRAY - ER.123456", String(ligne[2]));
   check("C = CP (référentiel)", ligne[3] === "CP");
   check("CORPS D'ETAT = (m) Carrelage", ligne[4] === "(m) Carrelage");

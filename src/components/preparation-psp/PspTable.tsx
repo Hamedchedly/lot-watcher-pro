@@ -237,11 +237,7 @@ export default function PspTable({
                     <Fragment key={op.id}>
                       {nouveauGroupe ? (
                         <SeparateurLigne
-                          label={[
-                            `TR ${op.tranche}`,
-                            localiteTranche(op.tranche),
-                            op.charge_clientele,
-                          ]
+                          label={[`TR ${op.tranche}`, localiteTranche(op.tranche)]
                             .filter(Boolean)
                             .join(" — ")}
                         />

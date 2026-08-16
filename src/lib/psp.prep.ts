@@ -55,6 +55,8 @@ export const PSP_BUDGET_DISPONIBLE_PAR_ANNEE: Record<string, number> = {
 export type PspDevis = {
   /** Identifiant Supabase (psp_devis.id) — présent dès lors que le devis est persisté. */
   id?: string;
+  /** Fournisseur rattaché (psp_devis.fournisseur_id) — V7.8 §7. */
+  fournisseur_id?: string | null;
   entreprise: string;
   montant: number;
   date_devis?: string | null;
@@ -459,7 +461,8 @@ export type DonneesExportXlsx = {
  * V7.7 §1-2 — Construit les données de l'export Excel à partir des opérations du
  * brouillon réel (adresse déjà enrichie du périmètre par l'appelant) :
  *  · TR          → code tranche ;
- *  · Arl/sect    → secteur du patrimoine (`secteurDeTranche`), jamais inventé ;
+ *  · Arl/sect    → IDENTIFIANT PERSONNEL du référentiel CC (V7.8 §9) — jamais le
+ *    nom du CC, jamais le sous-secteur, jamais inventé ;
  *  · ADRESSE     → périmètre réel (lot → « adresse - ER.xxx », rue entière…) ;
  *  · C           → catégorie GE/GT/CP (référentiel corps d'état) ;
  *  · CORPS D'ETAT→ valeur du référentiel (placeholder « — » → vide) ;

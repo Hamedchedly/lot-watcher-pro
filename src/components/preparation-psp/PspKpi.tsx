@@ -13,7 +13,13 @@ import {
   type PspAnnee,
   type PspOperation,
 } from "@/lib/psp.prep";
-import { calculEnveloppe, programmeParAnneeCategorie, type EnveloppeMap } from "@/lib/psp.prep.v7";
+import {
+  calculEnveloppe,
+  budgetDisponibleParAnnee,
+  budgetDisponibleTotalReel,
+  programmeParAnneeCategorie,
+  type EnveloppeMap,
+} from "@/lib/psp.prep.v7";
 import { cn } from "@/lib/utils";
 
 const CATEGORIES = ["GE", "GT", "CP"] as const;
@@ -43,6 +49,11 @@ export default function PspKpi({
 }) {
   const kpi = kpiGlobal(operations);
 
+  // V7.8 §3 — Budget disponible RÉEL : somme des enveloppes par année (sinon
+  // dotation par défaut). Distinction stricte « enveloppe » / « budget disponible ».
+  const budgetDisponible = budgetDisponibleTotalReel(enveloppes, PSP_BUDGET_DISPONIBLE_PAR_ANNEE);
+  const ecartDisponible = budgetDisponible - kpi.programme;
+
   // Programmé par année × catégorie — règle unique (testable), jamais stocké.
   const programmePar = programmeParAnneeCategorie(operations);
 
@@ -52,7 +63,7 @@ export default function PspKpi({
         <CarteKpi
           icone={<Coins className="size-4" />}
           label="Budget disponible"
-          valeur={money0(kpi.disponible)}
+          valeur={money0(budgetDisponible)}
           note={`${PSP_ANNEES.length} exercices · source ${BUDGET_SOURCE}`}
           accent="text-primary"
         />
@@ -66,9 +77,9 @@ export default function PspKpi({
         <CarteKpi
           icone={<PiggyBank className="size-4" />}
           label="Écart disponible"
-          valeur={money0(kpi.ecart)}
-          note={kpi.ecart >= 0 ? "Marge de programmation" : "Enveloppe dépassée"}
-          accent={kpi.ecart >= 0 ? "text-emerald-600" : "text-destructive"}
+          valeur={money0(ecartDisponible)}
+          note={ecartDisponible >= 0 ? "Marge de programmation" : "Enveloppe dépassée"}
+          accent={ecartDisponible >= 0 ? "text-emerald-600" : "text-destructive"}
         />
         <CarteKpi
           icone={<Scale className="size-4" />}
@@ -97,12 +108,11 @@ export default function PspKpi({
             {PSP_ANNEES.map((annee) => {
               const actif = anneesFiltre.includes(annee);
               const programme = kpi.parAnnee[String(annee)] ?? 0;
-              const envAnnee = CATEGORIES.reduce(
-                (s, c) => s + (enveloppes[`${annee}|${c}`] ?? 0),
-                0,
+              const disponible = budgetDisponibleParAnnee(
+                annee,
+                enveloppes,
+                PSP_BUDGET_DISPONIBLE_PAR_ANNEE,
               );
-              const disponible =
-                envAnnee > 0 ? envAnnee : (PSP_BUDGET_DISPONIBLE_PAR_ANNEE[String(annee)] ?? 0);
               const ecart = disponible - programme;
               return (
                 <div

@@ -174,6 +174,19 @@ export default function PspQuickAddRow({
     }
   };
 
+  /** V7.8 §5 — case « Devis » Oui/Non : décoché ⇒ champs masqués ET vidés. */
+  const basculerDevis = (checked: boolean) => {
+    setDevisCoche(checked);
+    if (!checked) {
+      setFournisseurQ("");
+      setSugFournisseurs([]);
+      setFournisseur(null);
+      setDevisMontant("");
+      setDevisNumero("");
+      setDevisDate("");
+    }
+  };
+
   return (
     <TableRow className="bg-primary/5 align-top hover:bg-primary/5">
       {/* TR — sélectionnée (chip persistante) ou recherche globale */}
@@ -283,7 +296,9 @@ export default function PspQuickAddRow({
         {rec.tranche ? (
           <PspAdressePanel rec={rec} />
         ) : (
-          <p className="text-[10px] text-muted-foreground">choisissez un TR d'abord</p>
+          <p className="text-[10px] text-muted-foreground">
+            Sélectionnez d'abord un TR pour définir l'adresse / le périmètre.
+          </p>
         )}
       </TableCell>
 
@@ -334,11 +349,12 @@ export default function PspQuickAddRow({
 
       {/* Devis — case à cocher ; si cochée : Entreprise / Montant / N° / Date */}
       <TableCell className="min-w-[170px] py-1.5">
-        <label className="flex items-center gap-1.5 text-xs font-bold">
+        <label className="flex cursor-pointer items-center gap-1.5 text-xs font-bold">
           <input
             type="checkbox"
             checked={devisCoche}
-            onChange={(e) => setDevisCoche(e.target.checked)}
+            onChange={(e) => basculerDevis(e.target.checked)}
+            className="size-3.5 cursor-pointer"
           />
           Devis
         </label>

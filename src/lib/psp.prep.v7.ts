@@ -21,7 +21,6 @@ import {
   type PspOperation,
 } from "./psp.prep.ts";
 import { entreeDe, rueDe } from "./adresses.ts";
-
 // ── 1. Corps d'état → catégorie (mapping centralisé, réutilisable) ──────────────
 // Source : fichier de programmation 2026 réel (code lettre entre parenthèses).
 /** V7.5 §5 — types « garage » identifiés par le champ métier `lots.type_lot`. */
@@ -134,6 +133,34 @@ export function calculEnveloppe(enveloppe: number, programme: number): CalculEnv
     pourcentage: enveloppe > 0 ? programme / enveloppe : null,
     depassement: enveloppe > 0 && restant < 0,
   };
+}
+
+const CATEGORIES_BUDGET = ["GE", "GT", "CP"] as const;
+
+/**
+ * V7.8 §3 — Budget DISPONIBLE d'une année : somme des enveloppes GE/GT/CP
+ * renseignées ; sinon repli sur la dotation par défaut (MOCK). Distinction
+ * stricte : « enveloppe » (par catégorie) vs « budget disponible » (par année).
+ * Règle UNIQUE utilisée par le KPI et la simulation — jamais stockée.
+ */
+export function budgetDisponibleParAnnee(
+  annee: PspAnnee,
+  enveloppes: EnveloppeMap,
+  defautParAnnee: Record<string, number> = {},
+): number {
+  const envAnnee = CATEGORIES_BUDGET.reduce((s, c) => s + (enveloppes[`${annee}|${c}`] ?? 0), 0);
+  return envAnnee > 0 ? envAnnee : (defautParAnnee[String(annee)] ?? 0);
+}
+
+/** V7.8 §3 — Budget disponible TOTAL de la période (somme des années). */
+export function budgetDisponibleTotalReel(
+  enveloppes: EnveloppeMap,
+  defautParAnnee: Record<string, number> = {},
+): number {
+  return PSP_ANNEES.reduce(
+    (s, a) => s + budgetDisponibleParAnnee(a, enveloppes, defautParAnnee),
+    0,
+  );
 }
 
 // ── 4. Export — chaîne d'adresse depuis les relations structurées ───────────────
