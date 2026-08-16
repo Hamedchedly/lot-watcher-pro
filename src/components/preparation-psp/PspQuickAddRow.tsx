@@ -141,7 +141,7 @@ export default function PspQuickAddRow({
                   fournisseurId: fournisseur?.id,
                   entreprise: fournisseur?.nom ?? null,
                   dateDevis: devisDate || null,
-                  montant: Number(devisMontant) || 0,
+                  montant: devisMontant.trim() === "" ? null : Number(devisMontant),
                   statut: "recu",
                   commentaire: null,
                   documentReference: devisNumero.trim() || null,

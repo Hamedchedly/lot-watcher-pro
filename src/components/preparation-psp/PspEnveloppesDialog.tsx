@@ -1,7 +1,7 @@
 /**
  * V7 — Dialog « Gérer les enveloppes » : montant alloué GE/GT/CP pour chaque
- * année 2027-2031. Sauvegarde via savePspEnveloppes (upsert). BUDGET_SOURCE reste
- * MOCK tant que la dotation officielle n'est pas définie.
+ * année 2027-2031. Sauvegarde via savePspEnveloppes (upsert). Les enveloppes
+ * réelles viennent de psp_enveloppes.
  */
 import { useState } from "react";
 
@@ -60,8 +60,8 @@ export default function PspEnveloppesDialog({
         <DialogHeader>
           <DialogTitle>Gérer les enveloppes</DialogTitle>
           <DialogDescription>
-            Enveloppes allouées GE / GT / CP par année. BUDGET_SOURCE = MOCK tant que la dotation
-            officielle n'est pas définie — ces montants sont saisis manuellement.
+            Enveloppes allouées GE / GT / CP par année (source : psp_enveloppes). Ces montants sont
+            saisis manuellement dans Paramètres PSP.
           </DialogDescription>
         </DialogHeader>
 

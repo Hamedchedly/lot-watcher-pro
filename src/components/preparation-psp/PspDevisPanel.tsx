@@ -29,7 +29,8 @@ export type DevisEdit = {
   fournisseurId?: string | null;
   entreprise?: string;
   dateDevis?: string | null;
-  montant?: number;
+  /** V7.10 §6 — montant NULLABLE (une demande de devis peut être sans montant). */
+  montant?: number | null;
   statut?: string | null;
   commentaire?: string | null;
   /** Numéro / référence du devis (psp_devis.document_reference). */
@@ -99,7 +100,7 @@ export default function PspDevisPanel({
         fournisseurId: fournisseurSel?.id ?? null,
         entreprise: entre.trim(),
         dateDevis: date || null,
-        montant: Number(montant) || 0,
+        montant: montant.trim() === "" ? null : Number(montant),
         statut,
         commentaire: commentaire.trim() || null,
         documentReference: numero.trim() || null,
@@ -119,7 +120,7 @@ export default function PspDevisPanel({
         fournisseurId: editForm.fournisseur_id ?? null,
         entreprise: editForm.entreprise,
         dateDevis: editForm.date_devis || null,
-        montant: Number(editForm.montant) || 0,
+        montant: editForm.montant.trim() === "" ? null : Number(editForm.montant),
         statut: editForm.statut || null,
         commentaire: editForm.commentaire.trim() || null,
         documentReference: editForm.document_reference.trim() || null,
@@ -172,6 +173,11 @@ export default function PspDevisPanel({
               onChange={(e) => {
                 const coche = e.target.checked;
                 if (!coche) {
+                  // V7.9/V7.10 — décoché : on neutralise les devis existants
+                  // (deletePspDevis) et on ferme le formulaire d'ajout.
+                  for (const d of operation.devis) {
+                    if (d.id) void onDelete(d.id);
+                  }
                   setAjoutOuvert(false);
                   reinitFormulaire();
                 } else if (!devisOui) {
@@ -282,9 +288,14 @@ export default function PspDevisPanel({
                         N° {d.document_reference}
                       </span>
                     ) : null}
+                    {d.date_demande ? (
+                      <span className="text-[10px] text-muted-foreground">
+                        Demande le {new Date(d.date_demande).toLocaleDateString("fr-FR")}
+                      </span>
+                    ) : null}
                     {d.date_devis ? (
-                      <span className="text-muted-foreground">
-                        {new Date(d.date_devis).toLocaleDateString("fr-FR")}
+                      <span className="text-[10px] text-muted-foreground">
+                        Devis le {new Date(d.date_devis).toLocaleDateString("fr-FR")}
                       </span>
                     ) : null}
                     {d.statut ? (
@@ -404,16 +415,7 @@ export default function PspDevisPanel({
                 </Button>
               </div>
             </div>
-          ) : editForm ? null : (
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 text-xs"
-              onClick={() => setAjoutOuvert(true)}
-            >
-              <Plus className="size-3" /> Ajouter un devis
-            </Button>
-          )}
+          ) : null}
         </div>
       ) : null}
 

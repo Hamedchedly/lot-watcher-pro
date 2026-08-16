@@ -57,8 +57,8 @@ console.log("\n=== A. ENVELOPPES ===");
 console.log("\n=== B. DEVIS ===");
 {
   const panel = source("src/components/preparation-psp/PspDevisPanel.tsx");
-  check("case « Devis » Oui/Non présente dans la fiche", /type="checkbox"[^>]*checked=\{devisOui \|\| ajoutOuvert\}/.test(panel.replace(/\s+/g, " ")));
-  check("bouton « Ajouter un devis » masqué pendant l'édition (editForm ? null)", panel.includes(") : editForm ? null : ("));
+  check("case « Devis » Oui/Non présente dans la fiche (unique)", /type="checkbox"[^>]*checked=\{devisOui \|\| ajoutOuvert\}/.test(panel.replace(/\s+/g, " ")));
+  check("aucun bouton « Ajouter un devis » redondant (case Oui/Non = contrôle unique, V7.10)", !panel.includes("Ajouter un devis"));
   check("formulaire ajout → bouton « Ajouter »", panel.includes("<Plus className=\"size-3\" /> Ajouter"));
   check("formulaire édition → bouton « Enregistrer »", panel.includes("<Check className=\"size-3\" /> Enregistrer"));
   check("création via onAdd (createPspDevis côté route)", panel.includes("await onAdd({"));

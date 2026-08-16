@@ -43,8 +43,6 @@ import {
   construireDonneesExportXlsx,
   FILTRES_VIDES,
   PSP_ANNEES,
-  PSP_BUDGET_DISPONIBLE_PAR_ANNEE,
-  PSP_OPERATIONS,
   ajouterOperationListe,
   modifierOperationListe,
   supprimerOperationListe,
@@ -145,11 +143,12 @@ function PreparationPspPage() {
   >(new Map());
   const [lotsParId, setLotsParId] = useState<Map<string, LotInfo>>(new Map());
 
-  // Source des opérations : mock V1 par défaut, fichier esquisse 2027 si chargé.
+  // Source des opérations : brouillon Supabase (source de vérité — V7.10 §2).
+  // Aucun mock au chargement : l'état initial est VIDE, le brouillon remplit la table.
   const [source, setSource] = useState<{ type: "mock" | "fichier"; fichier?: string }>({
     type: "mock",
   });
-  const [operations, setOperations] = useState<PspOperation[]>(() => PSP_OPERATIONS);
+  const [operations, setOperations] = useState<PspOperation[]>([]);
   const [reference, setReference] = useState<ReferencePatrimoine | null>(null);
 
   // ── Persistance Supabase V6.2 : brouillon actif (jamais créé automatiquement) ──
@@ -234,7 +233,8 @@ function PreparationPspPage() {
         id: String(d["id"] ?? ""),
         fournisseur_id: (d["fournisseur_id"] as string | null) ?? null,
         entreprise: String(d["entreprise"] ?? ""),
-        montant: Number(d["montant"] ?? 0),
+        date_demande: (d["created_at"] as string | null) ?? null,
+        montant: Number(d["montant"] ?? 0) || null,
         date_devis: (d["date_devis"] as string | null) ?? null,
         statut: String(d["statut"] ?? ""),
         remarque: (d["commentaire"] as string | null) ?? null,
@@ -544,7 +544,7 @@ function PreparationPspPage() {
     : refChargement
       ? "référence réelle : chargement…"
       : refErreur
-        ? "référence réelle indisponible — valeurs mock conservées"
+        ? "référence réelle indisponible — valeurs conservées sans enrichissement"
         : null;
 
   const exporter = () => {
@@ -669,7 +669,7 @@ function PreparationPspPage() {
         fournisseurId: d.fournisseurId ?? null,
         entreprise: d.entreprise ?? "",
         dateDevis: d.dateDevis ?? null,
-        montant: d.montant ?? 0,
+        montant: d.montant ?? null,
         statut: (d.statut ?? "recu") as "recu",
         commentaire: d.commentaire ?? null,
         documentReference: d.documentReference ?? null,
@@ -683,7 +683,8 @@ function PreparationPspPage() {
         id: String(devis["id"] ?? ""),
         fournisseur_id: (devis["fournisseur_id"] as string | null) ?? null,
         entreprise: String(devis["entreprise"] ?? ""),
-        montant: Number(devis["montant"] ?? 0),
+        date_demande: (devis["created_at"] as string | null) ?? null,
+        montant: (devis["montant"] as number | null) ?? null,
         date_devis: (devis["date_devis"] as string | null) ?? null,
         statut: String(devis["statut"] ?? ""),
         remarque: (devis["commentaire"] as string | null) ?? null,
@@ -725,7 +726,7 @@ function PreparationPspPage() {
             ? {
                 ...dv,
                 entreprise: d.entreprise ?? dv.entreprise,
-                montant: d.montant ?? dv.montant,
+                montant: d.montant ?? null,
                 date_devis: d.dateDevis ?? dv.date_devis ?? null,
                 statut: d.statut ?? dv.statut ?? "",
                 commentaire: d.commentaire ?? dv.commentaire ?? null,
@@ -984,94 +985,104 @@ function PreparationPspPage() {
       />
 
       <main className="mx-auto max-w-[2200px] space-y-4 px-4 pt-4 sm:px-6">
-        <PspKpi
-          operations={operations}
-          anneesFiltre={anneesFiltre}
-          onToggleAnnee={toggleAnnee}
-          enveloppes={enveloppes}
-          onOuvrirEnveloppes={() => {
-            setSettingsOnglet("enveloppes");
-            setSettingsOuvert(true);
-          }}
-          figee={figee}
-        />
-
-        {aucuneProgrammation ? (
+        {brouillonChargement ? (
+          /* V7.10 §2 — pendant le chargement : AUCUN mock, aucun tableau vide trompeur. */
           <div className="rounded-xl border border-dashed p-10 text-center">
-            <p className="text-lg font-black">Aucune programmation PSP enregistrée.</p>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Créez la préparation pluriannuelle 2027-2031 (officielle, brouillon v1) pour commencer
-              la saisie des opérations.
-            </p>
-            <Button className="mt-4" onClick={() => void handleCreerPreparation()}>
-              <Plus className="size-4" />
-              Créer la préparation 2027-2031
-            </Button>
+            <p className="text-lg font-black">Chargement de la programmation…</p>
           </div>
         ) : (
           <>
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex flex-wrap items-center gap-2">
-                <PspGroupingSelector mode={mode} onChange={setMode} />
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-8 text-[11px]"
-                  onClick={() => {
-                    setSettingsOnglet("charges");
-                    setSettingsOuvert(true);
-                  }}
-                  title="Paramètres PSP : chargés clientèle, corps d'état, enveloppes budgétaires"
-                >
-                  <Settings2 className="size-3.5" />
-                  Paramètres PSP
+            <PspKpi
+              operations={operations}
+              anneesFiltre={anneesFiltre}
+              onToggleAnnee={toggleAnnee}
+              enveloppes={enveloppes}
+              onOuvrirEnveloppes={() => {
+                setSettingsOnglet("enveloppes");
+                setSettingsOuvert(true);
+              }}
+              figee={figee}
+            />
+
+            {aucuneProgrammation ? (
+              <div className="rounded-xl border border-dashed p-10 text-center">
+                <p className="text-lg font-black">Aucune programmation PSP enregistrée.</p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Créez la préparation pluriannuelle 2027-2031 (officielle, brouillon v1) pour
+                  commencer la saisie des opérations.
+                </p>
+                <Button className="mt-4" onClick={() => void handleCreerPreparation()}>
+                  <Plus className="size-4" />
+                  Créer la préparation 2027-2031
                 </Button>
               </div>
-              <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
-                Source : {sourceLabel} · {operations.length} opérations · BUDGET_SOURCE = MOCK
-              </p>
-            </div>
-
-            {mode === "reports" ? (
-              <PspRevueReports
-                programmees={programmees2026}
-                suivi={suivi}
-                exercice={2027}
-                sourceFichiers={suivi2026Disponible}
-                modifications={modifications}
-                confirmees={confirmees}
-                decisions={decisions}
-                onReporter={handleReporter}
-                onAnnuler={handleAnnuler}
-                onConserver={handleConserver}
-                onReevaluer={handleReevaluer}
-                onConfirmerModification={handleConfirmerModification}
-              />
             ) : (
-              <PspTable
-                mode={mode}
-                operations={operationsFiltrees}
-                filters={filters}
-                onFiltersChange={setFilters}
-                onOpenOperation={(op) => setSelectedOpId(op.id)}
-                onModifier={ouvrirModification}
-                onDevis={ouvrirDevis}
-                onStatutPriorite={handleStatutPriorite}
-                onNotes={handleNotes}
-                perimetresParLigne={perimetresParLigne}
-                lotsParId={lotsParId}
-                quickAdd={
-                  programmation?.id
-                    ? {
-                        programmationId: programmation.id,
-                        reference,
-                        onSaved: handleQuickSaved,
-                      }
-                    : null
-                }
-                figee={figee}
-                reference={reference}
-              />
+              <>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <PspGroupingSelector mode={mode} onChange={setMode} />
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 text-[11px]"
+                      onClick={() => {
+                        setSettingsOnglet("charges");
+                        setSettingsOuvert(true);
+                      }}
+                      title="Paramètres PSP : chargés clientèle, corps d'état, enveloppes budgétaires"
+                    >
+                      <Settings2 className="size-3.5" />
+                      Paramètres PSP
+                    </Button>
+                  </div>
+                  <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+                    Source : {sourceLabel} · {operations.length} opérations · enveloppes
+                    psp_enveloppes
+                  </p>
+                </div>
+
+                {mode === "reports" ? (
+                  <PspRevueReports
+                    programmees={programmees2026}
+                    suivi={suivi}
+                    exercice={2027}
+                    sourceFichiers={suivi2026Disponible}
+                    modifications={modifications}
+                    confirmees={confirmees}
+                    decisions={decisions}
+                    onReporter={handleReporter}
+                    onAnnuler={handleAnnuler}
+                    onConserver={handleConserver}
+                    onReevaluer={handleReevaluer}
+                    onConfirmerModification={handleConfirmerModification}
+                  />
+                ) : (
+                  <PspTable
+                    mode={mode}
+                    operations={operationsFiltrees}
+                    filters={filters}
+                    onFiltersChange={setFilters}
+                    onOpenOperation={(op) => setSelectedOpId(op.id)}
+                    onModifier={ouvrirModification}
+                    onDevis={ouvrirDevis}
+                    onStatutPriorite={handleStatutPriorite}
+                    onNotes={handleNotes}
+                    perimetresParLigne={perimetresParLigne}
+                    lotsParId={lotsParId}
+                    quickAdd={
+                      programmation?.id
+                        ? {
+                            programmationId: programmation.id,
+                            reference,
+                            onSaved: handleQuickSaved,
+                          }
+                        : null
+                    }
+                    figee={figee}
+                    reference={reference}
+                  />
+                )}
+              </>
             )}
           </>
         )}
@@ -1230,8 +1241,9 @@ function SimulationDialog({
               (programmePar[`${annee}|GT`] ?? 0) +
               (programmePar[`${annee}|CP`] ?? 0);
             const envAnnee = categories.reduce((s, c) => s + (enveloppes[`${annee}|${c}`] ?? 0), 0);
-            const disponible =
-              envAnnee > 0 ? envAnnee : (PSP_BUDGET_DISPONIBLE_PAR_ANNEE[String(annee)] ?? 0);
+            // V7.10 §3 — budget disponible = somme des enveloppes réelles de l'année.
+            // Aucun fallback mock : si rien n'est renseigné → « — » (jamais 0 €).
+            const disponible = envAnnee;
             const restant = disponible - programme;
             const taux = disponible > 0 ? Math.min(1, programme / disponible) : 0;
             return (
@@ -1240,7 +1252,9 @@ function SimulationDialog({
                   <span className="font-mono font-black">{annee}</span>
                   <span className="text-muted-foreground">
                     Budget disponible :{" "}
-                    <span className="tabnum font-bold">{money0(disponible)}</span>
+                    <span className="tabnum font-bold">
+                      {disponible > 0 ? money0(disponible) : "—"}
+                    </span>
                   </span>
                 </div>
                 <div className="mt-1 flex items-center justify-between gap-2 text-xs">
@@ -1252,7 +1266,7 @@ function SimulationDialog({
                     <span
                       className={`tabnum font-black ${restant >= 0 ? "text-emerald-600" : "text-destructive"}`}
                     >
-                      {money0(restant)}
+                      {disponible > 0 ? money0(restant) : "—"}
                     </span>
                   </span>
                 </div>

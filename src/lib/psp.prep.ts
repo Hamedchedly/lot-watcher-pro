@@ -58,7 +58,13 @@ export type PspDevis = {
   /** Fournisseur rattaché (psp_devis.fournisseur_id) — V7.8 §7. */
   fournisseur_id?: string | null;
   entreprise: string;
-  montant: number;
+  /**
+   * Date de la DEMANDE de devis = psp_devis.created_at (V7.10 §8). Distincte de
+   * `date_devis` (date du devis reçu, nullable). Disponible pour le futur Suivi.
+   */
+  date_demande?: string | null;
+  /** Montant nullable (V7.10 §6) — une demande de devis peut être sans montant. */
+  montant: number | null;
   date_devis?: string | null;
   /** Statut structuré devis (psp_devis.statut). */
   statut?: string;
@@ -389,8 +395,9 @@ export type StatsDevis = { min: number; moyenne: number; max: number };
 
 /** Min / moyenne / max d'une liste de devis (toujours calculés, jamais saisis). */
 export const statsDevis = (devis: PspDevis[]): StatsDevis | null => {
-  if (devis.length === 0) return null;
-  const montants = devis.map((d) => d.montant);
+  // V7.10 §6 — les devis sans montant (demandes) ne participent pas aux stats.
+  const montants = devis.map((d) => d.montant).filter((m): m is number => typeof m === "number");
+  if (montants.length === 0) return null;
   return {
     min: Math.min(...montants),
     moyenne: montants.reduce((s, m) => s + m, 0) / montants.length,

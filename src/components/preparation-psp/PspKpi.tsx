@@ -5,14 +5,7 @@ import PspSecteurBadge from "@/components/preparation-psp/PspSecteurBadge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { money0 } from "@/lib/formats";
-import {
-  BUDGET_SOURCE,
-  PSP_ANNEES,
-  PSP_BUDGET_DISPONIBLE_PAR_ANNEE,
-  kpiGlobal,
-  type PspAnnee,
-  type PspOperation,
-} from "@/lib/psp.prep";
+import { PSP_ANNEES, kpiGlobal, type PspAnnee, type PspOperation } from "@/lib/psp.prep";
 import {
   calculEnveloppe,
   budgetDisponibleParAnnee,
@@ -30,7 +23,7 @@ const CATEGORIES = ["GE", "GT", "CP"] as const;
  * (2027 → 2031), cliquable (filtre cumulatif — ne modifie jamais la
  * programmation), qui intègre le détail GE / GT / CP : montant programmé /
  * enveloppe, pourcentage et barre d'avancement (dépassement en rouge).
- * L'enveloppe reste saisie via « Gérer les enveloppes » (BUDGET_SOURCE = MOCK).
+ * L'enveloppe reste saisie via « Paramètres PSP → Enveloppes » (psp_enveloppes).
  */
 export default function PspKpi({
   operations,
@@ -49,9 +42,9 @@ export default function PspKpi({
 }) {
   const kpi = kpiGlobal(operations);
 
-  // V7.8 §3 — Budget disponible RÉEL : somme des enveloppes par année (sinon
-  // dotation par défaut). Distinction stricte « enveloppe » / « budget disponible ».
-  const budgetDisponible = budgetDisponibleTotalReel(enveloppes, PSP_BUDGET_DISPONIBLE_PAR_ANNEE);
+  // V7.10 §3 — Budget disponible RÉEL = somme des enveloppes psp_enveloppes par
+  // année (GE + GT + CP). AUCUN fallback mock : année sans enveloppe → « — ».
+  const budgetDisponible = budgetDisponibleTotalReel(enveloppes);
   const ecartDisponible = budgetDisponible - kpi.programme;
 
   // Programmé par année × catégorie — règle unique (testable), jamais stocké.
@@ -63,8 +56,8 @@ export default function PspKpi({
         <CarteKpi
           icone={<Coins className="size-4" />}
           label="Budget disponible"
-          valeur={money0(budgetDisponible)}
-          note={`${PSP_ANNEES.length} exercices · source ${BUDGET_SOURCE}`}
+          valeur={budgetDisponible > 0 ? money0(budgetDisponible) : "—"}
+          note={`${PSP_ANNEES.length} exercices · enveloppes psp_enveloppes`}
           accent="text-primary"
         />
         <CarteKpi
@@ -77,7 +70,7 @@ export default function PspKpi({
         <CarteKpi
           icone={<PiggyBank className="size-4" />}
           label="Écart disponible"
-          valeur={money0(ecartDisponible)}
+          valeur={ecartDisponible >= 0 ? money0(ecartDisponible) : "—"}
           note={ecartDisponible >= 0 ? "Marge de programmation" : "Enveloppe dépassée"}
           accent={ecartDisponible >= 0 ? "text-emerald-600" : "text-destructive"}
         />
@@ -108,11 +101,7 @@ export default function PspKpi({
             {PSP_ANNEES.map((annee) => {
               const actif = anneesFiltre.includes(annee);
               const programme = kpi.parAnnee[String(annee)] ?? 0;
-              const disponible = budgetDisponibleParAnnee(
-                annee,
-                enveloppes,
-                PSP_BUDGET_DISPONIBLE_PAR_ANNEE,
-              );
+              const disponible = budgetDisponibleParAnnee(annee, enveloppes);
               const ecart = disponible - programme;
               return (
                 <div
@@ -146,7 +135,9 @@ export default function PspKpi({
                   <div className="mt-2 space-y-1 text-xs">
                     <p className="flex items-center justify-between">
                       <span className="text-muted-foreground">Budget disponible</span>
-                      <span className="tabnum font-bold">{money0(disponible)}</span>
+                      <span className="tabnum font-bold">
+                        {disponible > 0 ? money0(disponible) : "—"}
+                      </span>
                     </p>
                     <p className="flex items-center justify-between">
                       <span className="text-muted-foreground">Programmé</span>
@@ -160,7 +151,7 @@ export default function PspKpi({
                           ecart >= 0 ? "text-emerald-600" : "text-destructive",
                         )}
                       >
-                        {money0(ecart)}
+                        {disponible > 0 ? money0(ecart) : "—"}
                       </span>
                     </p>
                   </div>
@@ -222,8 +213,8 @@ export default function PspKpi({
           </div>
           <p className="mt-2 text-[10px] text-muted-foreground">
             Cliquez sur une année pour filtrer le tableau (cumulatif, désélectionnable) · les
-            enveloppes GE/GT/CP sont des données de préparation — BUDGET_SOURCE = MOCK tant que la
-            dotation officielle n'est pas définie.
+            enveloppes GE/GT/CP sont des données de préparation issues de `psp_enveloppes` — la
+            dotation officielle sera définie dans une phase ultérieure.
           </p>
         </CardContent>
       </Card>
