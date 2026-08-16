@@ -10,7 +10,6 @@ import { useEffect, useState } from "react";
 import { Users, X } from "lucide-react";
 import { useServerFn } from "@tanstack/react-start";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -92,18 +91,24 @@ export function ReferentielChargesClienteleBody({
       setMessage("Le sous-secteur est obligatoire.");
       return;
     }
-    if (!edition.chargeClientele.trim()) {
-      setMessage("Le chargé clientèle est obligatoire.");
+    if (!edition.identifiantPersonnel.trim()) {
+      setMessage("L'ID chargé clientèle est obligatoire.");
       return;
     }
+    // V7.9 §5 — ID normalisé en MAJUSCULES (la règle est aussi appliquée serveur).
+    const id = edition.identifiantPersonnel.trim().toUpperCase();
+    // V7.9 §4 — le nom complet n'est plus saisi dans cette grille : il est
+    // conservé pour l'existant ; pour un NOUVEAU sous-secteur, il prend la valeur
+    // de l'ID (la table PSP affiche alors cet ID dans la colonne CC).
+    const nom = edition.chargeClientele?.trim() || id;
     setSaving(true);
     setMessage(null);
     try {
       await saveFn({
         data: {
           sousSecteur: edition.sousSecteur.trim(),
-          chargeClientele: edition.chargeClientele.trim(),
-          identifiantPersonnel: edition.identifiantPersonnel.trim() || null,
+          chargeClientele: nom,
+          identifiantPersonnel: id,
           actif: edition.actif,
         },
       });
@@ -151,19 +156,13 @@ export function ReferentielChargesClienteleBody({
         <Table>
           <TableHeader>
             <TableRow className="bg-muted/50">
-              <TableHead className="w-20 text-[10px] font-black uppercase tracking-widest">
+              <TableHead className="w-24 text-[10px] font-black uppercase tracking-widest">
                 Sous-secteur
               </TableHead>
               <TableHead className="text-[10px] font-black uppercase tracking-widest">
-                Chargé clientèle
+                ID CC
               </TableHead>
-              <TableHead className="text-[10px] font-black uppercase tracking-widest">
-                ID personnel
-              </TableHead>
-              <TableHead className="w-16 text-[10px] font-black uppercase tracking-widest">
-                Actif
-              </TableHead>
-              <TableHead className="w-40 text-[10px] font-black uppercase tracking-widest">
+              <TableHead className="w-44 text-[10px] font-black uppercase tracking-widest">
                 Actions
               </TableHead>
             </TableRow>
@@ -171,14 +170,14 @@ export function ReferentielChargesClienteleBody({
           <TableBody>
             {charge ? (
               <TableRow>
-                <TableCell colSpan={5} className="py-3 text-center text-xs text-muted-foreground">
+                <TableCell colSpan={3} className="py-3 text-center text-xs text-muted-foreground">
                   Chargement…
                 </TableCell>
               </TableRow>
             ) : null}
             {!charge && lignes.length === 0 && !edition ? (
               <TableRow>
-                <TableCell colSpan={5} className="py-3 text-center text-xs text-muted-foreground">
+                <TableCell colSpan={3} className="py-3 text-center text-xs text-muted-foreground">
                   Aucune entrée — le référentiel n'est pas encore renseigné.
                 </TableCell>
               </TableRow>
@@ -195,31 +194,25 @@ export function ReferentielChargesClienteleBody({
                 </TableCell>
                 <TableCell>
                   <Input
-                    value={edition.chargeClientele}
-                    onChange={(e) => setEdition({ ...edition, chargeClientele: e.target.value })}
-                    placeholder="CMICHEL"
-                    className="h-7 text-xs uppercase"
-                  />
-                </TableCell>
-                <TableCell>
-                  <Input
                     value={edition.identifiantPersonnel}
                     onChange={(e) =>
-                      setEdition({ ...edition, identifiantPersonnel: e.target.value })
+                      setEdition({ ...edition, identifiantPersonnel: e.target.value.toUpperCase() })
                     }
                     placeholder="CMICHEL"
                     className="h-7 text-xs uppercase"
                   />
                 </TableCell>
                 <TableCell>
-                  <input
-                    type="checkbox"
-                    checked={edition.actif}
-                    onChange={(e) => setEdition({ ...edition, actif: e.target.checked })}
-                  />
-                </TableCell>
-                <TableCell>
-                  <div className="flex items-center gap-1">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <label className="flex cursor-pointer items-center gap-1 text-[10px] font-bold text-muted-foreground">
+                      <input
+                        type="checkbox"
+                        checked={edition.actif}
+                        onChange={(e) => setEdition({ ...edition, actif: e.target.checked })}
+                        className="size-3.5 cursor-pointer"
+                      />
+                      Actif
+                    </label>
                     <Button
                       size="sm"
                       className="h-7 text-[10px]"
@@ -244,21 +237,11 @@ export function ReferentielChargesClienteleBody({
               lignes.map((l) => (
                 <TableRow key={l.sous_secteur}>
                   <TableCell className="font-mono text-xs font-bold">{l.sous_secteur}</TableCell>
-                  <TableCell className="text-xs">{l.charge_clientele}</TableCell>
-                  <TableCell className="font-mono text-xs">
+                  <TableCell className="font-mono text-xs font-bold uppercase">
                     {l.identifiant_personnel ?? "—"}
                   </TableCell>
                   <TableCell>
-                    {l.actif ? (
-                      <Badge className="border-emerald-200 bg-emerald-50 text-emerald-700">
-                        Oui
-                      </Badge>
-                    ) : (
-                      <Badge className="border-red-200 bg-red-50 text-red-700">Non</Badge>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-1">
+                    <div className="flex flex-wrap items-center gap-1">
                       <Button
                         variant="outline"
                         size="sm"

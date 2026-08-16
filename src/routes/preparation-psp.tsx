@@ -519,6 +519,10 @@ function PreparationPspPage() {
         data: { programmationId: programmation.id, enveloppes: rows },
       });
       setEnveloppes(map);
+      // V7.9 §1 — les flux consommant psp_enveloppes sont rafraîchis (brouillon,
+      // grille Paramètres) pour rester alignés sur Supabase.
+      void queryClient.invalidateQueries({ queryKey: ["psp-brouillon-supabase"] });
+      void queryClient.invalidateQueries({ queryKey: ["psp-enveloppes"] });
       toast.success("Enveloppes enregistrées dans Supabase.");
     } catch (e) {
       toast.error(`Enregistrement impossible : ${(e as Error).message}`);
@@ -1096,7 +1100,7 @@ function PreparationPspPage() {
         onClose={() => setSettingsOuvert(false)}
         ongletInitial={settingsOnglet}
         sousSecteursConnus={sousSecteursConnus}
-        enveloppes={enveloppes}
+        programmationId={programmation?.id ?? null}
         onSaveEnveloppes={handleSaveEnveloppes}
         onChangedCC={() =>
           void queryClient.invalidateQueries({ queryKey: ["psp-reference-patrimoine"] })

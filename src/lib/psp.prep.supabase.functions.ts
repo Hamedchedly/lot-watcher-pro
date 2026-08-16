@@ -810,7 +810,9 @@ export const savePspChargeClientele = createServerFn({ method: "POST" })
       .object({
         sousSecteur: z.string().min(1),
         chargeClientele: z.string().trim().min(1),
-        identifiantPersonnel: z.string().nullish(),
+        // V7.9 §5 — l'ID CC est normalisé en MAJUSCULES côté serveur (la règle
+        // ne dépend jamais uniquement de l'UI).
+        identifiantPersonnel: z.string().trim().toUpperCase().nullish(),
         actif: z.boolean().optional().default(true),
       })
       .parse(d),

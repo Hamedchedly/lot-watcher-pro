@@ -152,6 +152,8 @@ export default function PspDevisPanel({
   const devisRecu = operation.devis.some(
     (d) => d.statut && d.statut !== "a_demander" && d.statut !== "annule",
   );
+  /** V7.9 §3 — OUI dès qu'au moins un devis existe (case Devis). */
+  const devisOui = operation.devis.length > 0;
 
   return (
     <div className="rounded-lg border bg-surface/60 p-3">
@@ -160,16 +162,37 @@ export default function PspDevisPanel({
           <Building2 className="size-3.5" />
           Devis
         </p>
-        <Badge
-          className={cn(
-            "font-bold",
-            devisRecu
-              ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-              : "border-border bg-muted text-muted-foreground",
-          )}
-        >
-          {devisRecu ? "☑ Devis reçu" : "☐ Non"}
-        </Badge>
+        <div className="flex items-center gap-2">
+          {/* V7.9 §3 — case Oui/Non unifiée : NON → aucun formulaire ; OUI →
+              formulaire (ajout si aucun devis, sinon édition existante). */}
+          <label className="flex cursor-pointer items-center gap-1.5 text-xs font-bold">
+            <input
+              type="checkbox"
+              checked={devisOui || ajoutOuvert}
+              onChange={(e) => {
+                const coche = e.target.checked;
+                if (!coche) {
+                  setAjoutOuvert(false);
+                  reinitFormulaire();
+                } else if (!devisOui) {
+                  setAjoutOuvert(true);
+                }
+              }}
+              className="size-3.5 cursor-pointer"
+            />
+            Devis
+          </label>
+          <Badge
+            className={cn(
+              "font-bold",
+              devisRecu
+                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                : "border-border bg-muted text-muted-foreground",
+            )}
+          >
+            {devisRecu ? "☑ Devis reçu" : "☐ Non"}
+          </Badge>
+        </div>
       </div>
 
       {operation.devis.length === 0 ? (
@@ -381,7 +404,7 @@ export default function PspDevisPanel({
                 </Button>
               </div>
             </div>
-          ) : (
+          ) : editForm ? null : (
             <Button
               variant="outline"
               size="sm"

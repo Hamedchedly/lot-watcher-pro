@@ -8,6 +8,8 @@
  */
 import { useState } from "react";
 import { Coins, Layers, Settings2, Users } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useServerFn } from "@tanstack/react-start";
 
 import { ReferentielChargesClienteleBody } from "@/components/preparation-psp/PspChargesClienteleDialog";
 import { ReferentielCorpsEtatsBody } from "@/components/preparation-psp/PspCorpsEtatsDialog";
@@ -23,6 +25,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PSP_ANNEES, type PspAnnee } from "@/lib/psp.prep";
+import { getPspEnveloppes } from "@/lib/psp.prep.supabase.functions";
 import type { EnveloppeMap } from "@/lib/psp.prep.v7";
 
 export type OngletParametres = "charges" | "corps" | "enveloppes";
@@ -34,7 +37,7 @@ export default function PspSettingsDialog({
   onClose,
   ongletInitial = "charges",
   sousSecteursConnus = [],
-  enveloppes,
+  programmationId,
   onSaveEnveloppes,
   onChangedCC,
   onChangedCorps,
@@ -43,21 +46,51 @@ export default function PspSettingsDialog({
   onClose: () => void;
   ongletInitial?: OngletParametres;
   sousSecteursConnus?: string[];
-  enveloppes: EnveloppeMap;
+  /** V7.9 §1 — programmation courante : la grille enveloppes se nourrit DIRECTEMENT
+   * de `getPspEnveloppes` (jamais de l'état KPI ni d'une valeur par défaut). */
+  programmationId?: string | null;
   onSaveEnveloppes: (map: EnveloppeMap) => Promise<void>;
   onChangedCC?: () => void;
   onChangedCorps?: () => void;
 }) {
+  const queryClient = useQueryClient();
   const [onglet, setOnglet] = useState<OngletParametres>(ongletInitial);
   /** V7.8 §4 — état local : nombres saisis OU chaîne vide (cellule non renseignée). */
-  const [valeurs, setValeurs] = useState<Record<string, number | string>>(enveloppes);
+  const [valeurs, setValeurs] = useState<Record<string, number | string>>({});
   const [savingEnv, setSavingEnv] = useState(false);
   const [messageEnv, setMessageEnv] = useState<string | null>(null);
+
+  // V7.9 §1-2 — source de vérité = Supabase (psp_enveloppes). Pas de flash de
+  // valeurs obsolètes : tant que le chargement n'est pas terminé, la grille
+  // affiche « Chargement des enveloppes… ».
+  const getEnveloppesFn = useServerFn(getPspEnveloppes);
+  const enveloppesQuery = useQuery({
+    queryKey: ["psp-enveloppes", programmationId ?? "aucune"],
+    queryFn: () => getEnveloppesFn({ data: { programmationId: programmationId as string } }),
+    enabled: Boolean(programmationId),
+    staleTime: 1000 * 60,
+    retry: 1,
+  });
+  const enveloppesChargees = enveloppesQuery.isLoading || enveloppesQuery.isPending;
+  const mapEnveloppes = (rows: Array<{ annee: number; categorie: string; montant: number }>) =>
+    rows.reduce<Record<string, number | string>>((m, r) => {
+      m[`${r.annee}|${r.categorie}`] = r.montant;
+      return m;
+    }, {});
 
   const handleOpenChange = (o: boolean) => {
     if (o) {
       setOnglet(ongletInitial);
-      setValeurs({ ...enveloppes });
+      // Repart des valeurs réellement persistées (getPspEnveloppes).
+      setValeurs(
+        mapEnveloppes(
+          (enveloppesQuery.data ?? []) as Array<{
+            annee: number;
+            categorie: string;
+            montant: number;
+          }>,
+        ),
+      );
       setMessageEnv(null);
     }
     if (!o) onClose();
@@ -86,6 +119,7 @@ export default function PspSettingsDialog({
         nettoie[cle] = typeof v === "number" ? v : Number(v) || 0;
       }
       await onSaveEnveloppes(nettoie);
+      void queryClient.invalidateQueries({ queryKey: ["psp-enveloppes"] });
     } catch (e) {
       setMessageEnv(`Enregistrement impossible : ${(e as Error).message}`);
     } finally {
@@ -133,45 +167,55 @@ export default function PspSettingsDialog({
           </TabsContent>
 
           <TabsContent value="enveloppes" className="border-t pt-3">
-            <div className="overflow-x-auto">
-              <table className="w-full border-collapse text-sm">
-                <thead>
-                  <tr>
-                    <th className="border p-2 text-left text-xs font-black uppercase tracking-widest text-muted-foreground">
-                      Catégorie
-                    </th>
-                    {PSP_ANNEES.map((a) => (
-                      <th key={a} className="border p-2 text-center font-mono">
-                        {a}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {CATEGORIES.map((cat) => (
-                    <tr key={cat}>
-                      <td className="border p-2 font-black">{cat}</td>
-                      {PSP_ANNEES.map((a) => (
-                        <td key={a} className="border p-1.5">
-                          <Input
-                            type="text"
-                            inputMode="numeric"
-                            className="tabnum h-8 text-right"
-                            value={valeurs[`${a}|${cat}`] ?? ""}
-                            onChange={(e) => setMontant(a, cat, e.target.value)}
-                          />
-                        </td>
+            {/* V7.9 §1-2 — source directe psp_enveloppes : pas de valeurs obsolètes ni de 0
+                tant que le chargement n'est pas terminé. */}
+            {enveloppesChargees || !programmationId ? (
+              <p className="rounded-lg border border-dashed p-4 text-center text-xs text-muted-foreground">
+                {programmationId ? "Chargement des enveloppes…" : "Aucune programmation chargée."}
+              </p>
+            ) : (
+              <>
+                <div className="overflow-x-auto">
+                  <table className="w-full border-collapse text-sm">
+                    <thead>
+                      <tr>
+                        <th className="border p-2 text-left text-xs font-black uppercase tracking-widest text-muted-foreground">
+                          Catégorie
+                        </th>
+                        {PSP_ANNEES.map((a) => (
+                          <th key={a} className="border p-2 text-center font-mono">
+                            {a}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {CATEGORIES.map((cat) => (
+                        <tr key={cat}>
+                          <td className="border p-2 font-black">{cat}</td>
+                          {PSP_ANNEES.map((a) => (
+                            <td key={a} className="border p-1.5">
+                              <Input
+                                type="text"
+                                inputMode="numeric"
+                                className="tabnum h-8 text-right"
+                                value={valeurs[`${a}|${cat}`] ?? ""}
+                                onChange={(e) => setMontant(a, cat, e.target.value)}
+                              />
+                            </td>
+                          ))}
+                        </tr>
                       ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <p className="mt-1 text-[10px] text-muted-foreground">
-              Les totaux consommés / programmés / restants / % sont TOUJOURS calculés depuis les
-              lignes (jamais stockés) — ils s'affichent dans la répartition annuelle et la
-              simulation.
-            </p>
+                    </tbody>
+                  </table>
+                </div>
+                <p className="mt-1 text-[10px] text-muted-foreground">
+                  Les totaux consommés / programmés / restants / % sont TOUJOURS calculés depuis les
+                  lignes (jamais stockés) — ils s'affichent dans la répartition annuelle et la
+                  simulation. Source de la grille : `psp_enveloppes` (getPspEnveloppes).
+                </p>
+              </>
+            )}
             {messageEnv ? (
               <p className="mt-2 rounded border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-bold text-amber-800">
                 {messageEnv}
