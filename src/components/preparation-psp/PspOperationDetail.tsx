@@ -14,6 +14,7 @@ import { ChevronDown, ChevronRight, FileText, History, Trash2 } from "lucide-rea
 import PspDevisPanel, { type DevisEdit } from "@/components/preparation-psp/PspDevisPanel";
 import PspOperationForm from "@/components/preparation-psp/PspOperationForm";
 import PspSecteurBadge from "@/components/preparation-psp/PspSecteurBadge";
+import PspSuiviApercu from "@/components/preparation-psp/PspSuiviApercu";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -131,6 +132,11 @@ export default function PspOperationDetail({
                 onUpdate={onDevisUpdate}
                 onDelete={onDevisDelete}
               />
+            </div>
+
+            {/* Aperçu Suivi V8.1 (lecture seule — test du socle) */}
+            <div className="mt-3">
+              <PspSuiviApercu pspLigneId={operation.id} />
             </div>
 
             {/* Historique des modifications (psp_ligne_historique) — repliable */}

@@ -19,6 +19,13 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 import {
+  recommanderEntreprises,
+  type SuiviOperationVue,
+  type SuggestionEntreprise,
+  type CommandeTravauxSuivi,
+  construireSuiviOperation,
+} from "./psp.suivi.foundation.ts";
+import {
   categorieDepuisCorpsEtat,
   detecterRecherchePatrimoine,
   lotsDeAdresse,
@@ -1176,6 +1183,216 @@ export const createPspOperationComplete = createServerFn({ method: "POST" })
     if (error) throw new Error(`Création de l'opération : ${error.message}`);
     return ligne as PspLignePersist;
   });
+// ── V8.1 — SOCLE SUIVI : lecture agrégée + recommandation d'entreprises ──────
+
+/**
+ * getPspSuiviOperation — vue métier agrégée d'une opération PSP
+ * (programmation + consultation + commandes liées + exécution).
+ *
+ * Lecture seule, batch (aucun N+1) : ligne, périmètre, devis, liens, commandes,
+ * décisions et patrimoine sont chargés en quelques requêtes.
+ * Aucune écriture, aucune valeur copiée dans psp_lignes.
+ */
+export const getPspSuiviOperation = createServerFn({ method: "POST" })
+  .validator((d: unknown) => z.object({ pspLigneId: z.string().uuid() }).parse(d))
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
+    const db = supabaseAdmin as any;
+
+    const { data: ligne, error } = await db
+      .from("psp_lignes")
+      .select("*")
+      .eq("id", data.pspLigneId)
+      .single();
+    if (error) throw new Error(`Lecture de l'opération : ${error.message}`);
+
+    const id = data.pspLigneId;
+    const [perimetresR, devisR, liensR, progR, decisionsR] = await Promise.all([
+      db.from("psp_ligne_patrimoine").select("*").eq("psp_ligne_id", id),
+      db.from("psp_devis").select("*").eq("psp_ligne_id", id),
+      db.from("psp_command_links").select("*").eq("psp_ligne_id", id),
+      db.from("psp_programmations").select("statut").eq("id", ligne.programmation_id).maybeSingle(),
+      db.from("psp_decisions").select("*").eq("psp_ligne_id", id),
+    ]);
+    if (perimetresR.error) throw new Error(`Lecture du périmètre : ${perimetresR.error.message}`);
+    if (devisR.error) throw new Error(`Lecture des devis : ${devisR.error.message}`);
+    if (liensR.error) throw new Error(`Lecture des liens : ${liensR.error.message}`);
+    if (decisionsR.error) throw new Error(`Lecture des décisions : ${decisionsR.error.message}`);
+
+    const perimetres = perimetresR.data ?? [];
+    const devis = devisR.data ?? [];
+    const liens = liensR.data ?? [];
+    const decisions = decisionsR.data ?? [];
+
+    // Commandes liées — batch (une seule requête pour toutes).
+    const commandeIds: string[] = liens
+      .map((l: { commande_id: string | null }) => l.commande_id)
+      .filter((v: string | null): v is string => Boolean(v));
+    let commandes: Array<Record<string, unknown>> = [];
+    if (commandeIds.length > 0) {
+      const { data: cmd, error: eC } = await db
+        .from("travaux_commandes")
+        .select(
+          "id, numero_commande, tranche_code, fournisseur, descriptif, corps_etat, etat_commande, etat_travaux, budget, engage, paye, solde, created_at, date_demarrage, date_fin_travaux, annee_exercice",
+        )
+        .in("id", commandeIds);
+      if (eC) throw new Error(`Lecture des commandes liées : ${eC.message}`);
+      commandes = (cmd ?? []).map((c: any) => ({
+        id: c.id,
+        numero_commande: c.numero_commande,
+        tranche_code: c.tranche_code,
+        fournisseur: c.fournisseur,
+        descriptif: c.descriptif,
+        corps_etat: c.corps_etat,
+        etat_commande: c.etat_commande,
+        etat_travaux: c.etat_travaux,
+        budget: c.budget,
+        engage: c.engage,
+        paye: c.paye,
+        solde: c.solde,
+        date_import: c.created_at,
+        date_demarrage: c.date_demarrage,
+        date_fin_travaux: c.date_fin_travaux,
+        annee_exercice: c.annee_exercice,
+      }));
+    }
+
+    // Patrimoine : TR → adresse (libellé + localité) et CC via
+    // tranches.sous_secteur → psp_charges_clientele (JAMAIS depuis travaux_commandes).
+    let adresse: string | null = null;
+    let cc: string | null = null;
+    if (ligne.tranche_code) {
+      const { data: tranche } = await db
+        .from("tranches")
+        .select("code, libelle, localite, sous_secteur")
+        .eq("code", ligne.tranche_code)
+        .maybeSingle();
+      if (tranche) {
+        adresse = [tranche.libelle, tranche.localite].filter(Boolean).join(" – ") || null;
+        if (tranche.sous_secteur) {
+          const { data: ccRow } = await db
+            .from("psp_charges_clientele")
+            .select("identifiant_personnel")
+            .eq("sous_secteur", tranche.sous_secteur)
+            .eq("actif", true)
+            .maybeSingle();
+          cc = ccRow?.identifiant_personnel ?? null;
+        }
+      }
+    }
+
+    return construireSuiviOperation({
+      ligne: {
+        id: ligne.id,
+        programmation_id: ligne.programmation_id,
+        tranche_code: ligne.tranche_code,
+        categorie: ligne.categorie,
+        corps_etat_code: ligne.corps_etat_code,
+        corps_etat: ligne.corps_etat,
+        nature_travaux: ligne.nature_travaux,
+        programme: ligne.programme ?? {},
+        ligne_budget: ligne.ligne_budget,
+        remarques: ligne.remarques,
+        origine: ligne.origine,
+        statut: ligne.statut,
+        priorite: ligne.priorite,
+        created_at: ligne.created_at,
+        updated_at: ligne.updated_at,
+      },
+      perimetres,
+      devis,
+      liens,
+      commandes: commandes as unknown as CommandeTravauxSuivi[],
+      decisions,
+      patrimoine: { adresse, cc },
+      programmationStatut: progR.data?.statut ?? null,
+    }) as SuiviOperationVue;
+  });
+
+/**
+ * getPspEntreprisesSuggestions — entreprises pertinentes pour une opération.
+ *
+ * Données RÉELLES uniquement : historique des commandes (travaux_commandes →
+ * profil d'activité via fournisseurs.analyse) + activités validées manuellement
+ * (fournisseur_activites). Aucune activité inventée.
+ */
+export const getPspEntreprisesSuggestions = createServerFn({ method: "POST" })
+  .validator((d: unknown) =>
+    z
+      .object({
+        pspLigneId: z.string().uuid(),
+        corpsEtat: z.string().nullish(),
+        limite: z.number().int().min(1).max(50).optional(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
+    const db = supabaseAdmin as any;
+
+    // Corps d'état de l'opération (si non fourni explicitement).
+    let corpsEtat = data.corpsEtat ?? null;
+    if (!corpsEtat) {
+      const { data: ligne } = await db
+        .from("psp_lignes")
+        .select("corps_etat")
+        .eq("id", data.pspLigneId)
+        .maybeSingle();
+      corpsEtat = ligne?.corps_etat ?? null;
+    }
+
+    const [fournisseursR, activitesR, aliasesR, commandesR] = await Promise.all([
+      db.from("fournisseurs").select("id, nom"),
+      db
+        .from("fournisseur_activites")
+        .select("fournisseur_id, corps_etat_code, corps_etat_libelle, niveau"),
+      db.from("fournisseur_aliases").select("fournisseur_id, source, identifiant_source"),
+      db
+        .from("travaux_commandes")
+        .select("id, numero_fournisseur, corps_etat, budget, annee_exercice")
+        .not("numero_fournisseur", "is", null),
+    ]);
+    if (fournisseursR.error)
+      throw new Error(`Lecture des fournisseurs : ${fournisseursR.error.message}`);
+    if (activitesR.error) throw new Error(`Lecture des activités : ${activitesR.error.message}`);
+    if (aliasesR.error) throw new Error(`Lecture des alias : ${aliasesR.error.message}`);
+    if (commandesR.error) throw new Error(`Lecture des commandes : ${commandesR.error.message}`);
+
+    // Alias travaux_commandes : numero_fournisseur → fournisseur_id (réel).
+    const parNumero = new Map<string, string>();
+    for (const a of aliasesR.data ?? []) {
+      if (a.source === "travaux_commandes" && a.identifiant_source != null) {
+        parNumero.set(String(a.identifiant_source).trim(), a.fournisseur_id);
+      }
+    }
+    const historique = (commandesR.data ?? [])
+      .map((c: any) => ({
+        fournisseur_id: parNumero.get(String(c.numero_fournisseur ?? "").trim()),
+        corps_etat: c.corps_etat as string | null,
+        montant: c.budget as number | null,
+        annee: c.annee_exercice as number | null,
+      }))
+      .filter((h: any) => h.fournisseur_id != null);
+
+    const activites = (activitesR.data ?? []).map((a: any) => ({
+      fournisseur_id: a.fournisseur_id as string,
+      corps_etat_code: a.corps_etat_code as string,
+      corps_etat_libelle: a.corps_etat_libelle as string,
+      niveau: a.niveau as "principal" | "secondaire" | "occasionnel",
+    }));
+
+    return recommanderEntreprises({
+      fournisseurs: (fournisseursR.data ?? []).map((f: any) => ({
+        id: f.id as string,
+        nom: f.nom as string,
+      })),
+      historique,
+      activites,
+      corps_etat_operation: corpsEtat,
+      limite: data.limite ?? 20,
+    }) as SuggestionEntreprise[];
+  });
+
 /**
  * Modification ATOMIQUE (V7.3) : ligne + remplacement du périmètre via le RPC
  * public.update_psp_operation. Échec → aucun résidu.
