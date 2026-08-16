@@ -8,7 +8,12 @@ import {
   rechercherPatrimoineGlobal,
   rechercherRuesTranche,
 } from "@/lib/psp.prep.supabase.functions";
-import { construirePerimetres, type PerimetreLigne } from "@/lib/psp.prep.v7";
+import {
+  construirePerimetres,
+  estLotGarage,
+  sansGarages,
+  type PerimetreLigne,
+} from "@/lib/psp.prep.v7";
 import { entreeDe, rueDe } from "@/lib/adresses";
 import type { ReferencePatrimoine } from "@/lib/psp.prep.data";
 
@@ -20,7 +25,12 @@ export type SuggestionLot = {
   adresse: string | null;
   ville: string | null;
   locataire_nom?: string | null;
+  /** Type du lot (PAR, GAR, BOX, …) — permet le filtre garages (V7.5). */
+  type_lot?: string | null;
 };
+
+/** V7.5 §5 — filtre garages partagé (défini dans psp.prep.v7, testé). */
+export { estLotGarage, sansGarages };
 
 /**
  * V7.3 — Recherche patrimoine partagée (saisie directe + formulaire).
@@ -67,6 +77,8 @@ export function useRecherchePatrimoine(options: {
   // ── Hiérarchie adresse ──
   const [adressePanelOuvert, setAdressePanelOuvert] = useState(false);
   const [niveauAdresse, setNiveauAdresse] = useState<"rues" | "numeros">("rues");
+  /** V7.5 §5 — garages masqués par défaut (filtre d'affichage uniquement). */
+  const [afficherGarages, setAfficherGarages] = useState(false);
   const [qRue, setQRue] = useState("");
   const [rues, setRues] = useState<Array<{ rue: string; ville: string | null; nb_lots: number }>>(
     [],
@@ -203,6 +215,29 @@ export function useRecherchePatrimoine(options: {
     setModifie(true);
   };
 
+  /** V7.5 §6 — reset TOTAL après un enregistrement réussi (saisie directe). */
+  const resetTout = () => {
+    setTranche(null);
+    setCc("");
+    setConflit(null);
+    setSearchQuery("");
+    setSugTranches([]);
+    setSugLots([]);
+    setTrPanelOuvert(false);
+    setRue(null);
+    setQRue("");
+    setRues([]);
+    setNumeros([]);
+    setAdressesChoisies([]);
+    setLotsDeAdresse(new Map());
+    setLotsChoisis([]);
+    setQLot("");
+    setSugLotsTranche([]);
+    setNiveauAdresse("rues");
+    setAdressePanelOuvert(false);
+    setModifie(false);
+  };
+
   /** Sélection d'un lot via la recherche globale (ER / locataire, sans TR encore choisie). */
   const choisirLotGlobal = (l: SuggestionLot) => {
     if (tranche && l.tranche_code !== tranche) {
@@ -215,11 +250,22 @@ export function useRecherchePatrimoine(options: {
     setCc(reference?.tranches.get(l.tranche_code)?.charge_clientele ?? "");
     setConflit(null);
     if (!lotsChoisis.some((x) => x.id === l.id)) setLotsChoisis((prev) => [...prev, l]);
+    // V7.5 §3 — la rue / le numéro / l'adresse du lot sont remplis immédiatement.
+    const r = rueDe(l.adresse);
+    const entree = entreeDe(l.adresse);
+    setRue(r);
+    setAdressesChoisies(entree ? [entree] : []);
+    setLotsDeAdresse((prev) => (entree ? new Map(prev).set(entree, [l]) : new Map(prev)));
+    setNiveauAdresse("numeros");
+    setAdressePanelOuvert(false);
     setSearchQuery("");
     setSugLots([]);
     setTrPanelOuvert(false);
-    setRue(rueDe(l.adresse));
-    setAdressesChoisies([entreeDe(l.adresse)]);
+    if (r) {
+      void rechercheNumerosFn({ data: { tranche: l.tranche_code, rue: r } }).then((n) =>
+        setNumeros((n ?? []) as string[]),
+      );
+    }
     setModifie(true);
   };
 
@@ -234,6 +280,14 @@ export function useRecherchePatrimoine(options: {
     setModifie(true);
     setConflit(null);
     if (!lotsChoisis.some((x) => x.id === l.id)) setLotsChoisis((prev) => [...prev, l]);
+    // V7.5 §3 — remplissage immédiat de la rue / du numéro / de l'adresse du lot.
+    const r = rueDe(l.adresse);
+    const entree = entreeDe(l.adresse);
+    if (r) setRue(r);
+    if (entree) {
+      setAdressesChoisies((prev) => (prev.includes(entree) ? prev : [...prev, entree]));
+      setLotsDeAdresse((prev) => (prev.has(entree) ? prev : new Map(prev).set(entree, [l])));
+    }
     setQLot("");
     setSugLotsTranche([]);
   };
@@ -336,10 +390,14 @@ export function useRecherchePatrimoine(options: {
     choisirTranche,
     effacerTranche,
     choisirLotGlobal,
+    resetTout,
     // hiérarchie adresse
     adressePanelOuvert,
     setAdressePanelOuvert,
     niveauAdresse,
+    setNiveauAdresse,
+    afficherGarages,
+    setAfficherGarages,
     qRue,
     setQRue,
     rues,

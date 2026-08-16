@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Building2, Pencil, Trash2 } from "lucide-react";
+import { Building2, Pencil } from "lucide-react";
 
 import PspSecteurBadge from "@/components/preparation-psp/PspSecteurBadge";
 import { Badge } from "@/components/ui/badge";
@@ -47,7 +47,7 @@ export default function PspOperationRow({
   lotsParId,
   onOpen,
   onModifier,
-  onSupprimer,
+  onDevis,
   onStatutPriorite,
   onNotes,
 }: {
@@ -56,7 +56,8 @@ export default function PspOperationRow({
   lotsParId: Map<string, LotInfo>;
   onOpen: (op: PspOperation) => void;
   onModifier: (op: PspOperation) => void;
-  onSupprimer: (id: string) => void;
+  /** V7.5 §10 — clic « Devis » : ouvre la fiche unique sur la section Devis. */
+  onDevis: (op: PspOperation) => void;
   onStatutPriorite: (id: string, patch: { statut?: string; priorite?: string }) => void;
   onNotes: (id: string, remarques: string) => void;
 }) {
@@ -124,15 +125,21 @@ export default function PspOperationRow({
         <span className="tabnum text-xs font-black">{money0(totalOperation(op))}</span>
       </TableCell>
       <TableCell className="py-2">
-        <span
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onDevis(op);
+          }}
+          title="Ouvrir la fiche d'édition sur la section Devis"
           className={cn(
-            "inline-flex items-center gap-1 text-[11px] font-bold",
+            "inline-flex items-center gap-1 text-[11px] font-bold hover:underline",
             nbDevis > 0 ? "text-emerald-700" : "text-muted-foreground",
           )}
         >
           <Building2 className="size-3" />
           {nbDevis > 0 ? `☑ Oui (${nbDevis})` : "☐ Non"}
-        </span>
+        </button>
       </TableCell>
 
       {/* Priorité — AVANT Statut : badge + sélecteur inline */}
@@ -223,19 +230,10 @@ export default function PspOperationRow({
             variant="ghost"
             size="icon"
             className="size-7 text-muted-foreground hover:text-primary"
-            title="Modifier"
+            title="Modifier (fiche unique : opération + devis + historique)"
             onClick={() => onModifier(op)}
           >
             <Pencil className="size-3.5" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="size-7 text-muted-foreground hover:text-destructive"
-            title="Supprimer"
-            onClick={() => onSupprimer(op.id)}
-          >
-            <Trash2 className="size-3.5" />
           </Button>
         </div>
       </TableCell>

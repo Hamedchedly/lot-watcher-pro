@@ -2,10 +2,11 @@ import { useEffect, useMemo, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { AlertTriangle, FlaskConical, Plus } from "lucide-react";
+import { AlertTriangle, FlaskConical, Plus, Users } from "lucide-react";
 import { toast } from "sonner";
 
 import PspAncienneProgrammation from "@/components/preparation-psp/PspAncienneProgrammation";
+import PspChargesClienteleDialog from "@/components/preparation-psp/PspChargesClienteleDialog";
 import PspEnveloppesDialog from "@/components/preparation-psp/PspEnveloppesDialog";
 import PspGroupingSelector, {
   type ModeAffichage,
@@ -33,11 +34,9 @@ import {
   PSP_OPERATIONS,
   ajouterOperationListe,
   construireCsvProgrammation,
-  deplacerOperation,
   kpiGlobal,
   modifierOperationListe,
   supprimerOperationListe,
-  type DeplacementMemo,
   type FiltresDetail,
   type PspAnnee,
   type PspCategorie,
@@ -107,6 +106,8 @@ function PreparationPspPage() {
   const [mode, setMode] = useState<ModeAffichage>("detail");
   const [filters, setFilters] = useState<FiltresDetail>(FILTRES_VIDES);
   const [selectedOpId, setSelectedOpId] = useState<string | null>(null);
+  /** V7.5 §10 — focus sur la section Devis à l'ouverture de la fiche. */
+  const [focusDevisId, setFocusDevisId] = useState<string | null>(null);
   const [ancienneOuverte, setAncienneOuverte] = useState(false);
   const [simulationOuverte, setSimulationOuverte] = useState(false);
   const [formOuvert, setFormOuvert] = useState(false);
@@ -117,6 +118,7 @@ function PreparationPspPage() {
   const [anneesFiltre, setAnneesFiltre] = useState<PspAnnee[]>([]);
   const [enveloppes, setEnveloppes] = useState<EnveloppeMap>({});
   const [enveloppesDialogOuvert, setEnveloppesDialogOuvert] = useState(false);
+  const [ccDialogOuvert, setCcDialogOuvert] = useState(false);
   const [perimetresParLigne, setPerimetresParLigne] = useState<Map<string, PerimetreLigne[]>>(
     new Map(),
   );
@@ -130,7 +132,6 @@ function PreparationPspPage() {
     type: "mock",
   });
   const [operations, setOperations] = useState<PspOperation[]>(() => PSP_OPERATIONS);
-  const [deplacements, setDeplacements] = useState<DeplacementMemo[]>([]);
   const [reference, setReference] = useState<ReferencePatrimoine | null>(null);
 
   // ── Persistance Supabase V6.2 : brouillon actif (jamais créé automatiquement) ──
@@ -247,7 +248,12 @@ function PreparationPspPage() {
   // (CC / adresse / ville / sous-secteur alignés sur les vraies données).
   useEffect(() => {
     if (!refBrute) return;
-    const ref = construireReferencePatrimoine(refBrute.tranches, refBrute.lots, refBrute.commandes);
+    const ref = construireReferencePatrimoine(
+      refBrute.tranches,
+      refBrute.lots,
+      refBrute.commandes,
+      refBrute.chargesClientele,
+    );
     setReference(ref);
     // Index id → lot pour le libellé de périmètre (affichage — jamais copié).
     const lots: Map<string, LotInfo> = new Map();
@@ -532,9 +538,15 @@ function PreparationPspPage() {
       toast.error("Programmation figée : modification impossible.");
       return;
     }
-    setFormMode("modification");
-    setFormOperation(op);
-    setFormOuvert(true);
+    // V7.5 §10 — le stylo ouvre la FICHE UNIQUE d'édition (formulaire + devis + historique).
+    setFocusDevisId(null);
+    setSelectedOpId(op.id);
+  };
+
+  /** V7.5 §10 — clic « Devis » : ouvre la même fiche sur la section Devis. */
+  const ouvrirDevis = (op: PspOperation) => {
+    setSelectedOpId(op.id);
+    setFocusDevisId(op.id);
   };
 
   const createLigneFn = useServerFn(createPspLigne);
@@ -718,8 +730,9 @@ function PreparationPspPage() {
     }
   };
 
-  const handleModifier = async (saisie: SaisieOperation) => {
-    if (!formOperation) return;
+  const handleModifier = async (saisie: SaisieOperation, operation?: PspOperation | null) => {
+    const cible = operation ?? formOperation;
+    if (!cible) return;
     if (figee) {
       toast.error("Programmation figée : modification impossible.");
       return;
@@ -760,16 +773,12 @@ function PreparationPspPage() {
     if (saisie.statut !== undefined) patch.statut = saisie.statut;
     if (saisie.priorite !== undefined) patch.priorite = saisie.priorite;
     setOperations((prev) =>
-      modifierOperationListe(
-        prev,
-        formOperation.id,
-        patch as Parameters<typeof modifierOperationListe>[2],
-      ),
+      modifierOperationListe(prev, cible.id, patch as Parameters<typeof modifierOperationListe>[2]),
     );
     try {
       const ligne = await updateCompleteFn({
         data: {
-          id: formOperation.id,
+          id: cible.id,
           trancheCode: saisie.tranche,
           categorie: saisie.categorie,
           corpsEtatCode: (saisie.corps_etat.match(/\(([^)]+)\)/)?.[1] ?? null) as string | null,
@@ -789,12 +798,12 @@ function PreparationPspPage() {
       });
       setPerimetresParLigne((prev) => {
         const next = new Map(prev);
-        next.set(formOperation.id, saisie.perimetres ?? []);
+        next.set(cible.id, saisie.perimetres ?? []);
         return next;
       });
       setOperations((prev) =>
         prev.map((o) =>
-          o.id === formOperation.id
+          o.id === cible.id
             ? {
                 ...o,
                 tranche: ligne.tranche_code,
@@ -849,30 +858,14 @@ function PreparationPspPage() {
     }
   };
 
-  const handleDeplacer = (id: string, cible: PspAnnee, motif: string | null) => {
-    if (figee) {
-      toast.error("Programmation figée : déplacement impossible.");
-      return;
-    }
-    const { ops, deplacement } = deplacerOperation(operations, id, cible, motif);
-    setOperations(ops);
-    if (deplacement) setDeplacements((prev) => [...prev, deplacement]);
-    if (deplacement) {
-      toast.success(
-        `Déplacée ${deplacement.anneePrecedente} → ${deplacement.anneeNouvelle} (${money0(deplacement.montant)}).`,
-      );
-    } else {
-      toast.info("Déplacement impossible : opération introuvable ou déjà sur cette année.");
-    }
-  };
-
   const handleSupprimer = async (id: string) => {
     if (figee) {
       toast.error("Programmation figée : suppression impossible.");
       return;
     }
-    if (!window.confirm("Supprimer cette opération du brouillon ?")) return;
+    // V7.5 §11 — la confirmation est portée par la fiche (AlertDialog). DELETE réel + SELECT vérifié.
     setOperations((prev) => supprimerOperationListe(prev, id));
+    setSelectedOpId(null);
     try {
       await deleteLigneFn({ data: { id } });
       toast.success("Opération supprimée (persistance Supabase).");
@@ -943,7 +936,19 @@ function PreparationPspPage() {
         ) : (
           <>
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <PspGroupingSelector mode={mode} onChange={setMode} />
+              <div className="flex flex-wrap items-center gap-2">
+                <PspGroupingSelector mode={mode} onChange={setMode} />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 text-[11px]"
+                  onClick={() => setCcDialogOuvert(true)}
+                  title="Consulter le référentiel sous-secteur → chargé de clientèle"
+                >
+                  <Users className="size-3.5" />
+                  Référentiel CC
+                </Button>
+              </div>
               <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
                 Source : {sourceLabel} · {operations.length} opérations · BUDGET_SOURCE = MOCK
               </p>
@@ -972,7 +977,7 @@ function PreparationPspPage() {
                 onFiltersChange={setFilters}
                 onOpenOperation={(op) => setSelectedOpId(op.id)}
                 onModifier={ouvrirModification}
-                onSupprimer={handleSupprimer}
+                onDevis={ouvrirDevis}
                 onStatutPriorite={handleStatutPriorite}
                 onNotes={handleNotes}
                 perimetresParLigne={perimetresParLigne}
@@ -996,12 +1001,16 @@ function PreparationPspPage() {
 
       <PspOperationDetail
         operation={selectedOp}
-        deplacements={deplacements}
+        perimetresLigne={perimetresParLigne.get(selectedOp?.id ?? "") ?? []}
+        reference={reference}
         figee={figee}
         historique={historiqueParLigne.get(selectedOp?.id ?? "") ?? []}
-        onClose={() => setSelectedOpId(null)}
-        onModifier={ouvrirModification}
-        onDeplacer={handleDeplacer}
+        focusDevis={focusDevisId === selectedOp?.id}
+        onClose={() => {
+          setSelectedOpId(null);
+          setFocusDevisId(null);
+        }}
+        onSave={(saisie) => void handleModifier(saisie, selectedOp)}
         onSupprimer={handleSupprimer}
         onDevisAdd={handleDevisAdd}
         onDevisUpdate={handleDevisUpdate}
@@ -1014,6 +1023,8 @@ function PreparationPspPage() {
         enveloppes={enveloppes}
         onSave={handleSaveEnveloppes}
       />
+
+      <PspChargesClienteleDialog open={ccDialogOuvert} onClose={() => setCcDialogOuvert(false)} />
 
       <PspOperationForm
         open={formOuvert}

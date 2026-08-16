@@ -95,7 +95,7 @@ export default function PspTable({
   onFiltersChange,
   onOpenOperation,
   onModifier,
-  onSupprimer,
+  onDevis,
   onStatutPriorite,
   onNotes,
   perimetresParLigne,
@@ -110,7 +110,7 @@ export default function PspTable({
   onFiltersChange: (f: FiltresDetail) => void;
   onOpenOperation: (op: PspOperation) => void;
   onModifier: (op: PspOperation) => void;
-  onSupprimer: (id: string) => void;
+  onDevis: (op: PspOperation) => void;
   onStatutPriorite: (id: string, patch: { statut?: string; priorite?: string }) => void;
   onNotes: (id: string, remarques: string) => void;
   perimetresParLigne: Map<string, PerimetreLigne[]>;
@@ -222,7 +222,7 @@ export default function PspTable({
                     lotsParId={lotsParId}
                     onOpen={onOpenOperation}
                     onModifier={onModifier}
-                    onSupprimer={onSupprimer}
+                    onDevis={onDevis}
                     onStatutPriorite={onStatutPriorite}
                     onNotes={onNotes}
                   />
@@ -252,7 +252,7 @@ export default function PspTable({
                         lotsParId={lotsParId}
                         onOpen={onOpenOperation}
                         onModifier={onModifier}
-                        onSupprimer={onSupprimer}
+                        onDevis={onDevis}
                         onStatutPriorite={onStatutPriorite}
                         onNotes={onNotes}
                       />
@@ -280,7 +280,7 @@ export default function PspTable({
                         lotsParId={lotsParId}
                         onOpen={onOpenOperation}
                         onModifier={onModifier}
-                        onSupprimer={onSupprimer}
+                        onDevis={onDevis}
                         onStatutPriorite={onStatutPriorite}
                         onNotes={onNotes}
                       />

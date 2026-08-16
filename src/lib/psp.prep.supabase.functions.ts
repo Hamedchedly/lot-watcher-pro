@@ -661,7 +661,7 @@ export const rechercherPatrimoineGlobal = createServerFn({ method: "POST" })
     if (chercheLots) {
       let query = db
         .from("lots")
-        .select("id, code_patrimoine, tranche_code, adresse, ville, locataire_nom")
+        .select("id, code_patrimoine, tranche_code, adresse, ville, locataire_nom, type_lot")
         .eq("actif", true);
       if (brut) {
         query = query.or(
@@ -681,17 +681,34 @@ export const getCorpsEtats = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
     const db = supabaseAdmin as any;
-    const { data: rows, error } = await db
-      .from("travaux_commandes")
-      .select("corps_etat")
-      .not("corps_etat", "is", null)
-      .limit(500);
-    if (error) throw new Error(`Lecture des corps d'état : ${error.message}`);
+    const PAGE = 1000;
     const set = new Set<string>();
-    for (const r of rows ?? []) {
-      const v = String(r["corps_etat"] ?? "").trim();
-      if (v) set.add(v);
+    const ajouter = (rows: Array<Record<string, unknown>>) => {
+      for (const r of rows) {
+        const v = String(r["corps_etat"] ?? "").trim();
+        if (v) set.add(v);
+      }
+    };
+    // V7.5 §9 — toutes les commandes (plus de cap 500 qui pouvait cacher des corps).
+    for (let from = 0; ; from += PAGE) {
+      const { data: rows, error } = await db
+        .from("travaux_commandes")
+        .select("corps_etat")
+        .not("corps_etat", "is", null)
+        .range(from, from + PAGE - 1);
+      if (error) throw new Error(`Lecture des corps d'état : ${error.message}`);
+      const page = (rows ?? []) as Array<Record<string, unknown>>;
+      ajouter(page);
+      if (page.length < PAGE) break;
     }
+    // Union : corps déjà saisis dans les lignes PSP (source légitime actuelle —
+    // aucun corps masqué, pas de seconde table).
+    const { data: lignes, error: errLignes } = await db
+      .from("psp_lignes")
+      .select("corps_etat")
+      .not("corps_etat", "is", null);
+    if (errLignes) throw new Error(`Lecture des corps d'état : ${errLignes.message}`);
+    ajouter((lignes ?? []) as Array<Record<string, unknown>>);
     const q = data.q.trim().toLowerCase();
     const liste = [...set].sort((a, b) => a.localeCompare(b));
     return q ? liste.filter((c) => c.toLowerCase().includes(q)).slice(0, 20) : liste.slice(0, 40);
@@ -707,7 +724,7 @@ export const rechercherLotsV7 = createServerFn({ method: "POST" })
     const db = supabaseAdmin as any;
     let query = db
       .from("lots")
-      .select("id, code_patrimoine, tranche_code, adresse, ville, locataire_nom")
+      .select("id, code_patrimoine, tranche_code, adresse, ville, locataire_nom, type_lot")
       .eq("actif", true);
     const q = data.q.trim();
     if (q) {
@@ -773,7 +790,7 @@ export const rechercherLotsAdresse = createServerFn({ method: "POST" })
     const db = supabaseAdmin as any;
     const { data: rows, error } = await db
       .from("lots")
-      .select("id, code_patrimoine, tranche_code, adresse, ville, locataire_nom")
+      .select("id, code_patrimoine, tranche_code, adresse, ville, locataire_nom, type_lot")
       .eq("tranche_code", data.tranche)
       .eq("actif", true)
       .limit(600);

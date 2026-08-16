@@ -14,12 +14,19 @@ import { createServerFn } from "@tanstack/react-start";
 
 import { parseProgrammationWorkbook } from "./psp.prep.data.ts";
 import { parseTravauxWorkbook } from "./travaux.ts";
-import type { CommandeRaw, LotRaw, TrancheRaw } from "./psp.prep.data.ts";
+import type {
+  ChargesClienteleReferentiel,
+  CommandeRaw,
+  LotRaw,
+  TrancheRaw,
+} from "./psp.prep.data.ts";
 
 export type DonneesReferenceBrutes = {
   tranches: TrancheRaw[];
   lots: LotRaw[];
   commandes: CommandeRaw[];
+  /** Référentiel actuel sous_secteur → chargé de clientèle (V7.5). */
+  chargesClientele: ChargesClienteleReferentiel[];
 };
 
 export const getPspReferencePatrimoine = createServerFn({ method: "GET" }).handler(
@@ -70,13 +77,34 @@ export const getPspReferencePatrimoine = createServerFn({ method: "GET" }).handl
       if (page.length < PAGE) break;
     }
 
+    const chargesClienteleResult = await db
+      .from("psp_charges_clientele")
+      .select("sous_secteur, charge_clientele, identifiant_personnel, actif")
+      .eq("actif", true);
+    if (chargesClienteleResult.error) {
+      throw new Error(`Lecture du référentiel CC : ${chargesClienteleResult.error.message}`);
+    }
+
     return {
       tranches: (tranchesResult.data ?? []) as TrancheRaw[],
       lots,
       commandes,
+      chargesClientele: (chargesClienteleResult.data ?? []) as ChargesClienteleReferentiel[],
     };
   },
 );
+
+/** Consultation du référentiel chargé clientèle (V7.5 §8) — lecture seule. */
+export const getPspChargesClientele = createServerFn({ method: "GET" }).handler(async () => {
+  const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
+  const db = supabaseAdmin as any;
+  const { data, error } = await db
+    .from("psp_charges_clientele")
+    .select("sous_secteur, charge_clientele, identifiant_personnel, actif")
+    .order("sous_secteur", { ascending: true });
+  if (error) throw new Error(`Lecture du référentiel CC : ${error.message}`);
+  return (data ?? []) as ChargesClienteleReferentiel[];
+});
 
 /**
  * V4 — Lecture des VRAIS fichiers 2026 (programmation + suivi) via le MOTEUR

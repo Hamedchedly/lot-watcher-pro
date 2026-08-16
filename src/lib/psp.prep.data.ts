@@ -62,8 +62,18 @@ export type TrancheReference = {
   secteur: string | null;
   nb_logements: number | null;
   charge_clientele: string | null;
+  /** Identifiant personnel du chargé (référentiel V7.5) — null si inconnu. */
+  identifiant_personnel?: string | null;
   adresse_reference: string | null;
   ville: string | null;
+};
+
+/** Entrée du référentiel chargé clientèle (V7.5). */
+export type ChargesClienteleReferentiel = {
+  sous_secteur: string;
+  charge_clientele: string;
+  identifiant_personnel: string | null;
+  actif: boolean;
 };
 
 /** Dictionnaire des références réelles indexé par code de TR. */
@@ -96,12 +106,16 @@ const modeDe = (valeurs: Array<string | null>): string | null => {
  * Construit la référence patrimoniale réelle (pur, sans accès base).
  * - adresse de référence : adresse la plus fréquente des lots du TR ;
  * - ville : ville la plus fréquente des lots du TR, sinon `tranches.localite` ;
- * - chargé de clientèle : charge la plus fréquente des commandes du TR.
+ * - chargé de clientèle : RÉFÉRENTIEL EXPLICITE `chargesClientele` (V7.5)
+ *   résolu via `tranches.sous_secteur` ; à défaut, repli sur la charge la plus
+ *   fréquente des commandes du TR (jamais utilisé comme autorité si le
+ *   référentiel existe).
  */
 export const construireReferencePatrimoine = (
   tranches: TrancheRaw[],
   lots: LotRaw[],
   commandes: CommandeRaw[],
+  chargesClientele: ChargesClienteleReferentiel[] = [],
 ): ReferencePatrimoine => {
   const adressesParTranche = new Map<string, Array<string | null>>();
   const villesParTranche = new Map<string, Array<string | null>>();
@@ -121,11 +135,18 @@ export const construireReferencePatrimoine = (
     charges.push(c.charge_clientele);
     chargesParTranche.set(c.tranche_code, charges);
   }
+  // Référentiel explicite sous_secteur → CC actuel (autorité, si disponible).
+  const referentielParSousSecteur = new Map<string, ChargesClienteleReferentiel>();
+  for (const r of chargesClientele) {
+    if (!r.actif) continue;
+    referentielParSousSecteur.set(r.sous_secteur, r);
+  }
 
   const tranchesMap = new Map<string, TrancheReference>();
   for (const t of tranches) {
     const adresseReference = modeDe(adressesParTranche.get(t.code) ?? []);
     const villeLots = modeDe(villesParTranche.get(t.code) ?? []);
+    const referentiel = t.sous_secteur ? referentielParSousSecteur.get(t.sous_secteur) : undefined;
     tranchesMap.set(t.code, {
       code: t.code,
       libelle: t.libelle,
@@ -133,7 +154,9 @@ export const construireReferencePatrimoine = (
       sous_secteur: t.sous_secteur,
       secteur: t.secteur,
       nb_logements: t.nb_logements,
-      charge_clientele: modeDe(chargesParTranche.get(t.code) ?? []),
+      charge_clientele:
+        referentiel?.charge_clientele ?? modeDe(chargesParTranche.get(t.code) ?? []),
+      identifiant_personnel: referentiel?.identifiant_personnel ?? null,
       adresse_reference: adresseReference,
       ville: villeLots ?? t.localite,
     });

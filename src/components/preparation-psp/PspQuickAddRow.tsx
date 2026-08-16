@@ -143,6 +143,21 @@ export default function PspQuickAddRow({
             : undefined,
         },
       });
+      // V7.5 §6 — reset complet de la saisie directe (ligne vierge sous l'en-tête).
+      setCorpsEtat("");
+      setNature("");
+      setMontants({});
+      setDevisCoche(false);
+      setFournisseurQ("");
+      setSugFournisseurs([]);
+      setFournisseur(null);
+      setDevisMontant("");
+      setDevisNumero("");
+      setDevisDate("");
+      setPriorite("normale");
+      setStatut("a_definir");
+      setNotes("");
+      rec.resetTout();
       onSaved();
     } catch (e) {
       console.error("Échec de la saisie directe :", e);

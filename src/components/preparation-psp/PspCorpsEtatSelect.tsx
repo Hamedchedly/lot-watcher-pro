@@ -6,7 +6,7 @@
  *  · le badge C est dérivé automatiquement.
  */
 import { useEffect, useMemo, useState } from "react";
-import { Check, ChevronDown, Search } from "lucide-react";
+import { Check, ChevronDown, Plus, Search } from "lucide-react";
 import { useServerFn } from "@tanstack/react-start";
 
 import PspSecteurBadge from "@/components/preparation-psp/PspSecteurBadge";
@@ -80,8 +80,21 @@ export default function PspCorpsEtatSelect({
           </div>
         </div>
         <div className="max-h-52 overflow-auto p-1">
-          {groupes.length === 0 ? (
+          {groupes.length === 0 && !q.trim() ? (
             <p className="px-2 py-2 text-[10px] text-muted-foreground">Aucun corps d'état.</p>
+          ) : null}
+          {q.trim() ? (
+            <button
+              type="button"
+              className="flex w-full items-center justify-between gap-2 rounded bg-primary/5 px-2 py-1 text-left text-xs font-bold text-primary hover:bg-accent"
+              onClick={() => {
+                onValueChange(q.trim());
+                setOuvert(false);
+              }}
+            >
+              <span className="truncate">Utiliser « {q.trim()} »</span>
+              <Plus className="size-3.5 shrink-0" />
+            </button>
           ) : null}
           {groupes.map((g) => (
             <div key={g.categorie}>

@@ -58,6 +58,7 @@ export default function PspOperationForm({
   perimetresLigne,
   onSave,
   onClose,
+  embedded = false,
 }: {
   open: boolean;
   mode: "ajout" | "modification";
@@ -66,6 +67,8 @@ export default function PspOperationForm({
   perimetresLigne?: PerimetreLigne[];
   onSave: (saisie: SaisieOperation) => void;
   onClose: () => void;
+  /** V7.5 §10 — rend le corps du formulaire sans wrapper Dialog (fiche fusionnée). */
+  embedded?: boolean;
 }) {
   const [corpsEtat, setCorpsEtat] = useState("");
   const [nature, setNature] = useState("");
@@ -84,7 +87,7 @@ export default function PspOperationForm({
   });
 
   useEffect(() => {
-    if (!open) return;
+    if (!open && !embedded) return;
     if (mode === "modification" && operation) {
       setCorpsEtat(operation.corps_etat ?? "");
       setNature(operation.nature_travaux ?? "");
@@ -100,7 +103,7 @@ export default function PspOperationForm({
       setPriorite("normale");
       setRemarques("");
     }
-  }, [open, mode, operation]);
+  }, [open, mode, operation, embedded]);
 
   const total = useMemo(
     () => PSP_ANNEES.reduce((s, a, i) => s + (Number(programme[i]) || 0), 0),
@@ -136,7 +139,251 @@ export default function PspOperationForm({
   const anneeValide = programme.some((v) => Number(v) > 0);
   const valide = Boolean(rec.tranche) && Boolean(corpsEtat) && anneeValide;
 
-  return (
+  const corpsFormulaire = (
+    <div className="mt-4 space-y-3">
+      {/* TR + CC + Ch.Op */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="space-y-1 sm:col-span-2">
+          <Label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+            TR (recherche)
+          </Label>
+          {rec.tranche ? (
+            <div className="flex items-center justify-between gap-1 rounded-md border border-primary/40 bg-primary/10 px-2 py-1.5">
+              <span className="font-mono text-xs font-black">
+                {rec.tranche}
+                {rec.referenceTranche?.localite ? ` — ${rec.referenceTranche.localite}` : ""}
+              </span>
+              <button
+                onClick={rec.effacerTranche}
+                className="text-muted-foreground hover:text-destructive"
+                title="Changer de TR"
+              >
+                <X className="size-3.5" />
+              </button>
+            </div>
+          ) : (
+            <div className="relative">
+              <Input
+                value={rec.searchQuery}
+                onChange={(e) => {
+                  rec.setSearchQuery(e.target.value);
+                  rec.setTrPanelOuvert(true);
+                }}
+                onFocus={() => rec.setTrPanelOuvert(true)}
+                placeholder="1976 · ER.123 · DUPONT…"
+                className="h-8 text-xs"
+              />
+              {rec.trPanelOuvert && (rec.sugTranches.length > 0 || rec.sugLots.length > 0) ? (
+                <div className="absolute z-40 mt-1 max-h-44 w-full overflow-auto rounded-lg border bg-popover p-1 shadow-lg">
+                  {rec.sugTranches.map((t) => (
+                    <button
+                      key={t.code}
+                      className="flex w-full justify-between gap-2 rounded px-2 py-1 text-left text-xs hover:bg-accent"
+                      onClick={() => rec.choisirTranche(t.code)}
+                    >
+                      <span className="font-mono font-bold">{t.code}</span>
+                      <span className="text-muted-foreground">{t.localite ?? t.libelle}</span>
+                    </button>
+                  ))}
+                  {rec.sugLots.map((l) => (
+                    <button
+                      key={l.id}
+                      className="flex w-full justify-between gap-2 rounded px-2 py-1 text-left text-xs hover:bg-accent"
+                      onClick={() => rec.choisirLotGlobal(l)}
+                    >
+                      <span className="font-mono font-bold">{l.code_patrimoine}</span>
+                      <span className="truncate text-muted-foreground">
+                        {l.locataire_nom ? `${l.locataire_nom} · ` : ""}
+                        {l.adresse}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          )}
+          {rec.alerteTranche ? (
+            <p className="text-[10px] font-bold text-amber-600">{rec.alerteTranche}</p>
+          ) : null}
+          <p className="text-[10px] text-muted-foreground">
+            Tranche : <span className="font-mono font-bold">{rec.tranche ?? "—"}</span> · CC :{" "}
+            <span className="font-bold">{rec.cc || "calculée"}</span>
+          </p>
+        </div>
+
+        <div className="space-y-1">
+          <Label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+            C — catégorie (auto)
+          </Label>
+          <div className="flex h-8 items-center gap-2 rounded-md border bg-surface px-2">
+            <PspSecteurBadge categorie={categorie} />
+            <span className="font-mono text-xs font-black text-primary">{categorie}</span>
+          </div>
+        </div>
+
+        <div className="space-y-1">
+          <Label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+            Ch. Op.
+          </Label>
+          <Input
+            value={CHARGE_OPERATION}
+            readOnly
+            className="h-8 text-xs font-black uppercase"
+            title="Chargé d'opération fixe pour cette programmation"
+          />
+        </div>
+      </div>
+
+      {rec.referenceTranche ? (
+        <div className="flex items-start gap-2 rounded-lg border border-primary/20 bg-primary/5 p-2.5 text-xs">
+          <Wand2 className="mt-0.5 size-3.5 shrink-0 text-primary" />
+          <span>
+            Référence réelle — {rec.referenceTranche.localite ?? "ville inconnue"} · sous-secteur{" "}
+            {rec.referenceTranche.sous_secteur ?? "—"} · {rec.referenceTranche.nb_logements ?? "—"}{" "}
+            logements
+          </span>
+        </div>
+      ) : null}
+
+      {/* Périmètre patrimonial — hiérarchie TR → rues → numéros → lots (V7.4) */}
+      <div className="rounded-lg border bg-surface/60 p-2.5">
+        <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+          Périmètre patrimonial
+        </p>
+        <div className="relative mt-1">
+          <PspAdressePanel rec={rec} />
+        </div>
+        {rec.conflit ? (
+          <p className="mt-1 text-[10px] font-bold text-destructive">{rec.conflit}</p>
+        ) : null}
+      </div>
+
+      {/* Corps d'état + nature */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div className="space-y-1 sm:col-span-1">
+          <Label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+            Corps d'état (GE / GT / CP)
+          </Label>
+          <PspCorpsEtatSelect value={corpsEtat} onValueChange={setCorpsEtat} />
+          <p className="text-[9px] text-muted-foreground">
+            Catégorie C recalculée automatiquement.
+          </p>
+        </div>
+
+        <div className="space-y-1 sm:col-span-2">
+          <Label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+            Nature des travaux
+          </Label>
+          <Textarea
+            value={nature}
+            onChange={(e) => setNature(e.target.value)}
+            placeholder="Description métier des travaux (zone large)…"
+            rows={3}
+            className="text-xs"
+          />
+        </div>
+      </div>
+
+      {/* Montants 2027-2031 */}
+      <div>
+        <Label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+          Montants programmés 2027-2031 (€)
+        </Label>
+        <div className="mt-1 grid grid-cols-5 gap-1.5">
+          {PSP_ANNEES.map((a, i) => (
+            <div key={a} className="space-y-1">
+              <span className="block text-center font-mono text-[10px] font-black text-muted-foreground">
+                {a}
+              </span>
+              <Input
+                type="number"
+                min={0}
+                step={1000}
+                value={Number(programme[i]) || ""}
+                onChange={(e) =>
+                  setProgramme((p) => {
+                    const next = [...p];
+                    next[i] = Math.max(0, Number(e.target.value) || 0);
+                    return next;
+                  })
+                }
+                className="h-8 text-center text-xs tabular-nums"
+              />
+            </div>
+          ))}
+        </div>
+        <p className="tabnum mt-1.5 text-right text-xs font-black text-primary">
+          Total : {money0(total)}
+        </p>
+        {!anneeValide ? (
+          <p className="mt-1 rounded border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-bold text-amber-800">
+            Indiquez au moins une année de programmation avec un montant supérieur à 0.
+          </p>
+        ) : null}
+      </div>
+
+      {/* Statut + Priorité */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="space-y-1">
+          <Label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+            Statut
+          </Label>
+          <Select value={statut} onValueChange={setStatut}>
+            <SelectTrigger className="h-8 text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {Object.entries(STATUT_LABELS).map(([v, l]) => (
+                <SelectItem key={v} value={v}>
+                  {l}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1">
+          <Label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+            Priorité
+          </Label>
+          <Select value={priorite} onValueChange={setPriorite}>
+            <SelectTrigger className="h-8 text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {Object.entries(PRIORITE_LABELS).map(([v, l]) => (
+                <SelectItem key={v} value={v}>
+                  {l}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1 sm:col-span-2">
+          <Label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+            Notes / remarques
+          </Label>
+          <Textarea
+            value={remarques}
+            onChange={(e) => setRemarques(e.target.value)}
+            rows={2}
+            className="text-xs"
+            placeholder="Observations libres (persistées dans psp_lignes.remarques)"
+          />
+        </div>
+      </div>
+    </div>
+  );
+
+  return embedded ? (
+    <div className="space-y-3">
+      {corpsFormulaire}
+      <div className="flex justify-end">
+        <Button size="sm" disabled={!valide || saving} onClick={enregistrer}>
+          {mode === "ajout" ? "Ajouter l'opération" : "Enregistrer les modifications"}
+        </Button>
+      </div>
+    </div>
+  ) : (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-h-[90vh] w-[min(92vw,760px)] gap-0 p-0 sm:max-w-[760px]">
         <div className="max-h-[calc(90vh-4rem)] overflow-y-auto p-5">
@@ -149,240 +396,7 @@ export default function PspOperationForm({
               automatique, Ch. Op. = HCHEDLY. Aucune donnée patrimoniale recopiée.
             </DialogDescription>
           </DialogHeader>
-
-          <div className="mt-4 space-y-3">
-            {/* TR + CC + Ch.Op */}
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <div className="space-y-1 sm:col-span-2">
-                <Label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
-                  TR (recherche)
-                </Label>
-                {rec.tranche ? (
-                  <div className="flex items-center justify-between gap-1 rounded-md border border-primary/40 bg-primary/10 px-2 py-1.5">
-                    <span className="font-mono text-xs font-black">
-                      {rec.tranche}
-                      {rec.referenceTranche?.localite ? ` — ${rec.referenceTranche.localite}` : ""}
-                    </span>
-                    <button
-                      onClick={rec.effacerTranche}
-                      className="text-muted-foreground hover:text-destructive"
-                      title="Changer de TR"
-                    >
-                      <X className="size-3.5" />
-                    </button>
-                  </div>
-                ) : (
-                  <div className="relative">
-                    <Input
-                      value={rec.searchQuery}
-                      onChange={(e) => {
-                        rec.setSearchQuery(e.target.value);
-                        rec.setTrPanelOuvert(true);
-                      }}
-                      onFocus={() => rec.setTrPanelOuvert(true)}
-                      placeholder="1976 · ER.123 · DUPONT…"
-                      className="h-8 text-xs"
-                    />
-                    {rec.trPanelOuvert && (rec.sugTranches.length > 0 || rec.sugLots.length > 0) ? (
-                      <div className="absolute z-40 mt-1 max-h-44 w-full overflow-auto rounded-lg border bg-popover p-1 shadow-lg">
-                        {rec.sugTranches.map((t) => (
-                          <button
-                            key={t.code}
-                            className="flex w-full justify-between gap-2 rounded px-2 py-1 text-left text-xs hover:bg-accent"
-                            onClick={() => rec.choisirTranche(t.code)}
-                          >
-                            <span className="font-mono font-bold">{t.code}</span>
-                            <span className="text-muted-foreground">{t.localite ?? t.libelle}</span>
-                          </button>
-                        ))}
-                        {rec.sugLots.map((l) => (
-                          <button
-                            key={l.id}
-                            className="flex w-full justify-between gap-2 rounded px-2 py-1 text-left text-xs hover:bg-accent"
-                            onClick={() => rec.choisirLotGlobal(l)}
-                          >
-                            <span className="font-mono font-bold">{l.code_patrimoine}</span>
-                            <span className="truncate text-muted-foreground">
-                              {l.locataire_nom ? `${l.locataire_nom} · ` : ""}
-                              {l.adresse}
-                            </span>
-                          </button>
-                        ))}
-                      </div>
-                    ) : null}
-                  </div>
-                )}
-                {rec.alerteTranche ? (
-                  <p className="text-[10px] font-bold text-amber-600">{rec.alerteTranche}</p>
-                ) : null}
-                <p className="text-[10px] text-muted-foreground">
-                  Tranche : <span className="font-mono font-bold">{rec.tranche ?? "—"}</span> · CC :{" "}
-                  <span className="font-bold">{rec.cc || "calculée"}</span>
-                </p>
-              </div>
-
-              <div className="space-y-1">
-                <Label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
-                  C — catégorie (auto)
-                </Label>
-                <div className="flex h-8 items-center gap-2 rounded-md border bg-surface px-2">
-                  <PspSecteurBadge categorie={categorie} />
-                  <span className="font-mono text-xs font-black text-primary">{categorie}</span>
-                </div>
-              </div>
-
-              <div className="space-y-1">
-                <Label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
-                  Ch. Op.
-                </Label>
-                <Input
-                  value={CHARGE_OPERATION}
-                  readOnly
-                  className="h-8 text-xs font-black uppercase"
-                  title="Chargé d'opération fixe pour cette programmation"
-                />
-              </div>
-            </div>
-
-            {rec.referenceTranche ? (
-              <div className="flex items-start gap-2 rounded-lg border border-primary/20 bg-primary/5 p-2.5 text-xs">
-                <Wand2 className="mt-0.5 size-3.5 shrink-0 text-primary" />
-                <span>
-                  Référence réelle — {rec.referenceTranche.localite ?? "ville inconnue"} ·
-                  sous-secteur {rec.referenceTranche.sous_secteur ?? "—"} ·{" "}
-                  {rec.referenceTranche.nb_logements ?? "—"} logements
-                </span>
-              </div>
-            ) : null}
-
-            {/* Périmètre patrimonial — hiérarchie TR → rues → numéros → lots (V7.4) */}
-            <div className="rounded-lg border bg-surface/60 p-2.5">
-              <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
-                Périmètre patrimonial
-              </p>
-              <div className="relative mt-1">
-                <PspAdressePanel rec={rec} />
-              </div>
-              {rec.conflit ? (
-                <p className="mt-1 text-[10px] font-bold text-destructive">{rec.conflit}</p>
-              ) : null}
-            </div>
-
-            {/* Corps d'état + nature */}
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-              <div className="space-y-1 sm:col-span-1">
-                <Label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
-                  Corps d'état (GE / GT / CP)
-                </Label>
-                <PspCorpsEtatSelect value={corpsEtat} onValueChange={setCorpsEtat} />
-                <p className="text-[9px] text-muted-foreground">
-                  Catégorie C recalculée automatiquement.
-                </p>
-              </div>
-
-              <div className="space-y-1 sm:col-span-2">
-                <Label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
-                  Nature des travaux
-                </Label>
-                <Textarea
-                  value={nature}
-                  onChange={(e) => setNature(e.target.value)}
-                  placeholder="Description métier des travaux (zone large)…"
-                  rows={3}
-                  className="text-xs"
-                />
-              </div>
-            </div>
-
-            {/* Montants 2027-2031 */}
-            <div>
-              <Label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
-                Montants programmés 2027-2031 (€)
-              </Label>
-              <div className="mt-1 grid grid-cols-5 gap-1.5">
-                {PSP_ANNEES.map((a, i) => (
-                  <div key={a} className="space-y-1">
-                    <span className="block text-center font-mono text-[10px] font-black text-muted-foreground">
-                      {a}
-                    </span>
-                    <Input
-                      type="number"
-                      min={0}
-                      step={1000}
-                      value={Number(programme[i]) || ""}
-                      onChange={(e) =>
-                        setProgramme((p) => {
-                          const next = [...p];
-                          next[i] = Math.max(0, Number(e.target.value) || 0);
-                          return next;
-                        })
-                      }
-                      className="h-8 text-center text-xs tabular-nums"
-                    />
-                  </div>
-                ))}
-              </div>
-              <p className="tabnum mt-1.5 text-right text-xs font-black text-primary">
-                Total : {money0(total)}
-              </p>
-              {!anneeValide ? (
-                <p className="mt-1 rounded border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-bold text-amber-800">
-                  Indiquez au moins une année de programmation avec un montant supérieur à 0.
-                </p>
-              ) : null}
-            </div>
-
-            {/* Statut + Priorité */}
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <div className="space-y-1">
-                <Label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
-                  Statut
-                </Label>
-                <Select value={statut} onValueChange={setStatut}>
-                  <SelectTrigger className="h-8 text-xs">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {Object.entries(STATUT_LABELS).map(([v, l]) => (
-                      <SelectItem key={v} value={v}>
-                        {l}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1">
-                <Label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
-                  Priorité
-                </Label>
-                <Select value={priorite} onValueChange={setPriorite}>
-                  <SelectTrigger className="h-8 text-xs">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {Object.entries(PRIORITE_LABELS).map(([v, l]) => (
-                      <SelectItem key={v} value={v}>
-                        {l}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1 sm:col-span-2">
-                <Label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
-                  Notes / remarques
-                </Label>
-                <Textarea
-                  value={remarques}
-                  onChange={(e) => setRemarques(e.target.value)}
-                  rows={2}
-                  className="text-xs"
-                  placeholder="Observations libres (persistées dans psp_lignes.remarques)"
-                />
-              </div>
-            </div>
-          </div>
-
+          {corpsFormulaire}
           <DialogFooter className="mt-4">
             <Button variant="ghost" size="sm" onClick={onClose}>
               Annuler

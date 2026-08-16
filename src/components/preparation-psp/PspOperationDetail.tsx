@@ -1,18 +1,30 @@
+/**
+ * V7.5 §10-12 — FICHE UNIQUE d'édition d'une opération (fusion saisie/modification
+ * et devis) :
+ *  · formulaire complet embarqué (TR, CC, périmètre/ER, corps d'état, catégorie,
+ *    nature, années/montants, statut, priorité, notes) via `PspOperationForm` ;
+ *  · section Devis (PspDevisPanel) ;
+ *  · historique des modifications (psp_ligne_historique, repliable) ;
+ *  · [Supprimer] UNIQUEMENT ici (confirmation) + [Fermer] ;
+ *  · le clic « Devis » ouvre la fiche sur la section Devis (focusDevis).
+ */
 import { useEffect, useRef, useState } from "react";
-import {
-  ArrowRight,
-  ChevronDown,
-  ChevronRight,
-  FileText,
-  History,
-  MapPin,
-  Pencil,
-  Trash2,
-} from "lucide-react";
+import { ChevronDown, ChevronRight, FileText, History, Trash2 } from "lucide-react";
 
 import PspDevisPanel, { type DevisEdit } from "@/components/preparation-psp/PspDevisPanel";
+import PspOperationForm from "@/components/preparation-psp/PspOperationForm";
 import PspSecteurBadge from "@/components/preparation-psp/PspSecteurBadge";
-import { Badge } from "@/components/ui/badge";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
@@ -23,268 +35,95 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { money0 } from "@/lib/formats";
-import {
-  PSP_ANNEES,
-  montantAnnee,
-  totalOperation,
-  type DeplacementMemo,
-  type PspAnnee,
-  type PspOperation,
-} from "@/lib/psp.prep";
-import { PRIORITE_LABELS, STATUT_LABELS, diffHistorique } from "@/lib/psp.prep.v7";
-import { cn } from "@/lib/utils";
+import { diffHistorique } from "@/lib/psp.prep.v7";
+import type { PerimetreLigne } from "@/lib/psp.prep.v7";
+import type { PspOperation, SaisieOperation } from "@/lib/psp.prep";
+import type { ReferencePatrimoine } from "@/lib/psp.prep.data";
 
-/** Chargé d'opération FIXE pour la programmation courante (V7.4 §4). */
-const CHARGE_OPERATION = "HCHEDLY";
-
-/**
- * Fiche opération (panneau latéral style Dialog) : tous les champs métier,
- * la programmation 2027-2031, le statut / la priorité, le bloc Devis (éditable
- * via psp_devis), le déplacement d'année et la mémoire locale des mouvements.
- */
 export default function PspOperationDetail({
   operation,
-  deplacements,
-  figee,
+  perimetresLigne,
+  reference,
   historique = [],
-  onClose,
-  onModifier,
-  onDeplacer,
+  figee,
+  focusDevis = false,
+  onSave,
   onSupprimer,
   onDevisAdd,
   onDevisUpdate,
   onDevisDelete,
+  onClose,
 }: {
   operation: PspOperation | null;
-  deplacements: DeplacementMemo[];
-  figee: boolean;
-  /** Historique des modifications (psp_ligne_historique) — V7.3. */
+  perimetresLigne: PerimetreLigne[];
+  reference: ReferencePatrimoine | null;
   historique?: Array<Record<string, unknown>>;
-  onClose: () => void;
-  onModifier: (op: PspOperation) => void;
-  onDeplacer: (id: string, cible: PspAnnee, motif: string | null) => void;
+  figee: boolean;
+  /** V7.5 §10 — clic « Devis » : ouvre la fiche sur la section Devis. */
+  focusDevis?: boolean;
+  onSave: (saisie: SaisieOperation) => void;
   onSupprimer: (id: string) => void;
   onDevisAdd: (ligneId: string, d: DevisEdit) => Promise<void>;
   onDevisUpdate: (id: string, d: DevisEdit) => Promise<void>;
   onDevisDelete: (id: string) => Promise<void>;
+  onClose: () => void;
 }) {
   const devisRef = useRef<HTMLDivElement>(null);
-  const mouvementsRef = useRef<HTMLDivElement>(null);
-  const historiqueRef = useRef<HTMLDivElement>(null);
-  const [cible, setCible] = useState<number>(2028);
-  const [motif, setMotif] = useState<string>("");
   const [historiqueOuvert, setHistoriqueOuvert] = useState(false);
 
   useEffect(() => {
     if (!operation) return undefined;
-    setCible(operation.annee === 2027 ? 2028 : 2027);
-    setMotif("");
-    const timer = window.setTimeout(
-      () => devisRef.current?.scrollIntoView({ block: "nearest" }),
-      150,
-    );
-    return () => window.clearTimeout(timer);
-  }, [operation]);
+    setHistoriqueOuvert(false);
+    if (focusDevis) {
+      const t = window.setTimeout(
+        () => devisRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }),
+        200,
+      );
+      return () => window.clearTimeout(t);
+    }
+    return undefined;
+  }, [operation, focusDevis]);
 
   if (!operation) return null;
 
-  const mouvements = deplacements.filter((d) => d.operationId === operation.id);
-
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-h-[90vh] w-[min(92vw,640px)] gap-0 p-0 sm:max-w-[640px]">
-        <ScrollArea className="max-h-[calc(90vh-4rem)]">
+      <DialogContent className="max-h-[92vh] w-[min(94vw,840px)] gap-0 p-0 sm:max-w-[840px]">
+        <ScrollArea className="max-h-[calc(92vh-4rem)]">
           <div className="p-5">
             <DialogHeader className="space-y-2">
-              <div className="flex items-start justify-between gap-2">
-                <div className="flex items-start gap-2">
-                  <div className="rounded-lg bg-primary/10 p-1.5 text-primary">
-                    <FileText className="size-4" />
-                  </div>
-                  <DialogTitle className="text-base font-black leading-snug">
-                    {operation.nature_travaux}
-                  </DialogTitle>
-                </div>
-                {operation.reportee ? (
-                  <Badge className="border-amber-200 bg-amber-50 text-amber-700">REPORTÉ</Badge>
-                ) : null}
-              </div>
-              <DialogDescription className="flex items-center gap-1.5 text-xs">
-                <MapPin className="size-3" />
-                {operation.adresse}, {operation.ville} — Tranche {operation.tranche}
+              <DialogTitle className="flex items-center gap-2 text-base">
+                <FileText className="size-4 text-primary" />
+                Modifier l'opération — TR {operation.tranche}
+                <PspSecteurBadge categorie={operation.categorie} />
+              </DialogTitle>
+              <DialogDescription>
+                Fiche unique : périmètre / ER, corps d'état, montants 2027-2031, devis, statut,
+                priorité, notes, historique. Ch. Op. = HCHEDLY.
               </DialogDescription>
             </DialogHeader>
 
-            <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
-              <Champ label="Tranche" valeur={operation.tranche} />
-              <Champ label="Chargé clientèle" valeur={operation.charge_clientele} large />
-              <Champ
-                label="Chargé opération"
-                valeur={operation.charge_operation || CHARGE_OPERATION}
+            {/* Formulaire complet (embedded) */}
+            <div className="mt-4">
+              <PspOperationForm
+                embedded
+                open={false}
+                mode="modification"
+                operation={operation}
+                reference={reference}
+                perimetresLigne={perimetresLigne}
+                onSave={onSave}
+                onClose={onClose}
               />
-              <div className="rounded-lg border bg-surface/60 p-2.5">
-                <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
-                  C — catégorie budgétaire
-                </p>
-                <p className="mt-0.5">
-                  <PspSecteurBadge categorie={operation.categorie} />
-                </p>
-              </div>
-              <Champ label="Sous-secteur" valeur={operation.sous_secteur ?? "—"} />
-              <Champ label="Budget" valeur={money0(operation.budget)} accent />
-              <Champ label="Corps d'état" valeur={operation.corps_etat} large />
-              <div className="rounded-lg border bg-surface/60 p-2.5">
-                <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
-                  Statut
-                </p>
-                <p className="mt-0.5">
-                  <Badge className={cn("font-bold", statutStyle(operation.statut ?? "a_definir"))}>
-                    {STATUT_LABELS[operation.statut ?? "a_definir"] ?? operation.statut}
-                  </Badge>
-                </p>
-              </div>
-              <div className="rounded-lg border bg-surface/60 p-2.5">
-                <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
-                  Priorité
-                </p>
-                <p className="mt-0.5">
-                  <Badge
-                    className={cn("font-bold", prioriteStyle(operation.priorite ?? "normale"))}
-                  >
-                    {PRIORITE_LABELS[operation.priorite ?? "normale"] ?? operation.priorite}
-                  </Badge>
-                </p>
-              </div>
             </div>
 
-            <div className="mt-3 rounded-lg border bg-surface/60 p-2.5">
-              <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
-                Programmation {PSP_ANNEES[0] ?? 2027} → {PSP_ANNEES[PSP_ANNEES.length - 1] ?? 2031}
+            {/* Section Devis (focus via clic « Devis ») */}
+            <div ref={devisRef} className="mt-4">
+              <p className="mb-1 flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+                <FileText className="size-3.5" />
+                Devis
               </p>
-              <div className="mt-1.5 grid grid-cols-5 gap-1.5">
-                {PSP_ANNEES.map((annee) => {
-                  const montant = montantAnnee(operation, annee);
-                  return (
-                    <div
-                      key={annee}
-                      className={
-                        annee === operation.annee
-                          ? "rounded-md border border-primary/40 bg-primary/5 px-1.5 py-1.5 text-center"
-                          : "rounded-md border bg-card px-1.5 py-1.5 text-center"
-                      }
-                    >
-                      <p className="font-mono text-[10px] font-black text-muted-foreground">
-                        {annee}
-                      </p>
-                      <p className="tabnum text-[11px] font-bold">
-                        {montant > 0 ? money0(montant) : "—"}
-                      </p>
-                    </div>
-                  );
-                })}
-              </div>
-              <p className="tabnum mt-1.5 text-right text-xs font-black text-primary">
-                Total : {money0(totalOperation(operation))}
-              </p>
-            </div>
-
-            {operation.remarques ? (
-              <div className="mt-3 rounded-lg border bg-surface/60 p-2.5">
-                <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
-                  Remarques
-                </p>
-                <p className="mt-0.5 text-xs">{operation.remarques}</p>
-              </div>
-            ) : null}
-
-            {operation.reportee && operation.ancienne_annee && operation.ancien_montant ? (
-              <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50/60 p-2.5">
-                <p className="text-[10px] font-black uppercase tracking-widest text-amber-700">
-                  Ancienne programmation
-                </p>
-                <p className="mt-0.5 text-xs">
-                  {operation.nature_travaux} — {operation.ancienne_annee} →{" "}
-                  <span className="font-bold">{money0(operation.ancien_montant)}</span>
-                </p>
-              </div>
-            ) : null}
-
-            <div className="mt-3 rounded-lg border border-primary/20 bg-primary/5 p-2.5">
-              <p className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest text-primary">
-                <ArrowRight className="size-3.5" />
-                Déplacer l'opération
-              </p>
-              <p className="mt-1 text-[11px] text-muted-foreground">
-                {money0(montantAnnee(operation, operation.annee))} programmé en {operation.annee}
-              </p>
-              <div className="mt-2 flex flex-wrap items-center gap-2">
-                <Select value={String(cible)} onValueChange={(v) => setCible(Number(v))}>
-                  <SelectTrigger className="h-8 w-[110px] text-xs">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {PSP_ANNEES.filter((a) => a !== operation.annee).map((a) => (
-                      <SelectItem key={a} value={String(a)}>
-                        Vers {a}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Input
-                  value={motif}
-                  onChange={(e) => setMotif(e.target.value)}
-                  placeholder="Motif du déplacement (en mémoire)"
-                  className="h-8 min-w-[180px] flex-1 text-xs"
-                />
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-8"
-                  onClick={() => onDeplacer(operation.id, cible as PspAnnee, motif.trim() || null)}
-                >
-                  <ArrowRight className="size-3.5" />
-                  Déplacer
-                </Button>
-              </div>
-            </div>
-
-            {mouvements.length > 0 ? (
-              <div ref={mouvementsRef} className="mt-3 rounded-lg border bg-surface/60 p-2.5">
-                <p className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest text-muted-foreground">
-                  <History className="size-3.5" />
-                  Mouvements en mémoire
-                </p>
-                <ul className="mt-1 space-y-1">
-                  {mouvements.map((d) => (
-                    <li
-                      key={d.id}
-                      className="flex flex-wrap items-center justify-between gap-1 text-xs"
-                    >
-                      <span>
-                        <span className="font-mono font-bold">{d.anneePrecedente}</span> →{" "}
-                        <span className="font-mono font-bold">{d.anneeNouvelle}</span>
-                        {d.motif ? (
-                          <span className="text-muted-foreground"> · {d.motif}</span>
-                        ) : null}
-                      </span>
-                      <span className="tabnum font-bold">{money0(d.montant)}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-
-            <div ref={devisRef} className="mt-3">
               <PspDevisPanel
                 operation={operation}
                 figee={figee}
@@ -293,8 +132,9 @@ export default function PspOperationDetail({
                 onDelete={onDevisDelete}
               />
             </div>
-            {/* V7.4 — Historique des modifications (psp_ligne_historique) — bloc repliable */}
-            <div ref={historiqueRef} className="mt-3 rounded-lg border bg-card">
+
+            {/* Historique des modifications (psp_ligne_historique) — repliable */}
+            <div className="mt-3 rounded-lg border bg-card">
               <Collapsible open={historiqueOuvert} onOpenChange={setHistoriqueOuvert}>
                 <CollapsibleTrigger asChild>
                   <button
@@ -306,7 +146,7 @@ export default function PspOperationDetail({
                       Historique des modifications
                     </span>
                     <span className="flex items-center gap-1 text-[10px] font-bold text-muted-foreground">
-                      {(historique ?? []).length > 0 ? `${historique.length} entrée(s)` : ""}
+                      {historique.length > 0 ? `${historique.length} entrée(s)` : ""}
                       {historiqueOuvert ? (
                         <ChevronDown className="size-3.5" />
                       ) : (
@@ -316,7 +156,7 @@ export default function PspOperationDetail({
                   </button>
                 </CollapsibleTrigger>
                 <CollapsibleContent>
-                  {historique && historique.length > 0 ? (
+                  {historique.length > 0 ? (
                     <ol className="space-y-2 border-t px-3 py-2">
                       {historique.map((h, i) => {
                         const operationText = String(h["operation"] ?? "modification");
@@ -376,44 +216,36 @@ export default function PspOperationDetail({
               </Collapsible>
             </div>
 
-            <DialogFooter className="mt-4 flex-col-reverse gap-2 sm:flex-row sm:justify-start">
-              <Button variant="outline" size="sm" onClick={() => onModifier(operation)}>
-                <Pencil className="size-3.5" />
-                Modifier
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() =>
-                  devisRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" })
-                }
-              >
-                <FileText className="size-3.5" />
-                Voir devis
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() =>
-                  mouvementsRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" })
-                }
-              >
-                <History className="size-3.5" />
-                Historique
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-destructive hover:text-destructive"
-                onClick={() => {
-                  onSupprimer(operation.id);
-                  onClose();
-                }}
-              >
-                <Trash2 className="size-3.5" />
-                Supprimer
-              </Button>
-              <Button variant="ghost" size="sm" onClick={onClose}>
+            {/* Suppression — UNIQUEMENT ici (V7.5 §11), séparée des actions */}
+            <DialogFooter className="mt-4 flex-col-reverse items-stretch gap-2 border-t border-dashed pt-3 sm:flex-row sm:items-center sm:justify-between">
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="destructive" size="sm" disabled={figee}>
+                    <Trash2 className="size-3.5" />
+                    Supprimer l'opération
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Supprimer cette opération ?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      La suppression est définitive : DELETE réel dans Supabase, périmètre
+                      patrimonial supprimé par cascade. L'historique de la ligne est également
+                      supprimé (cascade du mécanisme existant).
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Annuler</AlertDialogCancel>
+                    <AlertDialogAction
+                      className="bg-destructive text-white hover:bg-destructive/90"
+                      onClick={() => onSupprimer(operation.id)}
+                    >
+                      Supprimer
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+              <Button variant="outline" size="sm" onClick={onClose}>
                 Fermer
               </Button>
             </DialogFooter>
@@ -423,50 +255,3 @@ export default function PspOperationDetail({
     </Dialog>
   );
 }
-
-function Champ({
-  label,
-  valeur,
-  accent,
-  large,
-}: {
-  label: string;
-  valeur: string;
-  accent?: boolean;
-  large?: boolean;
-}) {
-  return (
-    <div
-      className={
-        large
-          ? "rounded-lg border bg-surface/60 p-2.5 sm:col-span-2"
-          : "rounded-lg border bg-surface/60 p-2.5"
-      }
-    >
-      <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
-        {label}
-      </p>
-      <p
-        className={
-          accent ? "tabnum mt-0.5 text-sm font-black text-primary" : "mt-0.5 text-sm font-medium"
-        }
-      >
-        {valeur}
-      </p>
-    </div>
-  );
-}
-
-const statutStyle = (s: string): string =>
-  ({
-    a_definir: "border-amber-200 bg-amber-50 text-amber-800",
-    attente_agence: "border-blue-200 bg-blue-50 text-blue-800",
-    attente_confirmation: "border-violet-200 bg-violet-50 text-violet-800",
-  })[s] ?? "border-border bg-muted text-muted-foreground";
-
-const prioriteStyle = (p: string): string =>
-  ({
-    prioritaire: "border-red-200 bg-red-50 text-red-800",
-    normale: "border-slate-200 bg-slate-100 text-slate-700",
-    non_prioritaire: "border-border bg-muted text-muted-foreground",
-  })[p] ?? "border-border bg-muted text-muted-foreground";

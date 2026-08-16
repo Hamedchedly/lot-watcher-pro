@@ -18,6 +18,22 @@ import { entreeDe, rueDe } from "./adresses.ts";
 
 // ── 1. Corps d'état → catégorie (mapping centralisé, réutilisable) ──────────────
 // Source : fichier de programmation 2026 réel (code lettre entre parenthèses).
+/** V7.5 §5 — types « garage » identifiés par le champ métier `lots.type_lot`. */
+const TYPES_GARAGE_V75 = new Set(["GAR", "BOX"]);
+
+/**
+ * V7.5 §5 — vrai si un lot est un garage/box (filtre d'affichage uniquement,
+ * jamais une suppression en base). Source métier : `lots.type_lot`.
+ */
+export const estLotGarage = (l: { type_lot?: string | null }): boolean =>
+  Boolean(l.type_lot && TYPES_GARAGE_V75.has(String(l.type_lot).toUpperCase()));
+
+/** V7.5 §5 — filtre les garages d'une liste de lots (sans muter la liste). */
+export const sansGarages = <T extends { type_lot?: string | null }>(
+  lots: T[],
+  afficherGarages: boolean,
+): T[] => (afficherGarages ? lots : lots.filter((l) => !estLotGarage(l)));
+
 export const CORPS_ETAT_CATEGORIE: Record<string, PspCategorie> = {
   // GT
   c: "GT",
