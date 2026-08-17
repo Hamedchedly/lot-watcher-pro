@@ -78,50 +78,95 @@ export const filtrerOperationsSuivi = (
 // ── Tri ──────────────────────────────────────────────────────────────────────
 
 export type CleTriSuivi =
-  "tranche" | "categorie" | "nature" | "montant" | "commande" | "cc" | "annee";
+  | "tranche"
+  | "sous_secteur"
+  | "cc"
+  | "corps_etat"
+  | "categorie"
+  | "nature"
+  | "montant"
+  | "consultation"
+  | "devis"
+  | "commande"
+  | "travaux"
+  | "annee"
+  | "origine";
 
+/**
+ * V8.4.1 — moteur de tri UNIQUE (généralisé) du registre Opérations.
+ * Conserve le comportement antérieur et ajoute les colonnes du tableau :
+ * sous_secteur, corps_etat, consultation, devis, travaux, origine.
+ * Aucun deuxième moteur de tri.
+ */
 export const trierOperationsSuivi = (
   operations: SuiviOperationVue[],
   cle: CleTriSuivi,
   asc: boolean,
 ): SuiviOperationVue[] => {
   const dir = asc ? 1 : -1;
-  return [...operations].sort((a, b) => {
-    let va: string | number;
-    let vb: string | number;
+  const valeur = (o: SuiviOperationVue): string | number => {
     switch (cle) {
       case "tranche":
-        va = a.identite.tranche;
-        vb = b.identite.tranche;
-        break;
-      case "categorie":
-        va = a.identite.categorie;
-        vb = b.identite.categorie;
-        break;
-      case "nature":
-        va = a.programmation.nature ?? "";
-        vb = b.programmation.nature ?? "";
-        break;
-      case "montant":
-        va = a.programmation.montant_total;
-        vb = b.programmation.montant_total;
-        break;
-      case "commande":
-        va = a.commandes.liees[0]?.numero_commande ?? "";
-        vb = b.commandes.liees[0]?.numero_commande ?? "";
-        break;
+        return o.identite.tranche;
+      case "sous_secteur":
+        return o.programmation.sous_secteur ?? "";
       case "cc":
-        va = a.programmation.cc ?? "";
-        vb = b.programmation.cc ?? "";
-        break;
+        return o.programmation.cc ?? "";
+      case "corps_etat":
+        return o.programmation.corps_etat ?? "";
+      case "categorie":
+        return o.identite.categorie;
+      case "nature":
+        return o.programmation.nature ?? "";
+      case "montant":
+        return o.programmation.montant_total;
+      case "consultation":
+        // État de consultation : priorité au statut (retenu > reçu > envoyée > rien).
+        return STATUT_CONSULTATION_RANG[o.consultation.statut] ?? 0;
+      case "devis":
+        return o.consultation.devis_retenu != null
+          ? 3
+          : o.consultation.nb_devis_recus > 0
+            ? 2
+            : o.consultation.nb_demandes > 0
+              ? 1
+              : 0;
+      case "commande":
+        return o.commandes.liees[0]?.numero_commande ?? "";
+      case "travaux":
+        return STATUT_EXECUTION_RANG[o.execution.statut] ?? 0;
       case "annee":
-        va = a.programmation.annee_premiere ?? 0;
-        vb = b.programmation.annee_premiere ?? 0;
-        break;
+        return o.programmation.annee_premiere ?? 0;
+      case "origine":
+        return o.identite.origine === "hors_psp" ? "Hors PSP" : "PSP";
     }
+  };
+  return [...operations].sort((a, b) => {
+    const va = valeur(a);
+    const vb = valeur(b);
     if (typeof va === "number" && typeof vb === "number") return (va - vb) * dir;
     return String(va).localeCompare(String(vb), "fr", { sensitivity: "base" }) * dir;
   });
+};
+
+/** Rang de tri de l'état de consultation (dérivé — aucun état inventé). */
+const STATUT_CONSULTATION_RANG: Record<string, number> = {
+  pas_consulte: 0,
+  demande_a_envoyer: 1,
+  en_attente: 2,
+  relance_necessaire: 3,
+  devis_recu: 4,
+  devis_retenu: 5,
+  consultation_abandonnee: 6,
+};
+
+/** Rang de tri de l'état d'exécution (dérivé — aucun état inventé). */
+const STATUT_EXECUTION_RANG: Record<string, number> = {
+  sans_commande: 0,
+  travaux_a_demarrer: 1,
+  travaux_en_cours: 2,
+  pas_realisee: 3,
+  travaux_termines: 4,
 };
 
 // ── KPI ──────────────────────────────────────────────────────────────────────

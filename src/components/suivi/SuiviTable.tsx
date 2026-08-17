@@ -5,7 +5,7 @@
  * Les montants détaillés restent dans la fiche. Aucun MOCK.
  */
 import { useMemo, useState } from "react";
-import { Search } from "lucide-react";
+import { ArrowDown, ArrowUp, Search } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -14,6 +14,8 @@ import {
   FILTRES_SUIVI_VIDES,
   filtrerOperationsSuivi,
   kpiSuivi,
+  trierOperationsSuivi,
+  type CleTriSuivi,
   type FiltresSuivi,
 } from "@/lib/psp.suivi.view";
 import type { SuiviOperationVue } from "@/lib/psp.suivi.foundation";
@@ -31,10 +33,46 @@ export default function SuiviTable({
   const [filtres, setFiltres] = useState<FiltresSuivi>(FILTRES_SUIVI_VIDES);
   const set = (patch: Partial<FiltresSuivi>) => setFiltres((f) => ({ ...f, ...patch }));
   const kpi = useMemo(() => kpiSuivi(operations), [operations]);
-  const visibles = useMemo(
-    () => filtrerOperationsSuivi(operations, filtres),
-    [operations, filtres],
-  );
+
+  // V8.4.1 — tri par clic sur les en-têtes (moteur UNIQUE trierOperationsSuivi).
+  const [cleTri, setCleTri] = useState<CleTriSuivi | null>(null);
+  const [asc, setAsc] = useState(true);
+
+  const visibles = useMemo(() => {
+    const filtresApliques = filtrerOperationsSuivi(operations, filtres);
+    return cleTri ? trierOperationsSuivi(filtresApliques, cleTri, asc) : filtresApliques;
+  }, [operations, filtres, cleTri, asc]);
+
+  const basculerTri = (cle: CleTriSuivi) => {
+    if (cleTri === cle) {
+      setAsc((v) => !v);
+    } else {
+      setCleTri(cle);
+      setAsc(true);
+    }
+  };
+
+  const Th = ({ cle, children }: { cle: CleTriSuivi; children: React.ReactNode }) => {
+    const actif = cleTri === cle;
+    return (
+      <th
+        className="cursor-pointer select-none px-2 py-1.5 font-bold hover:bg-muted/60"
+        onClick={() => basculerTri(cle)}
+        title="Trier"
+      >
+        <span className="inline-flex items-center gap-1">
+          {children}
+          {actif ? (
+            asc ? (
+              <ArrowUp className="size-2.5" />
+            ) : (
+              <ArrowDown className="size-2.5" />
+            )
+          ) : null}
+        </span>
+      </th>
+    );
+  };
 
   return (
     <div className="space-y-3">
@@ -90,16 +128,16 @@ export default function SuiviTable({
         <table className="w-full min-w-[860px] text-left text-[11px]">
           <thead>
             <tr className="border-b bg-muted/40 text-[9px] uppercase tracking-wider text-muted-foreground">
-              <th className="px-2 py-1.5 font-bold">Opération</th>
-              <th className="px-2 py-1.5 font-bold">TR</th>
-              <th className="px-2 py-1.5 font-bold">Sous-secteur</th>
-              <th className="px-2 py-1.5 font-bold">CC</th>
-              <th className="px-2 py-1.5 font-bold">Corps d&apos;état</th>
-              <th className="px-2 py-1.5 font-bold">Programmation</th>
-              <th className="px-2 py-1.5 font-bold">Consultation</th>
-              <th className="px-2 py-1.5 font-bold">Devis</th>
-              <th className="px-2 py-1.5 font-bold">Commande</th>
-              <th className="px-2 py-1.5 font-bold">Travaux</th>
+              <Th cle="nature">Opération</Th>
+              <Th cle="tranche">TR</Th>
+              <Th cle="sous_secteur">Sous-secteur</Th>
+              <Th cle="cc">CC</Th>
+              <Th cle="corps_etat">Corps d&apos;état</Th>
+              <Th cle="montant">Programmation</Th>
+              <Th cle="consultation">Consultation</Th>
+              <Th cle="devis">Devis</Th>
+              <Th cle="commande">Commande</Th>
+              <Th cle="travaux">Travaux</Th>
             </tr>
           </thead>
           <tbody>
