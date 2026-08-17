@@ -39,7 +39,7 @@ import {
   construireMailto,
   dateRetourParDefaut,
 } from "@/lib/psp.suivi.foundation";
-import { comparatifDevis } from "@/lib/psp.suivi.view";
+import { comparatifDevis, etapesAvancement } from "@/lib/psp.suivi.view";
 import type { SuiviOperationVue } from "@/lib/psp.suivi.foundation";
 
 const fmtDate = (v: string | null | undefined): string =>
@@ -102,7 +102,26 @@ export default function SuiviOperationFiche({
                 {p.nature ?? "Sans nature"} · {p.corps_etat ?? "Corps d'état non renseigné"} · CC{" "}
                 {p.cc ?? "—"} · Priorité {p.priorite ?? "normale"}
               </DialogDescription>
-            </DialogHeader>{" "}
+            </DialogHeader>
+            {/* V8.2.1 §5 — chaîne d avancement (états RÉELS) */}
+            <div className="mt-3 rounded-lg border bg-muted/30 p-2">
+              <p className="mb-1 text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+                Avancement
+              </p>
+              <ol className="space-y-0.5">
+                {etapesAvancement(operation).map((etape) => (
+                  <li key={etape.code} className="flex items-center gap-2 text-[11px]">
+                    <span className={etape.atteint ? "text-emerald-600" : "text-muted-foreground"}>
+                      {etape.atteint ? "●" : "○"}
+                    </span>
+                    <span className={etape.atteint ? "font-semibold" : "text-muted-foreground"}>
+                      {etape.label}
+                    </span>
+                    <span className="text-[9px] text-muted-foreground">↓</span>
+                  </li>
+                ))}
+              </ol>
+            </div>{" "}
             {/* ── PROGRAMMATION ── */}
             <Section title="Programmation" icon={Wallet}>
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">

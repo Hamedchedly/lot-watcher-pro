@@ -34,7 +34,12 @@ import {
   type SaisieOperation,
 } from "@/lib/psp.prep";
 import type { ReferencePatrimoine } from "@/lib/psp.prep.data";
-import { PRIORITE_LABELS, STATUT_LABELS, type PerimetreLigne } from "@/lib/psp.prep.v7";
+import {
+  PRIORITE_LABELS,
+  STATUT_LABELS,
+  type LotInfo,
+  type PerimetreLigne,
+} from "@/lib/psp.prep.v7";
 
 /** Chargé d'opération FIXE pour la programmation — jamais saisi. */
 const CHARGE_OPERATION = "HCHEDLY";
@@ -52,6 +57,7 @@ export default function PspOperationForm({
   operation,
   reference,
   perimetresLigne,
+  lotsParId,
   onSave,
   onClose,
   embedded = false,
@@ -61,6 +67,8 @@ export default function PspOperationForm({
   operation: PspOperation | null;
   reference: ReferencePatrimoine | null;
   perimetresLigne?: PerimetreLigne[];
+  /** V8.2.1 — restauration des lots du périmètre en modification. */
+  lotsParId?: Map<string, LotInfo> | null | undefined;
   onSave: (saisie: SaisieOperation) => void;
   onClose: () => void;
   /** V7.5 §10 — rend le corps du formulaire sans wrapper Dialog (fiche fusionnée). */
@@ -80,6 +88,7 @@ export default function PspOperationForm({
       tranche: operation?.tranche ?? null,
       perimetres: perimetresLigne ?? [],
     },
+    lotsParId,
   });
   /** V7.6 §13 — catégorie C dérivée du RÉFÉRENTIEL corps d'état (autorité). */
   const { categorieDe } = useReferentielCorpsEtats();

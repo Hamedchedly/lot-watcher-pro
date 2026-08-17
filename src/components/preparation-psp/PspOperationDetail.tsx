@@ -12,6 +12,7 @@ import { useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, FileText, History, Trash2 } from "lucide-react";
 
 import PspDevisPanel, { type DevisEdit } from "@/components/preparation-psp/PspDevisPanel";
+import PspDemandeDevisWorkflow from "@/components/preparation-psp/PspDemandeDevisWorkflow";
 import PspOperationForm from "@/components/preparation-psp/PspOperationForm";
 import PspSecteurBadge from "@/components/preparation-psp/PspSecteurBadge";
 import PspSuiviApercu from "@/components/preparation-psp/PspSuiviApercu";
@@ -38,13 +39,14 @@ import {
 } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { diffHistorique } from "@/lib/psp.prep.v7";
-import type { PerimetreLigne } from "@/lib/psp.prep.v7";
+import type { LotInfo, PerimetreLigne } from "@/lib/psp.prep.v7";
 import type { PspOperation, SaisieOperation } from "@/lib/psp.prep";
 import type { ReferencePatrimoine } from "@/lib/psp.prep.data";
 
 export default function PspOperationDetail({
   operation,
   perimetresLigne,
+  lotsParId,
   reference,
   historique = [],
   figee,
@@ -54,10 +56,13 @@ export default function PspOperationDetail({
   onDevisAdd,
   onDevisUpdate,
   onDevisDelete,
+  onDemandeEnvoyee = async () => undefined,
   onClose,
 }: {
   operation: PspOperation | null;
   perimetresLigne: PerimetreLigne[];
+  /** V8.2.1 — restauration du périmètre (lots) en modification. */
+  lotsParId?: Map<string, LotInfo> | null | undefined;
   reference: ReferencePatrimoine | null;
   historique?: Array<Record<string, unknown>>;
   figee: boolean;
@@ -68,6 +73,8 @@ export default function PspOperationDetail({
   onDevisAdd: (ligneId: string, d: DevisEdit) => Promise<void>;
   onDevisUpdate: (id: string, d: DevisEdit) => Promise<void>;
   onDevisDelete: (id: string) => Promise<void>;
+  /** V8.2.1 — rafraîchit le brouillon après enregistrement d'une demande de devis. */
+  onDemandeEnvoyee?: () => Promise<void>;
   onClose: () => void;
 }) {
   const devisRef = useRef<HTMLDivElement>(null);
@@ -114,6 +121,7 @@ export default function PspOperationDetail({
                 operation={operation}
                 reference={reference}
                 perimetresLigne={perimetresLigne}
+                lotsParId={lotsParId}
                 onSave={onSave}
                 onClose={onClose}
               />
@@ -131,6 +139,15 @@ export default function PspOperationDetail({
                 onAdd={(d) => onDevisAdd(operation.id, d)}
                 onUpdate={onDevisUpdate}
                 onDelete={onDevisDelete}
+              />
+            </div>
+
+            {/* V8.2.1 — workflow demande de devis (suggestions + mailto + enregistrement) */}
+            <div className="mt-3">
+              <PspDemandeDevisWorkflow
+                operation={operation}
+                figee={figee}
+                onEnvoye={onDemandeEnvoyee}
               />
             </div>
 

@@ -395,9 +395,14 @@ export const rattacherCommandes = (
 ): CommandeLieeSuivi[] => {
   const parId = new Map(commandes.map((c) => [c.id, c]));
   const result: CommandeLieeSuivi[] = [];
+  // V8.2.1 — une commande liée par plusieurs liens est comptée UNE seule fois
+  // (les montants ne doivent jamais être double-comptés).
+  const vues = new Set<string>();
   for (const lien of liens) {
     const cmd = parId.get(lien.commande_id);
     if (!cmd) continue; // commande absente (ne rien inventer)
+    if (vues.has(cmd.id)) continue; // dédoublonnage V8.2.1
+    vues.add(cmd.id);
     const rapprochement = statutRapprochementDepuisLien(lien);
     result.push({
       lien_id: lien.id,

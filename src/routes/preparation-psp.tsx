@@ -1091,6 +1091,7 @@ function PreparationPspPage() {
       <PspOperationDetail
         operation={selectedOp}
         perimetresLigne={perimetresParLigne.get(selectedOp?.id ?? "") ?? []}
+        lotsParId={lotsParId}
         reference={reference}
         figee={figee}
         historique={historiqueParLigne.get(selectedOp?.id ?? "") ?? []}
@@ -1104,6 +1105,9 @@ function PreparationPspPage() {
         onDevisAdd={handleDevisAdd}
         onDevisUpdate={handleDevisUpdate}
         onDevisDelete={handleDevisDelete}
+        onDemandeEnvoyee={async () => {
+          await queryClient.invalidateQueries({ queryKey: ["psp-brouillon-supabase"] });
+        }}
       />
 
       <PspSettingsDialog

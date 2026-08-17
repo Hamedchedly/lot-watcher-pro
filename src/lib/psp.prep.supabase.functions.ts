@@ -658,7 +658,10 @@ export const rechercherPatrimoineGlobal = createServerFn({ method: "POST" })
     } = { tranches: [], lots: [] };
 
     const chercheTranches = type === "tranche" || type === "mixte";
-    const chercheLots = type === "lot" || type === "mixte";
+    // V8.2.1 — une entrée NUMÉRIQUE (ex. « 33334 » pour ER.33334) cherche aussi
+    // les lots : le format réel des ER est « ER.33334 » (dots), jamais deviné.
+    const chercheLots =
+      type === "lot" || type === "mixte" || (type === "tranche" && /^\d/.test(brut));
 
     if (chercheTranches) {
       let query = db
@@ -678,9 +681,16 @@ export const rechercherPatrimoineGlobal = createServerFn({ method: "POST" })
         .select("id, code_patrimoine, tranche_code, adresse, ville, locataire_nom, type_lot")
         .eq("actif", true);
       if (brut) {
-        query = query.or(
-          `code_patrimoine.ilike.%${brut}%,adresse.ilike.%${brut}%,locataire_nom.ilike.%${brut}%`,
-        );
+        const num = brut.replace(/\D/g, "");
+        const filtres = [
+          `code_patrimoine.ilike.%${brut}%`,
+          `adresse.ilike.%${brut}%`,
+          `locataire_nom.ilike.%${brut}%`,
+        ];
+        // V8.2.1 — ER numérique (ex. « 33334 » pour ER.33334) : la forme sans
+        // séparateur doit aussi matcher le code réel (points / espaces).
+        if (num && num !== brut) filtres.push(`code_patrimoine.ilike.%${num}%`);
+        query = query.or(filtres.join(","));
       }
       const { data: rows, error } = await query.order("code_patrimoine").limit(25);
       if (!error) result.lots = rows ?? [];
@@ -859,9 +869,15 @@ export const rechercherLotsV7 = createServerFn({ method: "POST" })
       .eq("actif", true);
     const q = data.q.trim();
     if (q) {
-      query = query.or(
-        `code_patrimoine.ilike.%${q}%,adresse.ilike.%${q}%,locataire_nom.ilike.%${q}%`,
-      );
+      const num = q.replace(/\D/g, "");
+      const filtres = [
+        `code_patrimoine.ilike.%${q}%`,
+        `adresse.ilike.%${q}%`,
+        `locataire_nom.ilike.%${q}%`,
+      ];
+      // V8.2.1 — ER numérique : matcher aussi le code réel sans séparateur.
+      if (num && num !== q) filtres.push(`code_patrimoine.ilike.%${num}%`);
+      query = query.or(filtres.join(","));
     }
     if (data.tranche) query = query.eq("tranche_code", data.tranche);
     const { data: rows, error } = await query.order("code_patrimoine").limit(25);
@@ -1341,7 +1357,7 @@ export const getPspEntreprisesSuggestions = createServerFn({ method: "POST" })
       corpsEtat = ligne?.corps_etat ?? null;
     }
 
-    const [fournisseursR, activitesR, aliasesR, commandesR] = await Promise.all([
+    const [fournisseursR, activitesR, aliasesR, commandesR, contactsR] = await Promise.all([
       db.from("fournisseurs").select("id, nom"),
       db
         .from("fournisseur_activites")
@@ -1351,6 +1367,7 @@ export const getPspEntreprisesSuggestions = createServerFn({ method: "POST" })
         .from("travaux_commandes")
         .select("id, numero_fournisseur, corps_etat, budget, annee_exercice")
         .not("numero_fournisseur", "is", null),
+      db.from("fournisseurs_contacts").select("fournisseur_id, email").not("email", "is", null),
     ]);
     if (fournisseursR.error)
       throw new Error(`Lecture des fournisseurs : ${fournisseursR.error.message}`);
@@ -1381,7 +1398,16 @@ export const getPspEntreprisesSuggestions = createServerFn({ method: "POST" })
       niveau: a.niveau as "principal" | "secondaire" | "occasionnel",
     }));
 
-    return recommanderEntreprises({
+    const emailParFournisseur = new Map<string, string>();
+    for (const c of contactsR.data ?? []) {
+      const email = String(c.email ?? "").trim();
+      if (!email) continue;
+      if (!emailParFournisseur.has(c.fournisseur_id)) {
+        emailParFournisseur.set(c.fournisseur_id, email);
+      }
+    }
+
+    const suggestions = recommanderEntreprises({
       fournisseurs: (fournisseursR.data ?? []).map((f: any) => ({
         id: f.id as string,
         nom: f.nom as string,
@@ -1391,6 +1417,10 @@ export const getPspEntreprisesSuggestions = createServerFn({ method: "POST" })
       corps_etat_operation: corpsEtat,
       limite: data.limite ?? 20,
     }) as SuggestionEntreprise[];
+    return suggestions.map((s) => ({
+      ...s,
+      email: emailParFournisseur.get(s.fournisseur_id) ?? null,
+    }));
   });
 
 // ── V8.2 — SUIVI OPÉRATION : liste agrégée (batch, aucun N+1) ─────────────────

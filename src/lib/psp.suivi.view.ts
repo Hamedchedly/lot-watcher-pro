@@ -203,6 +203,7 @@ export type ComparatifDevis = {
 
 /**
  * Comparatif des devis reçus : réutilise `statsDevis` (V7.10 — ignore les
+
  * montants null). Le devis retenu est mis en évidence, jamais imposé.
  */
 export const comparatifDevis = (devis: DevisSuivi[]): ComparatifDevis => {
@@ -217,4 +218,44 @@ export const comparatifDevis = (devis: DevisSuivi[]): ComparatifDevis => {
     max: stats?.max ?? null,
     retenu,
   };
+};
+
+// ── Chaîne d'avancement (V8.2.1 §5) ─────────────────────────────────────────
+
+export type EtapeAvancement = {
+  code: string;
+  label: string;
+  atteint: boolean;
+};
+
+/**
+ * Chaîne d'avancement d'une opération (états RÉELS, jamais inventés) :
+ * PROGRAMMATION → CONSULTATION → DEMANDES DE DEVIS → DEVIS REÇUS →
+ * DEVIS RETENU → COMMANDE → TRAVAUX EN COURS → TERMINÉ.
+ * Consulté depuis `SuiviOperationVue` (socle V8.1) — aucun état stocké.
+ */
+export const etapesAvancement = (op: SuiviOperationVue): EtapeAvancement[] => {
+  const ex = op.execution.statut;
+  return [
+    { code: "programmation", label: "Programmation", atteint: op.programmation.montant_total > 0 },
+    {
+      code: "consultation",
+      label: "Consultation",
+      atteint: op.consultation.nb_entreprises_consultees > 0,
+    },
+    {
+      code: "demandes_devis",
+      label: "Demandes de devis",
+      atteint: op.consultation.nb_demandes > 0,
+    },
+    { code: "devis_recus", label: "Devis reçus", atteint: op.consultation.nb_devis_recus > 0 },
+    { code: "devis_retenu", label: "Devis retenu", atteint: op.consultation.devis_retenu != null },
+    { code: "commande", label: "Commande", atteint: op.commandes.nb_commandes > 0 },
+    {
+      code: "travaux_en_cours",
+      label: "Travaux en cours",
+      atteint: ex === "travaux_en_cours" || ex === "travaux_a_demarrer",
+    },
+    { code: "termine", label: "Terminé", atteint: ex === "travaux_termines" },
+  ];
 };

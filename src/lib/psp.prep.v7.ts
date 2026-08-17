@@ -385,6 +385,53 @@ export function construirePerimetres(input: {
  * Programmé par année × catégorie — règle unique utilisée par la répartition
  * annuelle (PspKpi) et testable. Clé `${annee}|${categorie}`. Jamais stocké.
  */
+/**
+ * V8.2.1 — Restauration du périmètre en MODIFICATION : transforme les périmètres
+ * « lot » (lot_id) en suggestions affichables (chips) via `lotsParId`
+ * (code_patrimoine, adresse, ville). Retourne [] si l'info lot est absente —
+ * les champs TR / rue / adresses restent restaurés indépendamment.
+ */
+export function suggestionsLotsDepuisPerimetres(
+  perimetres: PerimetreLigne[],
+  lotsParId: Map<string, LotInfo> | null,
+  tranche: string | null,
+): Array<{
+  id: string;
+  code_patrimoine: string;
+  tranche_code: string;
+  adresse: string | null;
+  ville: string | null;
+  locataire_nom?: string | null;
+  type_lot?: string | null;
+}> {
+  if (!lotsParId || !perimetres) return [];
+  const result: Array<{
+    id: string;
+    code_patrimoine: string;
+    tranche_code: string;
+    adresse: string | null;
+    ville: string | null;
+    locataire_nom?: string | null;
+    type_lot?: string | null;
+  }> = [];
+  const vus = new Set<string>();
+  for (const p of perimetres) {
+    if (p.niveau !== "lot" || !p.lot_id) continue;
+    if (vus.has(p.lot_id)) continue;
+    vus.add(p.lot_id);
+    const info = lotsParId.get(p.lot_id);
+    if (!info?.code_patrimoine) continue;
+    result.push({
+      id: p.lot_id,
+      code_patrimoine: info.code_patrimoine,
+      tranche_code: tranche ?? "",
+      adresse: info.adresse,
+      ville: info.ville,
+    });
+  }
+  return result;
+}
+
 export function programmeParAnneeCategorie(ops: PspOperation[]): Record<string, number> {
   const m: Record<string, number> = {};
   for (const op of ops) {
@@ -411,6 +458,8 @@ export function detecterRecherchePatrimoine(q: string): TypeRecherchePatrimoine 
   const texte = (q ?? "").trim();
   if (!texte) return "mixte";
   if (/^ER[.\s\d-]*$/i.test(texte) || /^ER[.\s\d-]/.test(texte)) return "lot";
+  // V8.2.1 — un ER numérique (ex. « 33334 ») reste classé « tranche » (compat V7.3) ;
+  // la requête côté serveur élargit la recherche aux lots pour les entrées numériques.
   if (/^\d/.test(texte)) return "tranche";
   if (/^TR\s*\d/i.test(texte)) return "tranche";
   return "mixte";

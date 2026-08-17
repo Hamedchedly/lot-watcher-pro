@@ -14,6 +14,8 @@ import {
   libelleCcManquant,
   resumeSelectionAdresse,
   sansGarages,
+  suggestionsLotsDepuisPerimetres,
+  type LotInfo,
   type PerimetreLigne,
 } from "@/lib/psp.prep.v7";
 import { entreeDe, rueDe } from "@/lib/adresses";
@@ -49,11 +51,23 @@ export { estLotGarage, sansGarages };
 export function useRecherchePatrimoine(options: {
   reference: ReferencePatrimoine | null;
   initial?: { tranche: string | null; perimetres?: PerimetreLigne[] };
+  /** V8.2.1 — restauration des lots sélectionnés en modification (lot_id → chips). */
+  lotsParId?: Map<string, LotInfo> | null | undefined;
 }) {
   const { reference } = options;
   const initialPerimetres = useMemo(
     () => options.initial?.perimetres ?? [],
     [options.initial?.perimetres],
+  );
+  /** V8.2.1 — lots sélectionnés restaurés depuis le périmètre initial (modification). */
+  const initialLots = useMemo(
+    () =>
+      suggestionsLotsDepuisPerimetres(
+        initialPerimetres,
+        options.lotsParId ?? null,
+        options.initial?.tranche ?? null,
+      ),
+    [initialPerimetres, options.lotsParId, options.initial?.tranche],
   );
 
   const rechercheGlobaleFn = useServerFn(rechercherPatrimoineGlobal);
@@ -63,7 +77,8 @@ export function useRecherchePatrimoine(options: {
   const rechercheLotsAdresseFn = useServerFn(rechercherLotsAdresse);
 
   // ── TR : searchQuery (temporaire) vs selectedTranche (persistant) ──
-  const [searchQuery, setSearchQuery] = useState("");
+  // V8.2.1 — le champ de recherche affiche la TR sélectionnée (modification).
+  const [searchQuery, setSearchQuery] = useState(options.initial?.tranche ?? "");
   const [sugTranches, setSugTranches] = useState<SuggestionTranche[]>([]);
   const [sugLots, setSugLots] = useState<SuggestionLot[]>([]);
   const [trPanelOuvert, setTrPanelOuvert] = useState(false);
@@ -93,7 +108,8 @@ export function useRecherchePatrimoine(options: {
       .map((p) => `${p.numero} ${p.rue}`.trim()),
   );
   const [lotsDeAdresse, setLotsDeAdresse] = useState<Map<string, SuggestionLot[]>>(new Map());
-  const [lotsChoisis, setLotsChoisis] = useState<SuggestionLot[]>([]);
+  /** V8.2.1 — lots sélectionnés restaurés en modification (périmètre initial). */
+  const [lotsChoisis, setLotsChoisis] = useState<SuggestionLot[]>(initialLots);
 
   // ── Recherche de lot dans la tranche (ER / locataire) ──
   const [qLot, setQLot] = useState("");
