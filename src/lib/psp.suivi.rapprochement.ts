@@ -564,3 +564,31 @@ export const evaluerCorrespondance = (
     statutLien: lienExistant?.statut ?? null,
   };
 };
+
+// ── Dérivation d'affichage (V8.5.2 — n'affecte PAS le moteur) ─────────────────
+
+export type ExerceCorrespondance = "courant" | "futur" | "historique" | "inconnu";
+
+/**
+ * Dérive la relation d'exercice entre une opération programmée et une commande.
+ * Règle métier : commande historique (exercice antérieur à la programmation) =
+ * « Historique — exercice différent », priorité visuelle réduite.
+ * Le moteur V8.5.1 n'est PAS modifié (aucun changement de seuils ni de score).
+ */
+export const deriverExerciceCorrespondance = (
+  anneesProgrammation: number[],
+  exerciceCommande: number | null,
+): { type: ExerceCorrespondance; libelle: string } => {
+  if (exerciceCommande == null) return { type: "inconnu", libelle: "Exercice non renseigné" };
+  const annees = anneesProgrammation.filter((a) => Number.isFinite(a));
+  if (annees.length === 0) return { type: "inconnu", libelle: "Opération non programmée" };
+  const min = Math.min(...annees);
+  const max = Math.max(...annees);
+  if (exerciceCommande >= min && exerciceCommande <= max) {
+    return { type: "courant", libelle: `Exercice ${exerciceCommande} (courant)` };
+  }
+  if (exerciceCommande < min) {
+    return { type: "historique", libelle: `Historique — exercice ${exerciceCommande} différent` };
+  }
+  return { type: "futur", libelle: `Exercice ${exerciceCommande} (futur)` };
+};

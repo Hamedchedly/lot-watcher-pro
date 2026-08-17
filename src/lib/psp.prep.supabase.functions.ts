@@ -26,6 +26,13 @@ import {
   construireSuiviOperation,
 } from "./psp.suivi.foundation.ts";
 import {
+  proposerRapprochements,
+  type OperationRapprochement,
+  type LienRapprochement,
+  type CommandeRapprochement,
+  type FournisseurRapprochement,
+} from "./psp.suivi.rapprochement.ts";
+import {
   categorieDepuisCorpsEtat,
   detecterRecherchePatrimoine,
   lotsDeAdresse,
@@ -1814,4 +1821,130 @@ export const getPspLignesHistorique = createServerFn({ method: "POST" })
       .order("created_at", { ascending: false });
     if (error) throw new Error(`Lecture de l'historique : ${error.message}`);
     return rows ?? [];
+  });
+
+/**
+ * V8.5.2 — REVUE DES CORRESPONDANCES COMMANDES (lecture seule, batch).
+ *
+ * Charge en quelques requêtes : opérations (lignes + périmètres + devis +
+ * entreprises consultées), commandes importées, liens existants, référentiels
+ * (fournisseurs/alias, lots ER) puis exécute le moteur PUR V8.5.1
+ * (`proposerRapprochements`) pour chaque opération.
+ *
+ * AUCUNE écriture : psp_command_links, psp_lignes, travaux_commandes et tables
+ * d'import restent intangibles. La validation/rattachement = V8.5.3.
+ */
+export const getPspCorrespondances = createServerFn({ method: "POST" })
+  .validator((d: unknown) => z.object({ pspLigneId: z.string().uuid() }).parse(d))
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
+    const db = supabaseAdmin as any;
+
+    // Batch : toutes les opérations + dépendances en quelques requêtes.
+    const [lignesR, perimetresR, devisR, commandesR, liensR, fournisseursR, aliasesR, lotsR] =
+      await Promise.all([
+        db.from("psp_lignes").select("*"),
+        db.from("psp_ligne_patrimoine").select("*"),
+        db.from("psp_devis").select("psp_ligne_id, fournisseur_id, entreprise"),
+        db
+          .from("travaux_commandes")
+          .select(
+            "id, numero_commande, tranche_code, adresse, corps_etat, descriptif, fournisseur, numero_fournisseur, budget, annee_exercice, nature_analytique",
+          ),
+        db
+          .from("psp_command_links")
+          .select("id, commande_id, psp_ligne_id, methode, confiance, statut"),
+        db.from("fournisseurs").select("id, nom"),
+        db.from("fournisseur_aliases").select("fournisseur_id, source, identifiant_source"),
+        db.from("lots").select("id, code_patrimoine"),
+      ]);
+    if (lignesR.error) throw new Error(`Lecture des opérations : ${lignesR.error.message}`);
+    if (commandesR.error) throw new Error(`Lecture des commandes : ${commandesR.error.message}`);
+
+    const lignes = (lignesR.data ?? []) as any[];
+    const perimetres = (perimetresR.data ?? []) as any[];
+    const devis = (devisR.data ?? []) as any[];
+    const commandes = (commandesR.data ?? []) as any[];
+    const liens = (liensR.data ?? []) as any[];
+    const fournisseurs = (fournisseursR.data ?? []) as any[];
+    const aliases = (aliasesR.data ?? []) as any[];
+    const lots = (lotsR.data ?? []) as any[];
+
+    const lotCodes: Record<string, string[]> = {};
+    for (const lot of lots) lotCodes[lot.id] = [lot.code_patrimoine];
+    const fournisseurRef = fournisseurs.map((f: any) => ({
+      id: f.id,
+      nom: f.nom,
+      aliases: aliases
+        .filter((a: any) => a.fournisseur_id === f.id)
+        .map((a: any) => a.identifiant_source),
+    })) as FournisseurRapprochement[];
+
+    const perimPar: Record<string, unknown[]> = {};
+    for (const p of perimetres) (perimPar[p.psp_ligne_id] ??= []).push(p);
+    const entrPar: Record<string, unknown[]> = {};
+    for (const d of devis) {
+      (entrPar[d.psp_ligne_id] ??= []).push({
+        fournisseur_id: d.fournisseur_id,
+        entreprise: d.entreprise,
+      });
+    }
+
+    const ligneCible = lignes.find((l: any) => l.id === data.pspLigneId);
+    if (!ligneCible) throw new Error("Opération introuvable.");
+
+    const operation: OperationRapprochement = {
+      id: ligneCible.id,
+      tranche_code: ligneCible.tranche_code,
+      categorie: ligneCible.categorie,
+      corps_etat: ligneCible.corps_etat,
+      nature_travaux: ligneCible.nature_travaux,
+      ligne_budget: ligneCible.ligne_budget,
+      origine: ligneCible.origine,
+      montant_total:
+        Object.values(ligneCible.programme ?? {}).reduce(
+          (s: number, v: unknown) => s + (Number(v) || 0),
+          0,
+        ) || null,
+      perimetres: (perimPar[ligneCible.id] ?? []) as OperationRapprochement["perimetres"],
+      entreprises_consultees: (entrPar[ligneCible.id] ??
+        []) as OperationRapprochement["entreprises_consultees"],
+    };
+    const anneesProgrammation = Object.keys(ligneCible.programme ?? {})
+      .map(Number)
+      .filter((a) => Number.isFinite(a));
+
+    const propositions = proposerRapprochements({
+      operation,
+      commandes: commandes as CommandeRapprochement[],
+      liens: liens as LienRapprochement[],
+      fournisseurs: fournisseurRef,
+      lotCodesParTranche: lotCodes,
+    });
+
+    return {
+      operationId: ligneCible.id,
+      tranche_code: ligneCible.tranche_code,
+      annees_programmation: anneesProgrammation,
+      propositions: propositions.map((p: any) => {
+        const commande = commandes.find((c: any) => c.id === p.commandeId);
+        return {
+          ...p,
+          commande: commande
+            ? {
+                id: commande.id,
+                numero_commande: commande.numero_commande,
+                tranche_code: commande.tranche_code,
+                adresse: commande.adresse,
+                corps_etat: commande.corps_etat,
+                descriptif: commande.descriptif,
+                fournisseur: commande.fournisseur,
+                numero_fournisseur: commande.numero_fournisseur,
+                budget: commande.budget,
+                annee_exercice: commande.annee_exercice,
+              }
+            : null,
+        };
+      }),
+    };
   });

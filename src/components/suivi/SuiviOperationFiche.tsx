@@ -13,6 +13,7 @@ import { useServerFn } from "@tanstack/react-start";
 import {
   Building2,
   Copy,
+  FileSearch,
   FileText,
   GitBranch,
   Mail,
@@ -23,6 +24,7 @@ import {
 } from "lucide-react";
 
 import PspDemandeDevisWorkflow from "@/components/preparation-psp/PspDemandeDevisWorkflow";
+import PspCorrespondancesSection from "@/components/suivi/PspCorrespondancesSection";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -367,6 +369,10 @@ export default function SuiviOperationFiche({
                   Dernier état travaux : {ex.etat_travaux ?? "—"}
                 </span>
               </div>
+            </Section>
+            {/* V8.5.2 — REVUE DES CORRESPONDANCES COMMANDES (lecture seule) */}
+            <Section title="Correspondances commandes" icon={FileSearch}>
+              <PspCorrespondancesSection pspLigneId={operation.identite.id} />
             </Section>
             <Separator className="my-4" />
             <div className="flex justify-end">
