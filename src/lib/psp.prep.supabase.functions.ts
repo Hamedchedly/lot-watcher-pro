@@ -1098,6 +1098,19 @@ export const createPspCommandLink = createServerFn({ method: "POST" })
     const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
     const db = supabaseAdmin as any;
 
+    // V8.5.3 — anti-doublon : une commande ne doit jamais être liée deux fois.
+    const { data: liensExistants } = await db
+      .from("psp_command_links")
+      .select("id, psp_ligne_id, methode, statut")
+      .eq("commande_id", data.commandeId);
+    if ((liensExistants ?? []).length > 0) {
+      const lien = liensExistants[0];
+      if (lien.psp_ligne_id === data.pspLigneId) {
+        throw new Error("Cette commande est déjà rattachée à cette opération.");
+      }
+      throw new Error("Cette commande est déjà rattachée à une autre opération.");
+    }
+
     const { data: commande } = await db
       .from("travaux_commandes")
       .select("numero_commande")
@@ -1136,7 +1149,42 @@ export const createPspCommandLink = createServerFn({ method: "POST" })
       .select("*")
       .single();
     if (error) throw new Error(`Rattachement de la commande : ${error.message}`);
+
+    // V8.5.3 — historisation dans psp_ligne_historique (table EXISTANTE, opération
+    // 'modification' autorisée par le CHECK ; motif explicite).
+    await db.from("psp_ligne_historique").insert({
+      ligne_id: data.pspLigneId,
+      operation: "modification",
+      avant: { type: "rattachement", commande_id: data.commandeId, avant: null },
+      apres: { type: "rattachement", commande_id: data.commandeId, lien_id: (link as any).id },
+      resolu: false,
+      motif: `Rattachement manuel commande ${numero}`,
+    });
+
     return link;
+  });
+
+/**
+ * V8.5.3 — RETIRE UN RATTACHEMENT (correction humaine).
+ *
+ * Supprime UNIQUEMENT le lien `psp_command_links`. La commande importée
+ * (travaux_commandes), les imports et psp_import_rows restent INTACTS.
+ * Confirmation requise côté UI avant appel.
+ */
+export const deletePspCommandLink = createServerFn({ method: "POST" })
+  .validator((d: unknown) => idSchema.parse(d))
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
+    const db = supabaseAdmin as any;
+    const { data: lien } = await db
+      .from("psp_command_links")
+      .select("*")
+      .eq("id", data.id)
+      .single();
+    if (!lien) throw new Error("Rattachement introuvable.");
+    const { error } = await db.from("psp_command_links").delete().eq("id", data.id);
+    if (error) throw new Error(`Retrait du rattachement : ${error.message}`);
+    return { ok: true as const, pspLigneId: lien.psp_ligne_id };
   });
 // ── V7.3 — fournisseurs, opérations ATOMIQUES, historique ──────────────────────
 
@@ -1928,8 +1976,10 @@ export const getPspCorrespondances = createServerFn({ method: "POST" })
       annees_programmation: anneesProgrammation,
       propositions: propositions.map((p: any) => {
         const commande = commandes.find((c: any) => c.id === p.commandeId);
+        const lien = liens.find((l: any) => l.commande_id === p.commandeId);
         return {
           ...p,
+          lienId: lien?.id ?? null,
           commande: commande
             ? {
                 id: commande.id,

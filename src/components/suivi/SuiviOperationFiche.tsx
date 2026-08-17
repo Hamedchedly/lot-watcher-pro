@@ -372,7 +372,7 @@ export default function SuiviOperationFiche({
             </Section>
             {/* V8.5.2 — REVUE DES CORRESPONDANCES COMMANDES (lecture seule) */}
             <Section title="Correspondances commandes" icon={FileSearch}>
-              <PspCorrespondancesSection pspLigneId={operation.identite.id} />
+              <PspCorrespondancesSection pspLigneId={operation.identite.id} onRattache={refresh} />
             </Section>
             <Separator className="my-4" />
             <div className="flex justify-end">
