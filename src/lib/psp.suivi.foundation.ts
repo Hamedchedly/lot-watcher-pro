@@ -38,7 +38,8 @@ import type { PspCategorie } from "./psp.prep.ts";
 /** Ligne PSP persistée (`psp_lignes`) — identité = id. */
 export interface LignePspSuivi {
   id: string;
-  programmation_id: string;
+  /** NULL pour une opération HORS PSP (V8.3 — aucune programmation de rattachement). */
+  programmation_id: string | null;
   tranche_code: string;
   categorie: PspCategorie;
   corps_etat_code: string | null;
@@ -353,6 +354,17 @@ export const statutConsultationGlobal = (
 /** Devis retenu d'une opération (statut 'retenu') — null si aucun. */
 export const devisRetenuDe = (devis: DevisSuivi[]): DevisSuivi | null =>
   devis.find((d) => d.statut === "retenu") ?? null;
+
+/**
+ * Un devis est « reçu » dès qu'une réponse de l'entreprise est disponible,
+ * quel que soit son traitement ultérieur : recu, a_analyser, retenu ou
+ * non_retenu. Un devis retenu (ou écarté) est nécessairement un devis reçu.
+ * (V8.3 — correction E5 : le marquage « retenu » ne doit pas faire sortir le
+ * devis du compteur de devis reçus.)
+ */
+const STATUTS_DEVIS_RECUS = new Set(["recu", "a_analyser", "retenu", "non_retenu"]);
+export const estDevisRecu = (devis: Pick<DevisSuivi, "statut">): boolean =>
+  STATUTS_DEVIS_RECUS.has(devis.statut);
 // ── Commandes liées + rapprochement + exécution ─────────────────────────────
 
 /** Commande rattachée à l'opération (lien + commande + statut de rapprochement). */
@@ -562,7 +574,7 @@ export const construireSuiviOperation = (input: {
     .sort((a, b) => a.annee - b.annee);
   const montantTotal = annees.reduce((s, a) => s + a.montant, 0);
   const anneePremiere = annees.find((a) => a.montant > 0)?.annee ?? null;
-  const nbDevisRecus = devis.filter((d) => d.statut === "recu" || d.statut === "a_analyser").length;
+  const nbDevisRecus = devis.filter((d) => estDevisRecu(d)).length;
 
   const synthese = ETAPES_SYNTHESE.map((etape) => {
     let atteint = false;

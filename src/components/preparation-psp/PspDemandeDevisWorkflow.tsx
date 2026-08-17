@@ -44,13 +44,29 @@ import {
   dateRetourParDefaut,
 } from "@/lib/psp.suivi.foundation";
 import { createPspDevis, getPspEntreprisesSuggestions } from "@/lib/psp.prep.supabase.functions";
-import type { PspOperation } from "@/lib/psp.prep";
+
+/**
+ * V8.3 — opération source d'une demande de devis. Type STRUCTUREL : utilisé
+ * depuis /preparation-psp (PspOperation) comme depuis le registre /suivi
+ * (SuiviOperationVue). Aucune dépendance à une table parallèle.
+ */
+export interface OperationDemandeDevis {
+  id: string;
+  tranche: string;
+  nature_travaux?: string | null;
+  corps_etat?: string | null;
+  adresse?: string | null;
+  ville?: string | null;
+}
 
 type SuggestionAvecEmail = {
   fournisseur_id: string;
   nom: string;
   correspondance: "forte" | "compatible" | "aucune";
   etiquettes: string[];
+  /** V8.3 §5 — historique réel des commandes (travaux_commandes). */
+  commandes_corps_etat: number;
+  commandes_total: number;
   email: string | null;
 };
 
@@ -59,7 +75,7 @@ export default function PspDemandeDevisWorkflow({
   figee,
   onEnvoye,
 }: {
-  operation: PspOperation;
+  operation: OperationDemandeDevis;
   figee: boolean;
   onEnvoye: () => Promise<void>;
 }) {
@@ -168,6 +184,15 @@ export default function PspDemandeDevisWorkflow({
                   {s.correspondance === "forte" ? "Correspondance forte" : "Entreprise compatible"}
                 </Badge>
                 <span className="text-muted-foreground">{s.etiquettes.join(" · ")}</span>
+                <span className="text-[9px] text-muted-foreground">
+                  {s.commandes_total > 0
+                    ? `${s.commandes_total} commande(s) historique(s)${
+                        s.commandes_corps_etat > 0
+                          ? ` dont ${s.commandes_corps_etat} pour ce corps d'état`
+                          : ""
+                      }`
+                    : "Aucun historique de commandes"}
+                </span>
                 {s.email && <span className="text-[9px] text-muted-foreground">{s.email}</span>}
               </li>
             );

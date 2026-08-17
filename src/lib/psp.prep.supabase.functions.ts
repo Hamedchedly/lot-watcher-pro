@@ -37,7 +37,8 @@ import type { ChargesClienteleReferentiel } from "./psp.prep.data.ts";
 
 export type PspLignePersist = {
   id: string;
-  programmation_id: string;
+  /** NULL pour une opération HORS PSP (V8.3). */
+  programmation_id: string | null;
   tranche_code: string;
   categorie: string;
   corps_etat_code: string | null;
@@ -1199,6 +1200,92 @@ export const createPspOperationComplete = createServerFn({ method: "POST" })
     if (error) throw new Error(`Création de l'opération : ${error.message}`);
     return ligne as PspLignePersist;
   });
+
+// ── V8.3 — OPÉRATION HORS PSP (registre Opérations) ──────────────────────────
+
+/**
+ * Création d'une opération HORS PSP depuis le registre « Opérations ».
+ *
+ * PSP et hors PSP = UNE SEULE entité opérationnelle (psp_lignes) : aucune table
+ * parallèle. Une opération hors PSP :
+ *   · n'a aucune programmation / année / ligne budgétaire / enveloppe / montant
+ *     obligatoire (programmation_id = NULL, programme = {}, origine = 'hors_psp') ;
+ *   · peut avoir TR, sous-secteur/CC (dérivés du patrimoine), adresse/périmètre,
+ *     corps d'état, catégorie, nature, priorité, statut, notes, devis, entreprises
+ *     consultées (mêmes tables PSP que les opérations PSP).
+ *
+ * Une opération vide sans information métier exploitable est REFUSÉE (§21) :
+ * la TR seule ne suffit pas — au moins un corps d'état OU une nature des travaux.
+ */
+export const createPspOperationHorsPsp = createServerFn({ method: "POST" })
+  .validator((d: unknown) =>
+    z
+      .object({
+        trancheCode: z.string().min(1),
+        categorie: z.enum(["GE", "GT", "CP"]),
+        corpsEtatCode: z.string().nullish(),
+        corpsEtat: z.string().nullish(),
+        natureTravaux: z.string().nullish(),
+        remarques: z.string().nullish(),
+        statut: z
+          .enum(["a_definir", "attente_agence", "attente_confirmation"])
+          .optional()
+          .default("a_definir"),
+        priorite: z
+          .enum(["prioritaire", "normale", "non_prioritaire"])
+          .optional()
+          .default("normale"),
+        perimetres: perimetreInput.default([]),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
+    const db = supabaseAdmin as any;
+
+    const corps = (data.corpsEtat ?? "").trim();
+    const nature = (data.natureTravaux ?? "").trim();
+    if (!corps && !nature) {
+      throw new Error(
+        "Opération refusée : renseignez au moins un corps d'état ou une nature des travaux.",
+      );
+    }
+
+    const { data: ligne, error } = await db
+      .from("psp_lignes")
+      .insert({
+        programmation_id: null,
+        tranche_code: data.trancheCode,
+        categorie: data.categorie,
+        corps_etat_code: data.corpsEtatCode ?? null,
+        corps_etat: corps || null,
+        nature_travaux: nature || null,
+        programme: {},
+        ligne_budget: null,
+        remarques: data.remarques ?? null,
+        statut: data.statut,
+        priorite: data.priorite,
+        origine: "hors_psp",
+      })
+      .select("*")
+      .single();
+    if (error) throw new Error(`Création de l'opération hors PSP : ${error.message}`);
+
+    const perimetres = (data.perimetres ?? []).map((p) => ({
+      psp_ligne_id: (ligne as any).id,
+      tranche_code: data.trancheCode,
+      niveau: p.niveau,
+      rue: p.rue ?? null,
+      numero: p.numero ?? null,
+      lot_id: p.lotId ?? null,
+    }));
+    if (perimetres.length > 0) {
+      const { error: perErr } = await db.from("psp_ligne_patrimoine").insert(perimetres);
+      if (perErr) throw new Error(`Enregistrement du périmètre : ${perErr.message}`);
+    }
+
+    return ligne as PspLignePersist;
+  });
 // ── V8.1 — SOCLE SUIVI : lecture agrégée + recommandation d'entreprises ──────
 
 /**
@@ -1446,16 +1533,23 @@ export const getPspSuiviOperations = createServerFn({ method: "POST" })
       .order("version", { ascending: false })
       .limit(1);
     const programmation = prog?.[0] ?? null;
-    if (!programmation) {
-      return { programmation: null, operations: [] };
-    }
 
-    const { data: lignes } = await db
+    // V8.3 — le registre « Opérations » charge : les lignes de la dernière
+    // programmation officielle (PSP) ET les lignes HORS PSP (programmation_id NULL).
+    const { data: lignesProg } = programmation
+      ? await db
+          .from("psp_lignes")
+          .select("*")
+          .eq("programmation_id", programmation.id)
+          .order("tranche_code")
+      : { data: [] as any[] };
+    const { data: lignesHorsPsp } = await db
       .from("psp_lignes")
       .select("*")
-      .eq("programmation_id", programmation.id)
-      .order("tranche_code");
-    const ids: string[] = (lignes ?? []).map((l: { id: string }) => l.id);
+      .is("programmation_id", null)
+      .order("created_at");
+    const lignes = [...(lignesProg ?? []), ...(lignesHorsPsp ?? [])];
+    const ids: string[] = [...new Set((lignes ?? []).map((l: { id: string }) => l.id))];
 
     const [perimetresR, devisR, liensR, decisionsR, enveloppesR] = await Promise.all([
       ids.length
@@ -1470,10 +1564,12 @@ export const getPspSuiviOperations = createServerFn({ method: "POST" })
       ids.length
         ? db.from("psp_decisions").select("*").in("psp_ligne_id", ids)
         : Promise.resolve({ data: [], error: null }),
-      db
-        .from("psp_enveloppes")
-        .select("annee, categorie, montant")
-        .eq("programmation_id", programmation.id),
+      programmation
+        ? db
+            .from("psp_enveloppes")
+            .select("annee, categorie, montant")
+            .eq("programmation_id", programmation.id)
+        : Promise.resolve({ data: [], error: null }),
     ]);
     const perimetres = (perimetresR.data ?? []) as any[];
     const devis = (devisR.data ?? []) as any[];
@@ -1573,18 +1669,20 @@ export const getPspSuiviOperations = createServerFn({ method: "POST" })
           cc: tranche?.sous_secteur ? (ccPar.get(tranche.sous_secteur) ?? null) : null,
           sous_secteur: tranche?.sous_secteur ?? null,
         },
-        programmationStatut: programmation.statut,
+        programmationStatut: programmation?.statut ?? null,
       });
     });
 
     return {
-      programmation: {
-        id: programmation.id,
-        annee_debut: programmation.annee_debut,
-        annee_fin: programmation.annee_fin,
-        version: programmation.version,
-        statut: programmation.statut,
-      },
+      programmation: programmation
+        ? {
+            id: programmation.id,
+            annee_debut: programmation.annee_debut,
+            annee_fin: programmation.annee_fin,
+            version: programmation.version,
+            statut: programmation.statut,
+          }
+        : null,
       enveloppes: enveloppesR.data ?? [],
       operations,
     };

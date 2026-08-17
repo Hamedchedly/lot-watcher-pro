@@ -127,10 +127,16 @@ export default function SuiviTable({
                   <td className="px-2 py-1.5">{op.programmation.cc ?? "—"}</td>
                   <td className="px-2 py-1.5">{op.programmation.corps_etat ?? "—"}</td>
                   <td className="px-2 py-1.5">
-                    <p className="font-bold">{op.programmation.annee_premiere ?? "—"}</p>
-                    <p className="text-[9px] text-muted-foreground">
-                      {money0(op.programmation.montant_total)}
-                    </p>
+                    {op.identite.origine === "hors_psp" ? (
+                      <span className="text-muted-foreground">Hors programme</span>
+                    ) : (
+                      <>
+                        <p className="font-bold">{op.programmation.annee_premiere ?? "—"}</p>
+                        <p className="text-[9px] text-muted-foreground">
+                          {money0(op.programmation.montant_total)}
+                        </p>
+                      </>
+                    )}
                   </td>
                   <td className="px-2 py-1.5">
                     {op.consultation.nb_entreprises_consultees > 0 ? (

@@ -61,6 +61,7 @@ export default function PspOperationForm({
   onSave,
   onClose,
   embedded = false,
+  horsPsp = false,
 }: {
   open: boolean;
   mode: "ajout" | "modification";
@@ -73,6 +74,11 @@ export default function PspOperationForm({
   onClose: () => void;
   /** V7.5 §10 — rend le corps du formulaire sans wrapper Dialog (fiche fusionnée). */
   embedded?: boolean;
+  /**
+   * V8.3 — opération HORS PSP : aucun montant / aucune année programmée.
+   * Masque le bloc « Montants programmés » ; le programme enregistré est vide.
+   */
+  horsPsp?: boolean;
 }) {
   const [corpsEtat, setCorpsEtat] = useState("");
   const [nature, setNature] = useState("");
@@ -136,7 +142,8 @@ export default function PspOperationForm({
       ville: "",
       nature_travaux: nature.trim(),
       annee: 2027 as PspAnnee,
-      programme,
+      // V8.3 — hors PSP : aucun montant programmé (programme vide).
+      programme: horsPsp ? [] : programme,
       remarques: remarques.trim() || null,
       perimetres: rec.perimetres,
       statut,
@@ -300,44 +307,54 @@ export default function PspOperationForm({
         </div>
       </div>
 
-      {/* Montants 2027-2031 */}
-      <div>
-        <Label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
-          Montants programmés 2027-2031 (€)
-        </Label>
-        <div className="mt-1 grid grid-cols-5 gap-1.5">
-          {PSP_ANNEES.map((a, i) => (
-            <div key={a} className="space-y-1">
-              <span className="block text-center font-mono text-[10px] font-black text-muted-foreground">
-                {a}
-              </span>
-              <Input
-                type="number"
-                min={0}
-                step={1000}
-                value={Number(programme[i]) || ""}
-                onChange={(e) =>
-                  setProgramme((p) => {
-                    const next = [...p];
-                    next[i] = Math.max(0, Number(e.target.value) || 0);
-                    return next;
-                  })
-                }
-                className="h-8 text-center text-xs tabular-nums"
-              />
-            </div>
-          ))}
-        </div>
-        <p className="tabnum mt-1.5 text-right text-xs font-black text-primary">
-          Total : {money0(total)}
-        </p>
-        {!anneeValide ? (
-          <p className="mt-1 rounded border border-dashed border-muted px-2 py-1 text-[10px] text-muted-foreground">
-            Brouillon : les montants / années sont facultatifs à la saisie — la complétude est
-            vérifiée au moment de l'export.
+      {/* Montants 2027-2031 — masqués pour une opération HORS PSP (V8.3) */}
+      {horsPsp ? (
+        <div className="rounded-lg border border-dashed bg-surface/40 px-2.5 py-2 text-[11px] text-muted-foreground">
+          <p className="font-semibold text-foreground">Hors programmation PSP</p>
+          <p className="mt-0.5">
+            Aucun montant ni année programmée — l'opération est suivie dans le registre Opérations
+            (consultation, devis, commandes importées, travaux).
           </p>
-        ) : null}
-      </div>
+        </div>
+      ) : (
+        <div>
+          <Label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+            Montants programmés 2027-2031 (€)
+          </Label>
+          <div className="mt-1 grid grid-cols-5 gap-1.5">
+            {PSP_ANNEES.map((a, i) => (
+              <div key={a} className="space-y-1">
+                <span className="block text-center font-mono text-[10px] font-black text-muted-foreground">
+                  {a}
+                </span>
+                <Input
+                  type="number"
+                  min={0}
+                  step={1000}
+                  value={Number(programme[i]) || ""}
+                  onChange={(e) =>
+                    setProgramme((p) => {
+                      const next = [...p];
+                      next[i] = Math.max(0, Number(e.target.value) || 0);
+                      return next;
+                    })
+                  }
+                  className="h-8 text-center text-xs tabular-nums"
+                />
+              </div>
+            ))}
+          </div>
+          <p className="tabnum mt-1.5 text-right text-xs font-black text-primary">
+            Total : {money0(total)}
+          </p>
+          {!anneeValide ? (
+            <p className="mt-1 rounded border border-dashed border-muted px-2 py-1 text-[10px] text-muted-foreground">
+              Brouillon : les montants / années sont facultatifs à la saisie — la complétude est
+              vérifiée au moment de l'export.
+            </p>
+          ) : null}
+        </div>
+      )}
 
       {/* Statut + Priorité */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
