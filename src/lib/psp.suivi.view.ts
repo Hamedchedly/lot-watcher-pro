@@ -15,8 +15,14 @@ export type FiltresSuivi = {
   recherche: string;
   /** Origine : toutes | psp | hors_psp (dérivé de psp_lignes.origine). */
   origine: "toutes" | "psp" | "hors_psp";
-  /** Étape : toutes | consultation | commande | travaux_en_cours | travaux_termines. */
-  etat: "toutes" | "consultation" | "commande" | "travaux_en_cours" | "travaux_termines";
+  /** Étape : toutes | consultation | commande | travaux_en_cours | travaux_termines | a_rapprocher. */
+  etat:
+    | "toutes"
+    | "consultation"
+    | "commande"
+    | "travaux_en_cours"
+    | "travaux_termines"
+    | "a_rapprocher";
 };
 
 export const FILTRES_SUIVI_VIDES: FiltresSuivi = {
@@ -49,6 +55,9 @@ export const filtrerOperationsSuivi = (
       )
         return false;
       if (filtres.etat === "travaux_termines" && ex !== "travaux_termines") return false;
+      // V8.5.4 — « À rapprocher » : opération sans commande liée mais avec
+      // devis/demandes (commande importée attendue) OU sans commande du tout.
+      if (filtres.etat === "a_rapprocher" && op.commandes.nb_commandes > 0) return false;
     }
     if (recherche) {
       const consultes = op.consultation.entreprises.map((e) => e.entreprise).join(" ");

@@ -112,7 +112,12 @@ export default function SuiviTable({
           onChange={(e) =>
             set({
               etat: e.target.value as
-                "toutes" | "consultation" | "commande" | "travaux_en_cours" | "travaux_termines",
+                | "toutes"
+                | "consultation"
+                | "commande"
+                | "travaux_en_cours"
+                | "travaux_termines"
+                | "a_rapprocher",
             })
           }
         >
@@ -121,6 +126,7 @@ export default function SuiviTable({
           <option value="commande">Commande</option>
           <option value="travaux_en_cours">Travaux en cours</option>
           <option value="travaux_termines">Travaux terminés</option>
+          <option value="a_rapprocher">À rapprocher</option>
         </select>
       </div>{" "}
       {/* Tableau — 10 colonnes (détails dans la fiche) */}

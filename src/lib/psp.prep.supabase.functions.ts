@@ -1998,3 +1998,381 @@ export const getPspCorrespondances = createServerFn({ method: "POST" })
       }),
     };
   });
+
+/**
+ * V8.5.4 — RECHERCHE MANUELLE D'UNE COMMANDE (côté serveur, ciblée).
+ *
+ * Recherche dans travaux_commandes (lecture seule) par : n° commande, entreprise /
+ * ID fournisseur, TR, adresse ou descriptif. Retourne les commandes correspondantes
+ * (limite 20) avec leur statut de rapprochement. Aucune écriture.
+ */
+export const rechercherCommandes = createServerFn({ method: "POST" })
+  .validator((d: unknown) =>
+    z
+      .object({
+        q: z.string().min(1).max(80),
+        limite: z.number().int().min(1).max(50).default(20),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
+    const db = supabaseAdmin as any;
+    const q = data.q.trim();
+    const estNumerique = /^\d+$/.test(q);
+
+    const { data: commandes, error } = await db
+      .from("travaux_commandes")
+      .select(
+        "id, numero_commande, tranche_code, adresse, corps_etat, descriptif, fournisseur, numero_fournisseur, budget, engage, paye, annee_exercice, date_demarrage, etat_commande, etat_travaux",
+      )
+      .or(
+        estNumerique
+          ? `numero_commande.ilike.%${q}%,numero_fournisseur.ilike.%${q}%`
+          : `fournisseur.ilike.%${q}%,tranche_code.ilike.%${q}%,adresse.ilike.%${q}%,descriptif.ilike.%${q}%,numero_commande.ilike.%${q}%`,
+      )
+      .limit(data.limite);
+    if (error) throw new Error(`Recherche des commandes : ${error.message}`);
+
+    const ids = (commandes ?? []).map((c: any) => c.id);
+    const liens = ids.length
+      ? ((
+          await db
+            .from("psp_command_links")
+            .select("id, commande_id, psp_ligne_id, methode, statut")
+            .in("commande_id", ids)
+        ).data ?? [])
+      : [];
+
+    return (commandes ?? []).map((c: any) => {
+      const lien = liens.find((l: any) => l.commande_id === c.id) ?? null;
+      return {
+        ...c,
+        rapprochement: lien
+          ? {
+              dejaLie: true,
+              lienId: lien.id,
+              pspLigneId: lien.psp_ligne_id,
+              methode: lien.methode,
+              statut: lien.statut,
+            }
+          : { dejaLie: false },
+      };
+    });
+  });
+
+/**
+ * V8.5.4 — RECHERCHE INVERSÉE : opérations candidates pour une commande.
+ *
+ * Réutilise `suggererOperationsPourCommande` (moteur V8.5.1 — aucune logique
+ * parallèle). Retourne les opérations pertinentes (AUTO/A_CONFIRMER/MANUEL)
+ * triées par score. Aucune écriture. L'utilisateur garde l'autorité métier.
+ */
+export const rechercherOperationsPourCommande = createServerFn({ method: "POST" })
+  .validator((d: unknown) => z.object({ commandeId: z.string().uuid() }).parse(d))
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
+    const db = supabaseAdmin as any;
+
+    const [cmdR, lignesR, perimR, devisR, liensR, fsR, aliasesR, lotsR] = await Promise.all([
+      db.from("travaux_commandes").select("*").eq("id", data.commandeId).single(),
+      db.from("psp_lignes").select("*"),
+      db.from("psp_ligne_patrimoine").select("*"),
+      db.from("psp_devis").select("psp_ligne_id, fournisseur_id, entreprise"),
+      db.from("psp_command_links").select("*"),
+      db.from("fournisseurs").select("id, nom"),
+      db.from("fournisseur_aliases").select("fournisseur_id, identifiant_source"),
+      db.from("lots").select("id, code_patrimoine"),
+    ]);
+    if (cmdR.error) throw new Error(`Commande introuvable : ${cmdR.error.message}`);
+
+    const commande = cmdR.data as any;
+    const lignes = (lignesR.data ?? []) as any[];
+    const perim = (perimR.data ?? []) as any[];
+    const devis = (devisR.data ?? []) as any[];
+    const liens = (liensR.data ?? []) as any[];
+    const fournisseurs = (fsR.data ?? []) as any[];
+    const aliases = (aliasesR.data ?? []) as any[];
+    const lots = (lotsR.data ?? []) as any[];
+
+    const lotCodes: Record<string, string[]> = {};
+    for (const lot of lots) lotCodes[lot.id] = [lot.code_patrimoine];
+    const fournisseurRef = fournisseurs.map((f: any) => ({
+      id: f.id,
+      nom: f.nom,
+      aliases: aliases
+        .filter((a: any) => a.fournisseur_id === f.id)
+        .map((a: any) => a.identifiant_source),
+    }));
+    const perimPar: Record<string, unknown[]> = {};
+    for (const p of perim) (perimPar[p.psp_ligne_id] ??= []).push(p);
+    const entrPar: Record<string, unknown[]> = {};
+    for (const d of devis) {
+      (entrPar[d.psp_ligne_id] ??= []).push({
+        fournisseur_id: d.fournisseur_id,
+        entreprise: d.entreprise,
+      });
+    }
+    const operations = lignes.map((l: any) => ({
+      id: l.id,
+      tranche_code: l.tranche_code,
+      categorie: l.categorie,
+      corps_etat: l.corps_etat,
+      nature_travaux: l.nature_travaux,
+      ligne_budget: l.ligne_budget,
+      origine: l.origine,
+      montant_total:
+        Object.values(l.programme ?? {}).reduce(
+          (s: number, v: unknown) => s + (Number(v) || 0),
+          0,
+        ) || null,
+      perimetres: perimPar[l.id] ?? [],
+      entreprises_consultees: entrPar[l.id] ?? [],
+    }));
+
+    const { suggererOperationsPourCommande } = await import("@/lib/psp.suivi.rapprochement");
+    const propositions = suggererOperationsPourCommande(
+      commande as never,
+      operations as never,
+      liens as never,
+      fournisseurRef as never,
+      lotCodes,
+    );
+
+    const parId = new Map(lignes.map((l: any) => [l.id, l]));
+    const anneesPar = new Map(
+      lignes.map((l: any) => [
+        l.id,
+        Object.keys(l.programme ?? {})
+          .map(Number)
+          .filter((a) => Number.isFinite(a)),
+      ]),
+    );
+    return {
+      commande: {
+        id: commande.id,
+        numero_commande: commande.numero_commande,
+        tranche_code: commande.tranche_code,
+        adresse: commande.adresse,
+        corps_etat: commande.corps_etat,
+        descriptif: commande.descriptif,
+        fournisseur: commande.fournisseur,
+        numero_fournisseur: commande.numero_fournisseur,
+        budget: commande.budget,
+        annee_exercice: commande.annee_exercice,
+      },
+      propositions: propositions.map((p: any) => {
+        const ligne = parId.get(p.operationId);
+        return {
+          ...p,
+          annees_programmation: anneesPar.get(p.operationId) ?? [],
+          operation: ligne
+            ? {
+                id: ligne.id,
+                tranche_code: ligne.tranche_code,
+                corps_etat: ligne.corps_etat,
+                nature_travaux: ligne.nature_travaux,
+                origine: ligne.origine,
+              }
+            : null,
+        };
+      }),
+    };
+  });
+
+/**
+ * V8.5.4 — VUE GLOBALE « COMMANDES À RAPPROCHER ».
+ *
+ * Un seul batch (pas de N+1). Pour chaque commande non liée, le moteur
+ * V8.5.1 (`suggererOperationsPourCommande`) est utilisé pour proposer des
+ * opérations — jamais de liaison automatique. La relation de période
+ * (`determinerRelationPeriode`) est ajoutée comme critère d'appui.
+ *
+ * Retourne les décomptes (total, fortes, à confirmer, faibles, sans
+ * correspondance, déjà rattachées) et la liste compacte pour le panneau.
+ */
+export const getPspCommandesARapprocher = createServerFn({ method: "POST" })
+  .validator((d: unknown) => z.object({}).parse(d ?? {}))
+  .handler(async () => {
+    const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
+    const db = supabaseAdmin as any;
+
+    const [lignesR, perimetresR, devisR, commandesR, liensR, fournisseursR, aliasesR, lotsR] =
+      await Promise.all([
+        db.from("psp_lignes").select("*"),
+        db.from("psp_ligne_patrimoine").select("*"),
+        db.from("psp_devis").select("psp_ligne_id, fournisseur_id, entreprise"),
+        db
+          .from("travaux_commandes")
+          .select(
+            "id, numero_commande, tranche_code, adresse, corps_etat, descriptif, fournisseur, numero_fournisseur, budget, engage, paye, annee_exercice, date_demarrage, etat_commande, etat_travaux",
+          ),
+        db.from("psp_command_links").select("id, commande_id, psp_ligne_id, methode, statut"),
+        db.from("fournisseurs").select("id, nom"),
+        db.from("fournisseur_aliases").select("fournisseur_id, source, identifiant_source"),
+        db.from("lots").select("id, code_patrimoine"),
+      ]);
+    if (commandesR.error) throw new Error(`Lecture des commandes : ${commandesR.error.message}`);
+    if (lignesR.error) throw new Error(`Lecture des opérations : ${lignesR.error.message}`);
+
+    const lignes = (lignesR.data ?? []) as any[];
+    const perimetres = (perimetresR.data ?? []) as any[];
+    const devis = (devisR.data ?? []) as any[];
+    const commandes = (commandesR.data ?? []) as any[];
+    const liens = (liensR.data ?? []) as any[];
+    const fournisseurs = (fournisseursR.data ?? []) as any[];
+    const aliases = (aliasesR.data ?? []) as any[];
+    const lots = (lotsR.data ?? []) as any[];
+
+    const lotCodes: Record<string, string[]> = {};
+    for (const lot of lots) lotCodes[lot.id] = [lot.code_patrimoine];
+    const fournisseurRef = fournisseurs.map((f: any) => ({
+      id: f.id,
+      nom: f.nom,
+      aliases: aliases
+        .filter((a: any) => a.fournisseur_id === f.id)
+        .map((a: any) => a.identifiant_source),
+    })) as unknown as FournisseurRapprochement[];
+    const perimPar: Record<string, unknown[]> = {};
+    for (const p of perimetres) (perimPar[p.psp_ligne_id] ??= []).push(p);
+    const entrPar: Record<string, unknown[]> = {};
+    for (const d of devis) {
+      (entrPar[d.psp_ligne_id] ??= []).push({
+        fournisseur_id: d.fournisseur_id,
+        entreprise: d.entreprise,
+      });
+    }
+    const operations: OperationRapprochement[] = lignes.map((l: any) => ({
+      id: l.id,
+      tranche_code: l.tranche_code,
+      categorie: l.categorie,
+      corps_etat: l.corps_etat,
+      nature_travaux: l.nature_travaux,
+      ligne_budget: l.ligne_budget,
+      origine: l.origine,
+      montant_total:
+        Object.values(l.programme ?? {}).reduce(
+          (s: number, v: unknown) => s + (Number(v) || 0),
+          0,
+        ) || null,
+      perimetres: (perimPar[l.id] ?? []) as OperationRapprochement["perimetres"],
+      entreprises_consultees: (entrPar[l.id] ??
+        []) as OperationRapprochement["entreprises_consultees"],
+    }));
+
+    const { suggererOperationsPourCommande, determinerRelationPeriode } =
+      await import("@/lib/psp.suivi.rapprochement");
+    const ligneParId = new Map(lignes.map((l: any) => [l.id, l]));
+    const anneesPar = new Map(
+      lignes.map((l: any) => [
+        l.id,
+        Object.keys(l.programme ?? {})
+          .map(Number)
+          .filter((a) => Number.isFinite(a)),
+      ]),
+    );
+    const lienParCommande = new Map(liens.map((l: any) => [l.commande_id, l]));
+
+    type EtatCommande =
+      "deja_rattachee" | "proposition_forte" | "a_confirmer" | "faible" | "sans_correspondance";
+
+    const lignesCompacts: Array<{
+      commande: any;
+      etat: EtatCommande;
+      meilleure_proposition: any | null;
+      operation_liee: any | null;
+      periode: { type: string; libelle: string; exercice: number | null } | null;
+    }> = [];
+
+    for (const commande of commandes) {
+      const lien = lienParCommande.get(commande.id);
+      if (lien) {
+        const ligne = ligneParId.get(lien.psp_ligne_id);
+        lignesCompacts.push({
+          commande,
+          etat: "deja_rattachee",
+          meilleure_proposition: null,
+          operation_liee: ligne
+            ? {
+                id: ligne.id,
+                tranche_code: ligne.tranche_code,
+                adresse: ligne.adresse,
+                corps_etat: ligne.corps_etat,
+                nature_travaux: ligne.nature_travaux,
+                methode: lien.methode,
+                statut: lien.statut,
+              }
+            : null,
+          periode: null,
+        });
+        continue;
+      }
+      const propositions = suggererOperationsPourCommande(
+        commande as unknown as CommandeRapprochement,
+        operations,
+        liens as unknown as LienRapprochement[],
+        fournisseurRef,
+        lotCodes,
+      );
+      const meilleure = propositions[0] ?? null;
+      const etat: EtatCommande = meilleure
+        ? meilleure.niveau === "AUTO"
+          ? "proposition_forte"
+          : meilleure.niveau === "A_CONFIRMER"
+            ? "a_confirmer"
+            : "faible"
+        : "sans_correspondance";
+      const ligne = meilleure ? ligneParId.get(meilleure.operationId) : null;
+      const annees = ligne ? (anneesPar.get(ligne.id) ?? []) : [];
+      lignesCompacts.push({
+        commande,
+        etat,
+        meilleure_proposition: meilleure
+          ? {
+              ...meilleure,
+              operation: ligne
+                ? {
+                    id: ligne.id,
+                    tranche_code: ligne.tranche_code,
+                    adresse: ligne.adresse,
+                    corps_etat: ligne.corps_etat,
+                    nature_travaux: ligne.nature_travaux,
+                  }
+                : null,
+            }
+          : null,
+        operation_liee: null,
+        periode: ligne
+          ? determinerRelationPeriode(
+              annees,
+              commande.annee_exercice ?? null,
+              commande.date_demarrage ?? null,
+            )
+          : null,
+      });
+    }
+
+    const compter = (e: EtatCommande) => lignesCompacts.filter((c) => c.etat === e).length;
+    const tri: Record<EtatCommande, number> = {
+      deja_rattachee: 0,
+      proposition_forte: 1,
+      a_confirmer: 2,
+      faible: 3,
+      sans_correspondance: 4,
+    };
+    lignesCompacts.sort(
+      (a, b) =>
+        tri[a.etat] - tri[b.etat] ||
+        (b.meilleure_proposition?.score ?? 0) - (a.meilleure_proposition?.score ?? 0),
+    );
+
+    return {
+      total: commandes.length,
+      propositions_fortes: compter("proposition_forte"),
+      propositions_a_confirmer: compter("a_confirmer"),
+      correspondances_faibles: compter("faible"),
+      sans_correspondance: compter("sans_correspondance"),
+      deja_rattachees: compter("deja_rattachee"),
+      commandes: lignesCompacts,
+    };
+  });

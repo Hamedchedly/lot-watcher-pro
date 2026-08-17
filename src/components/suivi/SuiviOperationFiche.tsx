@@ -25,6 +25,7 @@ import {
 
 import PspDemandeDevisWorkflow from "@/components/preparation-psp/PspDemandeDevisWorkflow";
 import PspCorrespondancesSection from "@/components/suivi/PspCorrespondancesSection";
+import PspRechercheCommandeDialog from "@/components/suivi/PspRechercheCommandeDialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -92,6 +93,9 @@ export default function SuiviOperationFiche({
   const emailRelance = relance
     ? (suggestions?.find((s) => s.fournisseur_id === relance.fournisseur_id)?.email ?? null)
     : null;
+
+  // V8.5.4 — recherche manuelle d'une commande dans la fiche.
+  const [rechercheCommandeOuverte, setRechercheCommandeOuverte] = useState(false);
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
@@ -373,7 +377,24 @@ export default function SuiviOperationFiche({
             {/* V8.5.2 — REVUE DES CORRESPONDANCES COMMANDES (lecture seule) */}
             <Section title="Correspondances commandes" icon={FileSearch}>
               <PspCorrespondancesSection pspLigneId={operation.identite.id} onRattache={refresh} />
+              {/* V8.5.4 — RECHERCHE MANUELLE D'UNE COMMANDE */}
+              <div className="mt-2 flex justify-end">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="text-[11px]"
+                  onClick={() => setRechercheCommandeOuverte(true)}
+                >
+                  Rechercher une commande
+                </Button>
+              </div>
             </Section>
+            <PspRechercheCommandeDialog
+              pspLigneId={operation.identite.id}
+              open={rechercheCommandeOuverte}
+              onClose={() => setRechercheCommandeOuverte(false)}
+              onRattache={refresh}
+            />
             <Separator className="my-4" />
             <div className="flex justify-end">
               <Button variant="outline" size="sm" onClick={onClose}>

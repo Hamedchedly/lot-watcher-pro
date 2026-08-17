@@ -9,9 +9,10 @@ import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Link, createFileRoute } from "@tanstack/react-router";
-import { ArrowLeft, Loader2, Plus, Workflow } from "lucide-react";
+import { ArrowLeft, FileSearch, Loader2, Plus, Workflow } from "lucide-react";
 
 import NouvelleOperationDialog from "@/components/suivi/NouvelleOperationDialog";
+import PspCommandesARapprocherPanel from "@/components/suivi/PspCommandesARapprocherPanel";
 import SuiviOperationFiche from "@/components/suivi/SuiviOperationFiche";
 import SuiviTable from "@/components/suivi/SuiviTable";
 import { Button } from "@/components/ui/button";
@@ -44,6 +45,7 @@ function SuiviPage() {
 
   const [selection, setSelection] = useState<SuiviOperationVue | null>(null);
   const [nouvelle, setNouvelle] = useState(false);
+  const [aRapprocher, setARapprocher] = useState(false);
 
   const programmation = data?.programmation ?? null;
   const operations = (data?.operations ?? []) as SuiviOperationVue[];
@@ -83,6 +85,10 @@ function SuiviPage() {
           {/* V8.3 §3/§21 — créer une opération (PSP ou HORS PSP) directement ici. */}
           <Button size="sm" onClick={() => setNouvelle(true)}>
             <Plus className="size-3.5" /> Nouvelle opération
+          </Button>
+          {/* V8.5.4 — vue globale « Commandes à rapprocher » */}
+          <Button size="sm" variant="outline" onClick={() => setARapprocher(true)}>
+            <FileSearch className="size-3.5" /> Commandes à rapprocher
           </Button>
           <Button asChild variant="outline" size="sm">
             <Link to="/preparation-psp">
@@ -125,6 +131,19 @@ function SuiviPage() {
           onClose={() => setNouvelle(false)}
           programmationId={programmation?.id ?? null}
           onCreated={refresh}
+        />
+      )}
+      {aRapprocher && (
+        <PspCommandesARapprocherPanel
+          open={aRapprocher}
+          onClose={() => setARapprocher(false)}
+          onExaminer={(pspLigneId) => {
+            const op = operations.find((o) => o.identite.id === pspLigneId);
+            if (op) {
+              setARapprocher(false);
+              setSelection(op);
+            }
+          }}
         />
       )}
     </div>

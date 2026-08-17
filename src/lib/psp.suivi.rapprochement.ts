@@ -592,3 +592,85 @@ export const deriverExerciceCorrespondance = (
   }
   return { type: "futur", libelle: `Exercice ${exerciceCommande} (futur)` };
 };
+
+// ── V8.5.4 — relation de période (critère d'appui) ─────────────────────────────
+
+export type RelationPeriode = "historique" | "courant" | "futur" | "inconnu";
+
+/**
+ * Détermine la relation de période entre une commande et une opération.
+ * Réutilise `deriverExerciceCorrespondance` (aucune logique parallèle) et
+ * utilise `date_commande` comme appui secondaire lorsque disponible.
+ *
+ * La période est un CRITÈRE D'APPUI : elle ne permet jamais, à elle seule,
+ * un rattachement (jamais de point AUTO sur la seule période).
+ */
+export const determinerRelationPeriode = (
+  anneesProgrammation: number[],
+  exerciceCommande: number | null,
+  dateCommande: string | null = null,
+): { type: RelationPeriode; libelle: string; exercice: number | null } => {
+  const base = deriverExerciceCorrespondance(anneesProgrammation, exerciceCommande);
+  // Appui : si l'exercice est inconnu mais qu'une date de commande existe,
+  // on déduit l'exercice de la date (jamais un rattachement seul).
+  if (base.type === "inconnu" && dateCommande) {
+    const annee = new Date(dateCommande).getFullYear();
+    if (Number.isFinite(annee)) {
+      const avecAnnee = deriverExerciceCorrespondance(anneesProgrammation, annee);
+      if (avecAnnee.type !== "inconnu") {
+        return { type: avecAnnee.type, libelle: avecAnnee.libelle, exercice: annee };
+      }
+    }
+  }
+  return { type: base.type, libelle: base.libelle, exercice: exerciceCommande };
+};
+
+// ── V8.5.4 — recherche inversée (commande → opérations) ────────────────────────
+
+/**
+ * Propose les opérations correspondant à une commande (recherche inversée).
+ *
+ * Réutilise EXCLUSIVEMENT `proposerRapprochements`/`evaluerCorrespondance`
+ * (aucun moteur parallèle) : pour chaque opération candidate, on évalue la
+ * commande et on retient les propositions pertinentes (AUTO, A_CONFIRMER,
+ * MANUEL), triées par score décroissant.
+ *
+ * La commande reste identifiée par travaux_commandes.id ; l'opération par
+ * psp_lignes.id. Aucune écriture.
+ */
+export const suggererOperationsPourCommande = (
+  commande: CommandeRapprochement,
+  operations: OperationRapprochement[],
+  liens: LienRapprochement[],
+  fournisseurs: FournisseurRapprochement[],
+  lotCodesParTranche: Record<string, string[]> = {},
+): PropositionRapprochement[] => {
+  const propositions: PropositionRapprochement[] = [];
+  for (const operation of operations) {
+    const p = evaluerCorrespondance(operation, commande, liens, fournisseurs, lotCodesParTranche);
+    if (p.niveau !== "NON_RAPPROCHE") {
+      propositions.push({ ...p, operationId: operation.id });
+    }
+  }
+  propositions.sort((a, b) => b.score - a.score);
+  // Ambiguïté : si deux candidats proches, le premier passe A_CONFIRMER.
+  return propositions.map((p, i) => {
+    const suivant = propositions[i + 1];
+    if (
+      p.niveau === "AUTO" &&
+      suivant &&
+      p.score - suivant.score < SEUILS_RAPPROCHEMENT.ecartAmbiguite
+    ) {
+      return {
+        ...p,
+        niveau: "A_CONFIRMER",
+        conflits: [...p.conflits, "Plusieurs opérations possibles — confirmation humaine requise"],
+        candidatsAlternatifs: propositions
+          .slice(i + 1)
+          .map((x) => ({ operationId: x.operationId, score: x.score }))
+          .slice(0, 2),
+      };
+    }
+    return p;
+  });
+};
