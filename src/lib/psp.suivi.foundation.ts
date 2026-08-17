@@ -846,7 +846,7 @@ export interface SuggestionEntreprise {
 }
 
 /** Normalise un texte pour les comparaisons (règle — pas d'invention). */
-const normaliserTexte = (v: string | null | undefined): string =>
+export const normaliserTexte = (v: string | null | undefined): string =>
   (v ?? "")
     .trim()
     .toLowerCase()
