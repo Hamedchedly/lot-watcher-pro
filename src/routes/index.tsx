@@ -96,7 +96,7 @@ function Index() {
             </Button>
             <Button asChild variant="outline">
               <Link to="/suivi">
-                <ListChecks className="size-4" /> Suivi opérations
+                <ListChecks className="size-4" /> Opérations
               </Link>
             </Button>
             <Button asChild variant="outline">

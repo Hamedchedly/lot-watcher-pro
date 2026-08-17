@@ -1277,6 +1277,7 @@ export const getPspSuiviOperation = createServerFn({ method: "POST" })
     // tranches.sous_secteur → psp_charges_clientele (JAMAIS depuis travaux_commandes).
     let adresse: string | null = null;
     let cc: string | null = null;
+    let sousSecteur: string | null = null;
     if (ligne.tranche_code) {
       const { data: tranche } = await db
         .from("tranches")
@@ -1285,6 +1286,7 @@ export const getPspSuiviOperation = createServerFn({ method: "POST" })
         .maybeSingle();
       if (tranche) {
         adresse = [tranche.libelle, tranche.localite].filter(Boolean).join(" – ") || null;
+        sousSecteur = tranche.sous_secteur ?? null;
         if (tranche.sous_secteur) {
           const { data: ccRow } = await db
             .from("psp_charges_clientele")
@@ -1320,7 +1322,7 @@ export const getPspSuiviOperation = createServerFn({ method: "POST" })
       liens,
       commandes: commandes as unknown as CommandeTravauxSuivi[],
       decisions,
-      patrimoine: { adresse, cc },
+      patrimoine: { adresse, cc, sous_secteur: sousSecteur },
       programmationStatut: progR.data?.statut ?? null,
     }) as SuiviOperationVue;
   });
@@ -1569,6 +1571,7 @@ export const getPspSuiviOperations = createServerFn({ method: "POST" })
             ? [tranche.libelle, tranche.localite].filter(Boolean).join(" – ") || null
             : null,
           cc: tranche?.sous_secteur ? (ccPar.get(tranche.sous_secteur) ?? null) : null,
+          sous_secteur: tranche?.sous_secteur ?? null,
         },
         programmationStatut: programmation.statut,
       });

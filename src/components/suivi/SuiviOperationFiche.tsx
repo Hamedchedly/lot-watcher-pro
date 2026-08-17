@@ -122,6 +122,20 @@ export default function SuiviOperationFiche({
                 ))}
               </ol>
             </div>{" "}
+            {/* V8.2.2 — IDENTITÉ (patrimoine) */}
+            <Section title="Identité" icon={MapPin}>
+              <div className="grid grid-cols-2 gap-1.5 text-[11px] sm:grid-cols-4">
+                <Cell label="TR" value={operation.identite.tranche} />
+                <Cell
+                  label="Origine"
+                  value={operation.identite.origine === "hors_psp" ? "Hors PSP" : "PSP"}
+                />
+                <Cell label="Sous-secteur" value={p.sous_secteur ?? "—"} />
+                <Cell label="CC" value={p.cc ?? "—"} />
+                <Cell label="Adresse" value={p.adresse ?? "—"} />
+                <Cell label="Corps d&#39;état" value={p.corps_etat ?? "—"} />
+              </div>
+            </Section>
             {/* ── PROGRAMMATION ── */}
             <Section title="Programmation" icon={Wallet}>
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -298,7 +312,7 @@ export default function SuiviOperationFiche({
               )}
             </Section>
             {/* ── TRAVAUX / EXÉCUTION ── */}
-            <Section title="Travaux / Exécution" icon={MapPin}>
+            <Section title="Travaux" icon={MapPin}>
               <div className="flex flex-wrap items-center gap-2 text-[11px]">
                 <Badge>{ex.statut_label}</Badge>
                 <span className="text-muted-foreground">

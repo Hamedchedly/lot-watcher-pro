@@ -284,9 +284,9 @@ console.log("\nL. identité par psp_lignes.id");
   const vue = construireSuiviOperation({ ligne: ligne(), exercice: 2026 });
   check("identite.id = ligne.id", vue.identite.id === "11111111-1111-4111-8111-111111111111");
   check(
-    "identite = {id, tranche, categorie}",
+    "identite = {id, tranche, categorie, origine}",
     JSON.stringify(Object.keys(vue.identite).sort()) ===
-      JSON.stringify(["categorie", "id", "tranche"].sort()),
+      JSON.stringify(["categorie", "id", "origine", "tranche"].sort()),
   );
 }
 

@@ -455,12 +455,13 @@ const somme = (vs: Array<number | null | undefined>): number =>
 // ── Vue métier agrégée (getPspSuiviOperation) ───────────────────────────────
 
 export interface SuiviOperationVue {
-  identite: { id: string; tranche: string; categorie: PspCategorie };
+  identite: { id: string; tranche: string; categorie: PspCategorie; origine: "psp" | "hors_psp" };
   programmation: {
     ligne: LignePspSuivi;
     perimetre: PerimetreSuivi[];
     adresse: string | null;
     cc: string | null;
+    sous_secteur: string | null;
     corps_etat: string | null;
     nature: string | null;
     priorite: string | null;
@@ -519,7 +520,7 @@ export const construireSuiviOperation = (input: {
   liens?: LienCommandeSuivi[];
   commandes?: CommandeTravauxSuivi[];
   decisions?: DecisionSuivi[];
-  patrimoine?: { adresse: string | null; cc: string | null };
+  patrimoine?: { adresse: string | null; cc: string | null; sous_secteur?: string | null };
   programmationStatut?: string | null;
   exercice?: number;
   dateRef?: Date;
@@ -532,7 +533,7 @@ export const construireSuiviOperation = (input: {
     liens = [],
     commandes = [],
     decisions = [],
-    patrimoine = { adresse: null, cc: null },
+    patrimoine = { adresse: null, cc: null, sous_secteur: null },
     programmationStatut = null,
     exercice = new Date().getFullYear(),
     dateRef = new Date(),
@@ -592,12 +593,18 @@ export const construireSuiviOperation = (input: {
   });
 
   return {
-    identite: { id: ligne.id, tranche: ligne.tranche_code, categorie: ligne.categorie },
+    identite: {
+      id: ligne.id,
+      tranche: ligne.tranche_code,
+      categorie: ligne.categorie,
+      origine: ligne.origine === "hors_psp" ? "hors_psp" : "psp",
+    },
     programmation: {
       ligne,
       perimetre: perimetres,
       adresse: patrimoine.adresse,
       cc: patrimoine.cc,
+      sous_secteur: patrimoine.sous_secteur ?? null,
       corps_etat: ligne.corps_etat,
       nature: ligne.nature_travaux,
       priorite: ligne.priorite,

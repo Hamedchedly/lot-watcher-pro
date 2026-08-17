@@ -36,8 +36,7 @@ function check(label, ok, detail = "") {
     console.error(`  ✘ ${label}${detail ? ` — ${detail}` : ""}`);
   }
 }
-const source = (rel) =>
-  readFileSync(fileURLToPath(new URL(`../${rel}`, import.meta.url)), "utf8");
+const source = (rel) => readFileSync(fileURLToPath(new URL(`../${rel}`, import.meta.url)), "utf8");
 
 const il_y_a = (jours) => new Date(Date.now() - jours * 86400000).toISOString();
 
@@ -49,7 +48,7 @@ const ligne = (over = {}) => ({
   corps_etat_code: "ce-couv",
   corps_etat: "Couverture",
   nature_travaux: "Réfection toiture",
-  programme: { "2027": 150000, "2028": 0, "2029": 0, "2030": 0, "2031": 0 },
+  programme: { 2027: 150000, 2028: 0, 2029: 0, 2030: 0, 2031: 0 },
   ligne_budget: null,
   remarques: null,
   origine: "preparation",
@@ -119,7 +118,7 @@ const opChauffage = construireSuiviOperation({
     id: "ligne-2",
     corps_etat: "Chauffage",
     nature_travaux: "Remplacement chaudières",
-    programme: { "2027": 0, "2028": 95000 },
+    programme: { 2027: 0, 2028: 95000 },
   }),
   patrimoine: { adresse: "20 rue des Roses", cc: "CC1977" },
   exercice: 2026,
@@ -130,40 +129,74 @@ const opSansCommande = construireSuiviOperation({
     id: "ligne-3",
     tranche_code: "1950",
     categorie: "CP",
-    programme: { "2027": 0, "2028": 0, "2029": 0, "2030": 0, "2031": 0 },
+    programme: { 2027: 0, 2028: 0, 2029: 0, 2030: 0, 2031: 0 },
   }),
   exercice: 2026,
 });
 
-const operations = [opToiture, opChauffage, opSansCommande];// ── A. Filtres ───────────────────────────────────────────────────────────────
-console.log("\nA. filtres du tableau");
+const operations = [opToiture, opChauffage, opSansCommande]; // ── A. Filtres simplifiés (V8.2.2 : recherche / origine / état) ─────────────
+console.log("\nA. filtres (recherche / origine / état)");
 {
-  check("tous (aucun filtre)", filtrerOperationsSuivi(operations, FILTRES_SUIVI_VIDES).length === 3);
-  check("année 2027 → 1 opération (toiture)", filtrerOperationsSuivi(operations, { ...FILTRES_SUIVI_VIDES, annee: "2027" }).length === 1);
-  check("année 2028 → 1 opération (chauffage)", filtrerOperationsSuivi(operations, { ...FILTRES_SUIVI_VIDES, annee: "2028" }).length === 1);
-  check("TR 1977 → 2 opérations", filtrerOperationsSuivi(operations, { ...FILTRES_SUIVI_VIDES, tranche: "1977" }).length === 2);
-  check("CC CC1977 → 2 opérations", filtrerOperationsSuivi(operations, { ...FILTRES_SUIVI_VIDES, cc: "CC1977" }).length === 2);
-  check("C GT → 2 opérations", filtrerOperationsSuivi(operations, { ...FILTRES_SUIVI_VIDES, categorie: "GT" }).length === 2);
-  check("statutConsultation en_attente → 1", filtrerOperationsSuivi(operations, { ...FILTRES_SUIVI_VIDES, statutConsultation: "en_attente" }).length === 1);
-  check("commande sans → 2", filtrerOperationsSuivi(operations, { ...FILTRES_SUIVI_VIDES, commande: "sans" }).length === 2);
-  check("commande avec → 1", filtrerOperationsSuivi(operations, { ...FILTRES_SUIVI_VIDES, commande: "avec" }).length === 1);
-  check("statutExecution sans_commande → 2", filtrerOperationsSuivi(operations, { ...FILTRES_SUIVI_VIDES, statutExecution: "sans_commande" }).length === 2);
-  check("recherche 'Chauffage' → 1", filtrerOperationsSuivi(operations, { ...FILTRES_SUIVI_VIDES, recherche: "Chauffage" }).length === 1);
-  check("fournisseur 'ENTREPRISE A' → 1 (commande liée)", filtrerOperationsSuivi(operations, { ...FILTRES_SUIVI_VIDES, fournisseur: "ENTREPRISE A" }).length === 1);
+  check(
+    "tous (aucun filtre)",
+    filtrerOperationsSuivi(operations, FILTRES_SUIVI_VIDES).length === 3,
+  );
+  check(
+    "recherche Chauffage → 1",
+    filtrerOperationsSuivi(operations, { ...FILTRES_SUIVI_VIDES, recherche: "Chauffage" })
+      .length === 1,
+  );
+  check(
+    "recherche ENTREPRISE A → 1 (commande liée)",
+    filtrerOperationsSuivi(operations, { ...FILTRES_SUIVI_VIDES, recherche: "ENTREPRISE A" })
+      .length === 1,
+  );
+  check(
+    "recherche 123456 (n° commande) → 1",
+    filtrerOperationsSuivi(operations, { ...FILTRES_SUIVI_VIDES, recherche: "123456" }).length ===
+      1,
+  );
+  check(
+    "origine PSP → 3",
+    filtrerOperationsSuivi(operations, { ...FILTRES_SUIVI_VIDES, origine: "psp" }).length === 3,
+  );
+  check(
+    "origine hors_psp → 0 (aucune ligne hors PSP en base)",
+    filtrerOperationsSuivi(operations, { ...FILTRES_SUIVI_VIDES, origine: "hors_psp" }).length ===
+      0,
+  );
+  check(
+    "état consultation → 1",
+    filtrerOperationsSuivi(operations, { ...FILTRES_SUIVI_VIDES, etat: "consultation" }).length ===
+      1,
+  );
+  check(
+    "état commande → 1",
+    filtrerOperationsSuivi(operations, { ...FILTRES_SUIVI_VIDES, etat: "commande" }).length === 1,
+  );
+  check(
+    "état travaux_en_cours → 1",
+    filtrerOperationsSuivi(operations, { ...FILTRES_SUIVI_VIDES, etat: "travaux_en_cours" })
+      .length === 1,
+  );
+  check(
+    "état travaux_termines → 0",
+    filtrerOperationsSuivi(operations, { ...FILTRES_SUIVI_VIDES, etat: "travaux_termines" })
+      .length === 0,
+  );
 }
 
-// ── B. KPI ───────────────────────────────────────────────────────────────────
+// ── B. KPI (V8.2.2 : 7 KPI limités) ────────────────────────────────────────
 console.log("\nB. KPI");
 {
   const k = kpiSuivi(operations);
-  check("programmées = 3", k.programmees === 3);
-  check("sans commande = 2", k.sansCommande === 2);
-  check("demandes devis = 1", k.demandesDevis === 1);
-  check("commandées = 1", k.commandees === 1);
+  check("opérations = 3", k.operations === 3);
   check("budget programmé = 245000", k.budgetProgramme === 245000);
-  check("budget commandé = 143500", k.budgetCommande === 143500);
+  check("commandé = 143500", k.budgetCommande === 143500);
   check("engagé = 140000", k.budgetEngage === 140000);
   check("payé = 75000", k.budgetPaye === 75000);
+  check("travaux en cours = 1", k.travauxEnCours === 1);
+  check("terminées = 0", k.terminees === 0);
   check("aucun MOCK (3200000 absent)", JSON.stringify(k).includes("3200000") === false);
 }
 
@@ -188,9 +221,15 @@ console.log("\nC. comparatif devis");
 console.log("\nD. tri");
 {
   const parTranche = trierOperationsSuivi(operations, "tranche", true);
-  check("tri TR asc → 1950, 1977, 1977", parTranche.map((o) => o.identite.tranche).join(",") === "1950,1977,1977");
+  check(
+    "tri TR asc → 1950, 1977, 1977",
+    parTranche.map((o) => o.identite.tranche).join(",") === "1950,1977,1977",
+  );
   const parMontantDesc = trierOperationsSuivi(operations, "montant", false);
-  check("tri montant desc → 150000 en premier", parMontantDesc[0]?.programmation.montant_total === 150000);
+  check(
+    "tri montant desc → 150000 en premier",
+    parMontantDesc[0]?.programmation.montant_total === 150000,
+  );
 }
 
 // ── E. Année de programmation ────────────────────────────────────────────────
@@ -205,20 +244,32 @@ console.log("\nE. année de programmation");
 console.log("\nF. aucune collision TR+C");
 {
   check("ids distincts (même TR+C)", opToiture.identite.id !== opChauffage.identite.id);
-  check("natures distinctes conservées", opToiture.programmation.nature === "Réfection toiture" && opChauffage.programmation.nature === "Remplacement chaudières");
+  check(
+    "natures distinctes conservées",
+    opToiture.programmation.nature === "Réfection toiture" &&
+      opChauffage.programmation.nature === "Remplacement chaudières",
+  );
 }
 
 // ── G. aucun MOCK ────────────────────────────────────────────────────────────
 console.log("\nG. aucun MOCK");
 {
   check("aucune valeur 3200000", JSON.stringify(operations).includes("3200000") === false);
-  check("sources réelles", operations.every((o) => o.source.donnees_reelles === true && o.source.mock === false));
+  check(
+    "sources réelles",
+    operations.every((o) => o.source.donnees_reelles === true && o.source.mock === false),
+  );
 }
 
 // ── H. statsDevis élargi (V7.10 réutilisé) ───────────────────────────────────
 console.log("\nH. statsDevis élargi");
 {
-  const s = statsDevis([{ montant: 100 }, { montant: 200 }, { montant: null }, { montant: undefined }]);
+  const s = statsDevis([
+    { montant: 100 },
+    { montant: 200 },
+    { montant: null },
+    { montant: undefined },
+  ]);
   check("ignore les montants null", s?.min === 100 && s?.max === 200 && s?.moyenne === 150);
   check("tous null → null", statsDevis([{ montant: null }]) === null);
 }
@@ -231,10 +282,16 @@ console.log("\nI. structure de la route /suivi");
   const tableau = source("src/components/suivi/SuiviTable.tsx");
   check("route /suivi définie", route.includes('"/suivi"'));
   check("arborescence : Programmation", fiche.includes("Programmation"));
-  check("arborescence : Consultation + Entreprises suggérées", fiche.includes("Consultation") && fiche.includes("Entreprises suggérées"));
-  check("arborescence : Devis (comparatif)", fiche.includes("Devis") && fiche.includes("comparatif"));
+  check(
+    "arborescence : Consultation + Entreprises suggérées",
+    fiche.includes("Consultation") && fiche.includes("Entreprises suggérées"),
+  );
+  check(
+    "arborescence : Devis (comparatif)",
+    fiche.includes("Devis") && fiche.includes("comparatif"),
+  );
   check("arborescence : Commandes", fiche.includes("Commandes"));
-  check("arborescence : Travaux / Exécution", fiche.includes("Travaux / Exécution"));
+  check("arborescence : Travaux / Exécution", fiche.includes("Travaux"));
   check("aucun MOCK dans la route", route.includes("SUIVI_2026_MOCK") === false);
   check("tableau : KPI + filtres", tableau.includes("KPI") && tableau.includes("recherche"));
   check("tableau : état vide explicite", tableau.includes("Aucune donnée disponible.") === true);
@@ -243,20 +300,30 @@ console.log("\nI. structure de la route /suivi");
 // ── J. moteur état (etatMetier) inchangé ─────────────────────────────────────
 console.log("\nJ. Dashboard inchangé (etatMetier)");
 {
-  check("Terminés → Terminés", etatMetier({ etat_travaux: "Terminés", etat_commande: null, engage: 0 }, 2026) === "Terminés");
-  check("En cours + engagé → En cours", etatMetier({ etat_travaux: "En cours", etat_commande: null, engage: 12000 }, 2026) === "En cours");
+  check(
+    "Terminés → Terminés",
+    etatMetier({ etat_travaux: "Terminés", etat_commande: null, engage: 0 }, 2026) === "Terminés",
+  );
+  check(
+    "En cours + engagé → En cours",
+    etatMetier({ etat_travaux: "En cours", etat_commande: null, engage: 12000 }, 2026) ===
+      "En cours",
+  );
 }
 
 // ── K. moteur mailto/mail intact ─────────────────────────────────────────────
 console.log("\nK. moteur mailto/mail intact");
 {
-  const compose = composerMail(MAIL_MODELES.find((m) => m.id === "demande_devis"), {
-    TR: "1977",
-    NATURE_TRAVAUX: "Toiture",
-    CORPS_ETAT: "Couverture",
-    ADRESSE: "10 rue des Lilas",
-    DATE_RETOUR: "2026-09-10",
-  });
+  const compose = composerMail(
+    MAIL_MODELES.find((m) => m.id === "demande_devis"),
+    {
+      TR: "1977",
+      NATURE_TRAVAUX: "Toiture",
+      CORPS_ETAT: "Couverture",
+      ADRESSE: "10 rue des Lilas",
+      DATE_RETOUR: "2026-09-10",
+    },
+  );
   check("sujet composé", compose.sujet === "Demande de devis – 1977 – Toiture");
   const mailto = construireMailto({ email: null, sujet: compose.sujet, corps: compose.corps });
   check("mailto généré", mailto.startsWith("mailto:") && mailto.includes("subject="));

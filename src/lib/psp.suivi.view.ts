@@ -11,33 +11,18 @@ import type { DevisSuivi } from "./psp.suivi.foundation.ts";
 // ── Filtres du tableau ───────────────────────────────────────────────────────
 
 export type FiltresSuivi = {
-  annee: string; // "" | "2027" … "2031"
-  tranche: string;
-  cc: string;
-  categorie: string; // "" | "GE" | "GT" | "CP"
-  corpsEtat: string;
-  statutPsp: string;
-  statutConsultation: string;
-  statutExecution: string;
-  fournisseur: string;
-  commande: "toutes" | "avec" | "sans";
-  priorite: string;
+  /** Recherche globale : TR, adresse, corps d'état, nature, entreprise, n° commande, CC. */
   recherche: string;
+  /** Origine : toutes | psp | hors_psp (dérivé de psp_lignes.origine). */
+  origine: "toutes" | "psp" | "hors_psp";
+  /** Étape : toutes | consultation | commande | travaux_en_cours | travaux_termines. */
+  etat: "toutes" | "consultation" | "commande" | "travaux_en_cours" | "travaux_termines";
 };
 
 export const FILTRES_SUIVI_VIDES: FiltresSuivi = {
-  annee: "",
-  tranche: "",
-  cc: "",
-  categorie: "",
-  corpsEtat: "",
-  statutPsp: "",
-  statutConsultation: "",
-  statutExecution: "",
-  fournisseur: "",
-  commande: "toutes",
-  priorite: "",
   recherche: "",
+  origine: "toutes",
+  etat: "toutes",
 };
 
 /** L'opération est-elle programmée (montant > 0) sur l'année donnée ? */
@@ -46,47 +31,40 @@ export const operationSurAnnee = (op: SuiviOperationVue, annee: number): boolean
 
 const texte = (v: string | null | undefined): string => (v ?? "").trim().toLowerCase();
 
-/** Applique les filtres du tableau (pur). */
+/** Applique les filtres du tableau (V8.2.2 — recherche, origine, état). */
 export const filtrerOperationsSuivi = (
   operations: SuiviOperationVue[],
   filtres: FiltresSuivi,
 ): SuiviOperationVue[] => {
   const recherche = texte(filtres.recherche);
-  const fournisseur = texte(filtres.fournisseur);
   return operations.filter((op) => {
-    const p = op.programmation;
-    const c = op.consultation;
-    const cmd = op.commandes;
-    const ex = op.execution;
-    if (filtres.annee && !operationSurAnnee(op, Number(filtres.annee))) return false;
-    if (filtres.tranche && texte(op.identite.tranche) !== texte(filtres.tranche)) return false;
-    if (filtres.cc && texte(p.cc) !== texte(filtres.cc)) return false;
-    if (filtres.categorie && op.identite.categorie !== filtres.categorie) return false;
-    if (filtres.corpsEtat && !texte(p.corps_etat).includes(texte(filtres.corpsEtat))) return false;
-    if (filtres.statutPsp && p.statut_psp !== filtres.statutPsp) return false;
-    if (filtres.statutConsultation && c.statut !== filtres.statutConsultation) return false;
-    if (filtres.statutExecution && ex.statut !== filtres.statutExecution) return false;
-    if (filtres.priorite && texte(p.priorite) !== texte(filtres.priorite)) return false;
-    if (filtres.commande === "avec" && cmd.nb_commandes === 0) return false;
-    if (filtres.commande === "sans" && cmd.nb_commandes > 0) return false;
-    if (fournisseur) {
-      const fournisseurs = cmd.liees.map((l) => texte(l.entreprise)).filter(Boolean);
-      const consultes = c.entreprises.map((e) => texte(e.entreprise)).filter(Boolean);
-      if (![...fournisseurs, ...consultes].some((f) => f.includes(fournisseur))) return false;
+    if (filtres.origine !== "toutes" && op.identite.origine !== filtres.origine) return false;
+    if (filtres.etat !== "toutes") {
+      const ex = op.execution.statut;
+      if (filtres.etat === "consultation" && op.consultation.nb_demandes === 0) return false;
+      if (filtres.etat === "commande" && op.commandes.nb_commandes === 0) return false;
+      if (
+        filtres.etat === "travaux_en_cours" &&
+        !(ex === "travaux_en_cours" || ex === "travaux_a_demarrer")
+      )
+        return false;
+      if (filtres.etat === "travaux_termines" && ex !== "travaux_termines") return false;
     }
     if (recherche) {
-      const consultes = c.entreprises.map((e) => e.entreprise).join(" ");
-      const entrepriseLies = cmd.liees
+      const consultes = op.consultation.entreprises.map((e) => e.entreprise).join(" ");
+      const liees = op.commandes.liees
         .map((l) => `${l.numero_commande ?? ""} ${l.entreprise ?? ""}`)
         .join(" ");
       const haystack = [
         op.identite.tranche,
-        p.nature,
-        p.corps_etat,
-        p.cc,
+        op.programmation.nature,
+        op.programmation.corps_etat,
+        op.programmation.cc,
+        op.programmation.sous_secteur,
+        op.programmation.adresse,
         op.identite.categorie,
         consultes,
-        entrepriseLies,
+        liees,
       ]
         .filter(Boolean)
         .map((x) => texte(x))
@@ -149,44 +127,29 @@ export const trierOperationsSuivi = (
 // ── KPI ──────────────────────────────────────────────────────────────────────
 
 export type KpiSuivi = {
-  programmees: number;
-  sansCommande: number;
-  demandesDevis: number;
-  devisRecus: number;
-  devisRetenus: number;
-  commandees: number;
-  travauxEnCours: number;
-  terminees: number;
-  relances: number;
-  aConfirmer: number;
+  operations: number;
   budgetProgramme: number;
   budgetCommande: number;
   budgetEngage: number;
   budgetPaye: number;
+  travauxEnCours: number;
+  terminees: number;
 };
 
-/** KPI dynamiques du tableau (aucun MOCK — sources réelles). */
+/** KPI du tableau Opérations (V8.2.2 — limités, aucun MOCK). */
 export const kpiSuivi = (operations: SuiviOperationVue[]): KpiSuivi => {
   const somme = (vs: number[]) => vs.reduce((s, v) => s + v, 0);
   return {
-    programmees: operations.length,
-    sansCommande: operations.filter((o) => o.execution.statut === "sans_commande").length,
-    demandesDevis: operations.filter((o) => o.consultation.nb_demandes > 0).length,
-    devisRecus: operations.filter((o) => o.consultation.nb_devis_recus > 0).length,
-    devisRetenus: operations.filter((o) => o.consultation.statut === "devis_retenu").length,
-    commandees: operations.filter((o) => o.commandes.nb_commandes > 0).length,
+    operations: operations.length,
+    budgetProgramme: somme(operations.map((o) => o.programmation.montant_total)),
+    budgetCommande: somme(operations.map((o) => o.commandes.budget_commande)),
+    budgetEngage: somme(operations.map((o) => o.commandes.engage)),
+    budgetPaye: somme(operations.map((o) => o.commandes.paye)),
     travauxEnCours: operations.filter(
       (o) =>
         o.execution.statut === "travaux_en_cours" || o.execution.statut === "travaux_a_demarrer",
     ).length,
     terminees: operations.filter((o) => o.execution.statut === "travaux_termines").length,
-    relances: operations.filter((o) => o.consultation.relance_necessaire).length,
-    aConfirmer: operations.filter((o) => o.commandes.statut_rapprochement_global === "a_confirmer")
-      .length,
-    budgetProgramme: somme(operations.map((o) => o.programmation.montant_total)),
-    budgetCommande: somme(operations.map((o) => o.commandes.budget_commande)),
-    budgetEngage: somme(operations.map((o) => o.commandes.engage)),
-    budgetPaye: somme(operations.map((o) => o.commandes.paye)),
   };
 };
 

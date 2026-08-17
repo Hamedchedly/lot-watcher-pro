@@ -20,11 +20,11 @@ import type { SuiviOperationVue } from "@/lib/psp.suivi.foundation";
 export const Route = createFileRoute("/suivi")({
   head: () => ({
     meta: [
-      { title: "Suivi opérations — PSP" },
+      { title: "Opérations — PSP" },
       {
         name: "description",
         content:
-          "Suivi des opérations programmées : programmation, consultation (entreprises, demandes, relances, réponses), devis et commandes importées.",
+          "Registre opérationnel unique : toutes les opérations (PSP et hors PSP), consultation, devis, commandes et travaux.",
       },
     ],
   }),
@@ -51,7 +51,7 @@ function SuiviPage() {
         <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-3 px-4 py-4 sm:px-6">
           <div className="mr-auto">
             <h1 className="flex items-center gap-2 text-lg font-semibold leading-tight">
-              <Workflow className="size-5 text-primary" /> Suivi opérations
+              <Workflow className="size-5 text-primary" /> Opérations
             </h1>
             <p className="text-sm text-muted-foreground">
               {programmation

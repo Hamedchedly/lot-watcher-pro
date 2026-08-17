@@ -1,32 +1,21 @@
 /**
- * V8.2 — SUIVI OPÉRATION : tableau des opérations.
+ * V8.2.2 — OPÉRATIONS : tableau principal (registre opérationnel unique).
  *
- * KPI dynamiques + filtres + tableau 9 colonnes (les détails sont dans la
- * fiche). Réutilise les fonctions pures de `psp.suivi.view` — aucun MOCK.
+ * Simplifié : 10 colonnes, 7 KPI, 3 filtres (Recherche / Origine / État).
+ * Les montants détaillés restent dans la fiche. Aucun MOCK.
  */
 import { useMemo, useState } from "react";
-import { ChevronsUpDown, Search } from "lucide-react";
+import { Search } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { money0 } from "@/lib/formats";
-import { PSP_ANNEES } from "@/lib/psp.prep";
 import {
   FILTRES_SUIVI_VIDES,
   filtrerOperationsSuivi,
   kpiSuivi,
-  trierOperationsSuivi,
-  type CleTriSuivi,
   type FiltresSuivi,
 } from "@/lib/psp.suivi.view";
-import {
-  STATUT_CONSULTATION_LABELS,
-  STATUT_EXECUTION_LABELS,
-  STATUT_PSP_LABELS,
-  type StatutConsultationCode,
-  type StatutExecutionCode,
-  type StatutPspCode,
-} from "@/lib/psp.suivi.foundation";
 import type { SuiviOperationVue } from "@/lib/psp.suivi.foundation";
 
 const selectCls =
@@ -40,265 +29,154 @@ export default function SuiviTable({
   onOpen: (op: SuiviOperationVue) => void;
 }) {
   const [filtres, setFiltres] = useState<FiltresSuivi>(FILTRES_SUIVI_VIDES);
-  const [cleTri, setCleTri] = useState<CleTriSuivi>("tranche");
-  const [asc, setAsc] = useState(true);
-
-  const kpi = useMemo(() => kpiSuivi(operations), [operations]);
-  const visibles = useMemo(() => {
-    const filtrees = filtrerOperationsSuivi(operations, filtres);
-    return trierOperationsSuivi(filtrees, cleTri, asc);
-  }, [operations, filtres, cleTri, asc]);
-
   const set = (patch: Partial<FiltresSuivi>) => setFiltres((f) => ({ ...f, ...patch }));
-  const trier = (cle: CleTriSuivi) => {
-    if (cle === cleTri) setAsc((a) => !a);
-    else {
-      setCleTri(cle);
-      setAsc(true);
-    }
-  };
+  const kpi = useMemo(() => kpiSuivi(operations), [operations]);
+  const visibles = useMemo(
+    () => filtrerOperationsSuivi(operations, filtres),
+    [operations, filtres],
+  );
 
   return (
     <div className="space-y-3">
-      {/* KPI dynamiques */}
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-8">
-        <Kpi label="Programmées" value={String(kpi.programmees)} />
-        <Kpi label="Sans commande" value={String(kpi.sansCommande)} />
-        <Kpi label="Demandes devis" value={String(kpi.demandesDevis)} />
-        <Kpi label="Devis reçus" value={String(kpi.devisRecus)} />
-        <Kpi label="Commandées" value={String(kpi.commandees)} />
-        <Kpi label="En cours" value={String(kpi.travauxEnCours)} />
-        <Kpi label="Terminées" value={String(kpi.terminees)} />
-        <Kpi label="Relances" value={String(kpi.relances)} />
-        <Kpi label="Programmé" value={money0(kpi.budgetProgramme)} />
+      {/* KPI — limités (V8.2.2) */}
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
+        <Kpi label="Opérations" value={String(kpi.operations)} />
+        <Kpi label="Budget programmé" value={money0(kpi.budgetProgramme)} />
         <Kpi label="Commandé" value={money0(kpi.budgetCommande)} />
         <Kpi label="Engagé" value={money0(kpi.budgetEngage)} />
         <Kpi label="Payé" value={money0(kpi.budgetPaye)} />
-      </div>{" "}
-      {/* Barre de filtres */}
+        <Kpi label="Travaux en cours" value={String(kpi.travauxEnCours)} />
+        <Kpi label="Terminées" value={String(kpi.terminees)} />
+      </div>
+      {/* Filtres — 3 uniquement (Recherche / Origine / État) */}
       <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-card p-2">
         <div className="relative">
           <Search className="absolute left-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground" />
           <Input
-            className="h-8 w-44 pl-7 text-[11px]"
-            placeholder="Recherche…"
+            className="h-8 w-56 pl-7 text-[11px]"
+            placeholder="Recherche : TR, adresse, corps d'état, entreprise, n° commande…"
             value={filtres.recherche}
             onChange={(e) => set({ recherche: e.target.value })}
           />
         </div>
         <select
           className={selectCls}
-          value={filtres.annee}
-          onChange={(e) => set({ annee: e.target.value })}
+          value={filtres.origine}
+          onChange={(e) => set({ origine: e.target.value as "toutes" | "psp" | "hors_psp" })}
         >
-          <option value="">Année : toutes</option>
-          {PSP_ANNEES.map((a) => (
-            <option key={a} value={String(a)}>
-              {a}
-            </option>
-          ))}
-        </select>
-        <Input
-          className="h-8 w-20 text-[11px]"
-          placeholder="TR"
-          value={filtres.tranche}
-          onChange={(e) => set({ tranche: e.target.value })}
-        />
-        <Input
-          className="h-8 w-24 text-[11px]"
-          placeholder="CC"
-          value={filtres.cc}
-          onChange={(e) => set({ cc: e.target.value })}
-        />
-        <select
-          className={selectCls}
-          value={filtres.categorie}
-          onChange={(e) => set({ categorie: e.target.value })}
-        >
-          <option value="">C : toutes</option>
-          {(["GE", "GT", "CP"] as const).map((c) => (
-            <option key={c} value={c}>
-              {c}
-            </option>
-          ))}
+          <option value="toutes">Origine : toutes</option>
+          <option value="psp">PSP</option>
+          <option value="hors_psp">Hors PSP</option>
         </select>
         <select
           className={selectCls}
-          value={filtres.statutPsp}
-          onChange={(e) => set({ statutPsp: e.target.value })}
+          value={filtres.etat}
+          onChange={(e) =>
+            set({
+              etat: e.target.value as
+                "toutes" | "consultation" | "commande" | "travaux_en_cours" | "travaux_termines",
+            })
+          }
         >
-          <option value="">Statut PSP : tous</option>
-          {(Object.keys(STATUT_PSP_LABELS) as StatutPspCode[]).map((s) => (
-            <option key={s} value={s}>
-              {STATUT_PSP_LABELS[s]}
-            </option>
-          ))}
+          <option value="toutes">État : toutes</option>
+          <option value="consultation">Consultation</option>
+          <option value="commande">Commande</option>
+          <option value="travaux_en_cours">Travaux en cours</option>
+          <option value="travaux_termines">Travaux terminés</option>
         </select>
-        <select
-          className={selectCls}
-          value={filtres.statutConsultation}
-          onChange={(e) => set({ statutConsultation: e.target.value })}
-        >
-          <option value="">Consultation : toutes</option>
-          {(Object.keys(STATUT_CONSULTATION_LABELS) as StatutConsultationCode[]).map((s) => (
-            <option key={s} value={s}>
-              {STATUT_CONSULTATION_LABELS[s]}
-            </option>
-          ))}
-        </select>
-        <select
-          className={selectCls}
-          value={filtres.statutExecution}
-          onChange={(e) => set({ statutExecution: e.target.value })}
-        >
-          <option value="">Exécution : tous</option>
-          {(Object.keys(STATUT_EXECUTION_LABELS) as StatutExecutionCode[]).map((s) => (
-            <option key={s} value={s}>
-              {STATUT_EXECUTION_LABELS[s]}
-            </option>
-          ))}
-        </select>
-        <select
-          className={selectCls}
-          value={filtres.commande}
-          onChange={(e) => set({ commande: e.target.value as "toutes" | "avec" | "sans" })}
-        >
-          <option value="toutes">Commande : toutes</option>
-          <option value="avec">Avec commande</option>
-          <option value="sans">Sans commande</option>
-        </select>
-        <select
-          className={selectCls}
-          value={filtres.priorite}
-          onChange={(e) => set({ priorite: e.target.value })}
-        >
-          <option value="">Priorité : toutes</option>
-          <option value="prioritaire">Prioritaire</option>
-          <option value="normale">Normale</option>
-          <option value="non_prioritaire">Non prioritaire</option>
-        </select>
-      </div>
-      {/* Tableau */}
+      </div>{" "}
+      {/* Tableau — 10 colonnes (détails dans la fiche) */}
       <div className="overflow-x-auto rounded-lg border bg-card">
-        <table className="w-full min-w-[900px] text-left text-[11px]">
+        <table className="w-full min-w-[860px] text-left text-[11px]">
           <thead>
             <tr className="border-b bg-muted/40 text-[9px] uppercase tracking-wider text-muted-foreground">
-              <Th
-                label="Opération"
-                cle="nature"
-                onTri={trier}
-                actif={cleTri === "nature"}
-                asc={asc}
-                icon
-              />
-              <Th
-                label="TR"
-                cle="tranche"
-                onTri={trier}
-                actif={cleTri === "tranche"}
-                asc={asc}
-                icon
-              />
-              <Th label="CC" cle="cc" onTri={trier} actif={cleTri === "cc"} asc={asc} icon />
-              <Th
-                label="C"
-                cle="categorie"
-                onTri={trier}
-                actif={cleTri === "categorie"}
-                asc={asc}
-                icon
-              />
-              <Th
-                label="Programmation"
-                cle="annee"
-                onTri={trier}
-                actif={cleTri === "annee"}
-                asc={asc}
-                icon
-              />
+              <th className="px-2 py-1.5 font-bold">Opération</th>
+              <th className="px-2 py-1.5 font-bold">TR</th>
+              <th className="px-2 py-1.5 font-bold">Sous-secteur</th>
+              <th className="px-2 py-1.5 font-bold">CC</th>
+              <th className="px-2 py-1.5 font-bold">Corps d&apos;état</th>
+              <th className="px-2 py-1.5 font-bold">Programmation</th>
+              <th className="px-2 py-1.5 font-bold">Consultation</th>
               <th className="px-2 py-1.5 font-bold">Devis</th>
               <th className="px-2 py-1.5 font-bold">Commande</th>
               <th className="px-2 py-1.5 font-bold">Travaux</th>
-              <th className="px-2 py-1.5 font-bold">Financier</th>
             </tr>
           </thead>
           <tbody>
             {visibles.length === 0 ? (
               <tr>
-                <td colSpan={9} className="px-2 py-6 text-center text-muted-foreground">
+                <td colSpan={10} className="px-2 py-6 text-center text-muted-foreground">
                   Aucune donnée disponible.
                 </td>
               </tr>
             ) : (
-              visibles.map((op) => {
-                const p = op.programmation;
-                const c = op.consultation;
-                const cmd = op.commandes;
-                const ex = op.execution;
-                return (
-                  <tr
-                    key={op.identite.id}
-                    onClick={() => onOpen(op)}
-                    className="cursor-pointer border-b transition-colors last:border-0 hover:bg-muted/40"
-                  >
-                    <td className="px-2 py-1.5">
-                      <p className="font-semibold">{p.nature ?? "Sans nature"}</p>
-                      <p className="text-[9px] text-muted-foreground">{p.corps_etat ?? "—"}</p>
-                    </td>
-                    <td className="px-2 py-1.5 font-bold">{op.identite.tranche}</td>
-                    <td className="px-2 py-1.5">{p.cc ?? "—"}</td>
-                    <td className="px-2 py-1.5">
-                      <Badge variant="outline">{op.identite.categorie}</Badge>
-                    </td>
-                    <td className="px-2 py-1.5">
-                      <p className="font-bold">{p.annee_premiere ?? "—"}</p>
-                      <p className="text-[9px] text-muted-foreground">{money0(p.montant_total)}</p>
-                    </td>
-                    <td className="px-2 py-1.5">
-                      <p className={c.relance_necessaire ? "font-semibold text-amber-700" : ""}>
-                        {c.statut_label}
+              visibles.map((op) => (
+                <tr
+                  key={op.identite.id}
+                  onClick={() => onOpen(op)}
+                  className="cursor-pointer border-b transition-colors last:border-0 hover:bg-muted/40"
+                >
+                  <td className="px-2 py-1.5">
+                    <p className="font-semibold">{op.programmation.nature ?? "Sans nature"}</p>
+                    <Badge variant="outline" className="text-[9px]">
+                      {op.identite.origine === "hors_psp" ? "Hors PSP" : "PSP"}
+                    </Badge>
+                  </td>
+                  <td className="px-2 py-1.5 font-bold">{op.identite.tranche}</td>
+                  <td className="px-2 py-1.5">{op.programmation.sous_secteur ?? "—"}</td>
+                  <td className="px-2 py-1.5">{op.programmation.cc ?? "—"}</td>
+                  <td className="px-2 py-1.5">{op.programmation.corps_etat ?? "—"}</td>
+                  <td className="px-2 py-1.5">
+                    <p className="font-bold">{op.programmation.annee_premiere ?? "—"}</p>
+                    <p className="text-[9px] text-muted-foreground">
+                      {money0(op.programmation.montant_total)}
+                    </p>
+                  </td>
+                  <td className="px-2 py-1.5">
+                    {op.consultation.nb_entreprises_consultees > 0 ? (
+                      <span className={op.consultation.relance_necessaire ? "text-amber-700" : ""}>
+                        {op.consultation.nb_entreprises_consultees} entreprise(s)
+                        {op.consultation.relance_necessaire ? " · Relance" : ""}
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground">Pas de consultation</span>
+                    )}
+                  </td>
+                  <td className="px-2 py-1.5">
+                    {op.consultation.statut === "devis_retenu" ? (
+                      <span className="font-semibold text-emerald-700">Devis retenu</span>
+                    ) : op.consultation.nb_devis_recus > 0 ? (
+                      <span>{op.consultation.nb_devis_recus} reçu(s)</span>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </td>
+                  <td className="px-2 py-1.5">
+                    {op.commandes.nb_commandes === 0 ? (
+                      <span className="text-muted-foreground">—</span>
+                    ) : (
+                      <p className="font-semibold">
+                        {op.commandes.liees[0]?.numero_commande ?? "—"}
+                        {op.commandes.nb_commandes > 1
+                          ? ` (+${op.commandes.nb_commandes - 1})`
+                          : ""}
                       </p>
-                      {c.relance_necessaire && (
-                        <p className="text-[9px] font-bold text-amber-700">Relance</p>
-                      )}
-                    </td>
-                    <td className="px-2 py-1.5">
-                      {cmd.nb_commandes === 0 ? (
-                        <span className="text-muted-foreground">Sans commande</span>
-                      ) : (
-                        <>
-                          <p className="font-semibold">
-                            {cmd.liees[0]?.numero_commande ?? "—"}
-                            {cmd.nb_commandes > 1 ? ` (+${cmd.nb_commandes - 1})` : ""}
-                          </p>
-                          <p className="text-[9px] text-muted-foreground">
-                            {cmd.liees[0]?.entreprise ?? "—"}
-                          </p>
-                        </>
-                      )}
-                    </td>
-                    <td className="px-2 py-1.5">
-                      <Badge variant="outline" className="text-[9px]">
-                        {ex.statut_label}
-                      </Badge>
-                    </td>
-                    <td className="px-2 py-1.5">
-                      <p className="font-semibold">{money0(p.montant_total)}</p>
-                      <p className="text-[9px] text-muted-foreground">
-                        Cmd {money0(cmd.budget_commande)} · Eng {money0(cmd.engage)} · Payé{" "}
-                        {money0(cmd.paye)}
-                      </p>
-                    </td>
-                  </tr>
-                );
-              })
+                    )}
+                  </td>
+                  <td className="px-2 py-1.5">
+                    <Badge variant="outline" className="text-[9px]">
+                      {op.execution.statut_label}
+                    </Badge>
+                  </td>
+                </tr>
+              ))
             )}
           </tbody>
         </table>
       </div>
       <p className="text-[10px] text-muted-foreground">
-        {visibles.length} opération(s) affichée(s) sur {operations.length} — cliquez sur une ligne
-        pour ouvrir la fiche.
+        {visibles.length} opération(s) affichée(s) sur {operations.length} — cliquez pour ouvrir la
+        fiche (détails financiers et parcours complet).
       </p>
     </div>
   );
@@ -310,34 +188,5 @@ function Kpi({ label, value }: { label: string; value: string }) {
       <p className="text-[9px] uppercase tracking-wider text-muted-foreground">{label}</p>
       <p className="text-sm font-bold">{value}</p>
     </div>
-  );
-}
-
-function Th({
-  label,
-  cle,
-  onTri,
-  actif,
-  asc,
-  icon = false,
-}: {
-  label: string;
-  cle: CleTriSuivi;
-  onTri: (cle: CleTriSuivi) => void;
-  actif: boolean;
-  asc: boolean;
-  icon?: boolean;
-}) {
-  return (
-    <th
-      className="cursor-pointer select-none px-2 py-1.5 font-bold hover:bg-muted"
-      onClick={() => onTri(cle)}
-    >
-      <span className="inline-flex items-center gap-0.5">
-        {label}
-        {icon && <ChevronsUpDown className="size-2.5 opacity-60" />}
-        {actif ? (asc ? " ▲" : " ▼") : ""}
-      </span>
-    </th>
   );
 }
