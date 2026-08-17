@@ -394,7 +394,7 @@ export const trierOperationsDetail = (
 export type StatsDevis = { min: number; moyenne: number; max: number };
 
 /** Min / moyenne / max d'une liste de devis (toujours calculés, jamais saisis). */
-export const statsDevis = (devis: PspDevis[]): StatsDevis | null => {
+export const statsDevis = (devis: Array<{ montant: number | null }>): StatsDevis | null => {
   // V7.10 §6 — les devis sans montant (demandes) ne participent pas aux stats.
   const montants = devis.map((d) => d.montant).filter((m): m is number => typeof m === "number");
   if (montants.length === 0) return null;

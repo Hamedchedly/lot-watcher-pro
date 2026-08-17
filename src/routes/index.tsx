@@ -95,12 +95,20 @@ function Index() {
               </Link>
             </Button>
             <Button asChild variant="outline">
+              <Link to="/suivi">
+                <ListChecks className="size-4" /> Suivi opérations
+              </Link>
+            </Button>
+            <Button asChild variant="outline">
               <Link to="/fournisseurs" search={LISTE_FOURNISSEURS_SEARCH_VIDE}>
                 <Building2 className="size-4" /> Fournisseurs
               </Link>
             </Button>
             <Button asChild>
-              <Link to="/dashboard-travaux" search={{ commande: undefined, de: undefined, a: undefined }}>
+              <Link
+                to="/dashboard-travaux"
+                search={{ commande: undefined, de: undefined, a: undefined }}
+              >
                 <BarChart3 className="size-4" /> Dashboard travaux
               </Link>
             </Button>

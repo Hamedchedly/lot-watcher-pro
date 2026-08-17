@@ -1219,10 +1219,10 @@ export const getPspSuiviOperation = createServerFn({ method: "POST" })
     if (liensR.error) throw new Error(`Lecture des liens : ${liensR.error.message}`);
     if (decisionsR.error) throw new Error(`Lecture des décisions : ${decisionsR.error.message}`);
 
-    const perimetres = perimetresR.data ?? [];
-    const devis = devisR.data ?? [];
-    const liens = liensR.data ?? [];
-    const decisions = decisionsR.data ?? [];
+    const perimetres = (perimetresR.data ?? []) as any[];
+    const devis = (devisR.data ?? []) as any[];
+    const liens = (liensR.data ?? []) as any[];
+    const decisions = (decisionsR.data ?? []) as any[];
 
     // Commandes liées — batch (une seule requête pour toutes).
     const commandeIds: string[] = liens
@@ -1391,6 +1391,170 @@ export const getPspEntreprisesSuggestions = createServerFn({ method: "POST" })
       corps_etat_operation: corpsEtat,
       limite: data.limite ?? 20,
     }) as SuggestionEntreprise[];
+  });
+
+// ── V8.2 — SUIVI OPÉRATION : liste agrégée (batch, aucun N+1) ─────────────────
+
+/**
+ * getPspSuiviOperations — tableau du Suivi : toutes les opérations de la
+ * dernière programmation officielle, agrégées (programmation + consultation +
+ * commandes + exécution) en quelques requêtes batch.
+ * Aucune écriture, aucun MOCK, aucune copie de commande dans psp_lignes.
+ */
+export const getPspSuiviOperations = createServerFn({ method: "POST" })
+  .validator((d: unknown) => d as undefined)
+  .handler(async () => {
+    const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
+    const db = supabaseAdmin as any;
+
+    const { data: prog } = await db
+      .from("psp_programmations")
+      .select("*")
+      .eq("type", "officielle")
+      .order("version", { ascending: false })
+      .limit(1);
+    const programmation = prog?.[0] ?? null;
+    if (!programmation) {
+      return { programmation: null, operations: [] };
+    }
+
+    const { data: lignes } = await db
+      .from("psp_lignes")
+      .select("*")
+      .eq("programmation_id", programmation.id)
+      .order("tranche_code");
+    const ids: string[] = (lignes ?? []).map((l: { id: string }) => l.id);
+
+    const [perimetresR, devisR, liensR, decisionsR, enveloppesR] = await Promise.all([
+      ids.length
+        ? db.from("psp_ligne_patrimoine").select("*").in("psp_ligne_id", ids)
+        : Promise.resolve({ data: [], error: null }),
+      ids.length
+        ? db.from("psp_devis").select("*").in("psp_ligne_id", ids)
+        : Promise.resolve({ data: [], error: null }),
+      ids.length
+        ? db.from("psp_command_links").select("*").in("psp_ligne_id", ids)
+        : Promise.resolve({ data: [], error: null }),
+      ids.length
+        ? db.from("psp_decisions").select("*").in("psp_ligne_id", ids)
+        : Promise.resolve({ data: [], error: null }),
+      db
+        .from("psp_enveloppes")
+        .select("annee, categorie, montant")
+        .eq("programmation_id", programmation.id),
+    ]);
+    const perimetres = (perimetresR.data ?? []) as any[];
+    const devis = (devisR.data ?? []) as any[];
+    const liens = (liensR.data ?? []) as any[];
+    const decisions = (decisionsR.data ?? []) as any[];
+
+    // Commandes liées — batch unique.
+    const commandeIds: string[] = [
+      ...new Set(liens.map((l: any) => l.commande_id).filter(Boolean)),
+    ] as string[];
+    let commandes: Array<Record<string, unknown>> = [];
+    if (commandeIds.length > 0) {
+      const { data: cmd } = await db
+        .from("travaux_commandes")
+        .select(
+          "id, numero_commande, tranche_code, fournisseur, descriptif, corps_etat, etat_commande, etat_travaux, budget, engage, paye, solde, created_at, date_demarrage, date_fin_travaux, annee_exercice",
+        )
+        .in("id", commandeIds);
+      commandes = (cmd ?? []).map((c: any) => ({
+        id: c.id,
+        numero_commande: c.numero_commande,
+        tranche_code: c.tranche_code,
+        fournisseur: c.fournisseur,
+        descriptif: c.descriptif,
+        corps_etat: c.corps_etat,
+        etat_commande: c.etat_commande,
+        etat_travaux: c.etat_travaux,
+        budget: c.budget,
+        engage: c.engage,
+        paye: c.paye,
+        solde: c.solde,
+        date_import: c.created_at,
+        date_demarrage: c.date_demarrage,
+        date_fin_travaux: c.date_fin_travaux,
+        annee_exercice: c.annee_exercice,
+      }));
+    }
+
+    // Patrimoine : tranches + CC (batch) — règle §1A.
+    const codes: string[] = [
+      ...new Set((lignes ?? []).map((l: { tranche_code: string }) => l.tranche_code)),
+    ] as string[];
+    const tranches = codes.length
+      ? ((
+          await db
+            .from("tranches")
+            .select("code, libelle, localite, sous_secteur")
+            .in("code", codes)
+        ).data ?? [])
+      : [];
+    const sousSecteurs: string[] = [
+      ...new Set(tranches.map((t: any) => t.sous_secteur).filter(Boolean)),
+    ] as string[];
+    const ccRows = sousSecteurs.length
+      ? ((
+          await db
+            .from("psp_charges_clientele")
+            .select("sous_secteur, identifiant_personnel")
+            .in("sous_secteur", sousSecteurs)
+            .eq("actif", true)
+        ).data ?? [])
+      : [];
+    const ccPar: Map<string, string | null> = new Map<string, string | null>(
+      ccRows.map((r: any) => [r.sous_secteur, r.identifiant_personnel]),
+    );
+    const tranchePar: Map<string, any> = new Map(tranches.map((t: any) => [t.code, t]));
+
+    const operations = (lignes ?? []).map((ligne: any) => {
+      const tranche: any = tranchePar.get(ligne.tranche_code);
+      return construireSuiviOperation({
+        ligne: {
+          id: ligne.id,
+          programmation_id: ligne.programmation_id,
+          tranche_code: ligne.tranche_code,
+          categorie: ligne.categorie,
+          corps_etat_code: ligne.corps_etat_code,
+          corps_etat: ligne.corps_etat,
+          nature_travaux: ligne.nature_travaux,
+          programme: ligne.programme ?? {},
+          ligne_budget: ligne.ligne_budget,
+          remarques: ligne.remarques,
+          origine: ligne.origine,
+          statut: ligne.statut,
+          priorite: ligne.priorite,
+          created_at: ligne.created_at,
+          updated_at: ligne.updated_at,
+        },
+        perimetres: perimetres.filter((p: any) => p.psp_ligne_id === ligne.id),
+        devis: devis.filter((d: any) => d.psp_ligne_id === ligne.id),
+        liens: liens.filter((l: any) => l.psp_ligne_id === ligne.id),
+        commandes: commandes as unknown as CommandeTravauxSuivi[],
+        decisions: decisions.filter((d: any) => d.psp_ligne_id === ligne.id),
+        patrimoine: {
+          adresse: tranche
+            ? [tranche.libelle, tranche.localite].filter(Boolean).join(" – ") || null
+            : null,
+          cc: tranche?.sous_secteur ? (ccPar.get(tranche.sous_secteur) ?? null) : null,
+        },
+        programmationStatut: programmation.statut,
+      });
+    });
+
+    return {
+      programmation: {
+        id: programmation.id,
+        annee_debut: programmation.annee_debut,
+        annee_fin: programmation.annee_fin,
+        version: programmation.version,
+        statut: programmation.statut,
+      },
+      enveloppes: enveloppesR.data ?? [],
+      operations,
+    };
   });
 
 /**
