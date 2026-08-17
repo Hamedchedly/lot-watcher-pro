@@ -148,6 +148,8 @@ const devisInput = z.object({
     .default("a_demander"),
   commentaire: z.string().nullish(),
   documentReference: z.string().nullish(),
+  /** V8.4 — date limite de réponse souhaitée (optionnelle). */
+  dateLimiteReponse: z.string().nullish(),
 });
 
 const reportInput = z.object({
@@ -399,6 +401,7 @@ export const createPspDevis = createServerFn({ method: "POST" })
         statut: data.statut,
         commentaire: data.commentaire ?? null,
         document_reference: data.documentReference ?? null,
+        date_limite_reponse: data.dateLimiteReponse ?? null,
       })
       .select("*")
       .single();
@@ -430,6 +433,8 @@ export const updatePspDevis = createServerFn({ method: "POST" })
           .optional(),
         commentaire: z.string().nullish(),
         documentReference: z.string().nullish(),
+        /** V8.4 — date limite de réponse souhaitée (optionnelle). */
+        dateLimiteReponse: z.string().nullish(),
       })
       .parse(d),
   )
@@ -445,6 +450,8 @@ export const updatePspDevis = createServerFn({ method: "POST" })
     if (data.commentaire !== undefined) patch["commentaire"] = data.commentaire ?? null;
     if (data.documentReference !== undefined)
       patch["document_reference"] = data.documentReference ?? null;
+    if (data.dateLimiteReponse !== undefined)
+      patch["date_limite_reponse"] = data.dateLimiteReponse ?? null;
     const { data: devis, error } = await db
       .from("psp_devis")
       .update(patch)
@@ -464,6 +471,63 @@ export const deletePspDevis = createServerFn({ method: "POST" })
     const { error } = await db.from("psp_devis").delete().eq("id", data.id);
     if (error) throw new Error(`Suppression du devis : ${error.message}`);
     return { ok: true as const };
+  });
+
+/**
+ * V8.4 §8/§10 — ENREGISTRE LA RELANCE d'un devis (action « Marquer comme envoyée »).
+ *
+ * PAT S11 ne prétend JAMAIS avoir envoyé le mail : cette fonction est appelée
+ * explicitement par l'utilisateur après ouverture de mailto:. Elle :
+ *   1. met à jour `psp_devis.derniere_relance_at` (distinct de created_at) ;
+ *   2. écrit une entrée `psp_ligne_historique` (operation='relance', delta JSONB)
+ *      — réutilise la table d'historique EXISTANTE (aucune table parallèle).
+ * Ne modifie PAS la date de première demande (created_at) ni le statut du devis.
+ */
+export const enregistrerRelanceDevis = createServerFn({ method: "POST" })
+  .validator((d: unknown) =>
+    z
+      .object({
+        id: z.string().uuid(),
+        motif: z.string().max(400).optional(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
+    const db = supabaseAdmin as any;
+    const { data: devis } = await db.from("psp_devis").select("*").eq("id", data.id).single();
+    if (!devis) throw new Error("Devis introuvable.");
+
+    const maintenant = new Date().toISOString();
+    const { data: maj, error: upErr } = await db
+      .from("psp_devis")
+      .update({ derniere_relance_at: maintenant })
+      .eq("id", data.id)
+      .select("*")
+      .single();
+    if (upErr) throw new Error(`Enregistrement de la relance : ${upErr.message}`);
+
+    const { error: histErr } = await db.from("psp_ligne_historique").insert({
+      ligne_id: devis.psp_ligne_id,
+      operation: "relance",
+      avant: {
+        type: "devis",
+        devis_id: devis.id,
+        entreprise: devis.entreprise,
+        derniere_relance_at: devis.derniere_relance_at ?? null,
+      },
+      apres: {
+        type: "devis",
+        devis_id: devis.id,
+        entreprise: devis.entreprise,
+        derniere_relance_at: maintenant,
+      },
+      resolu: false,
+      motif: data.motif ?? "Relance de demande de devis",
+    });
+    if (histErr) throw new Error(`Historisation de la relance : ${histErr.message}`);
+
+    return maj;
   });
 
 // ═══════════════════════════════════════════════════════════════════════════════

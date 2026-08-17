@@ -80,6 +80,8 @@ export interface DevisSuivi {
   created_at: string | null;
   /** Date limite de réponse (optionnelle — à défaut : created_at + joursReponse). */
   date_limite_reponse?: string | null;
+  /** V8.4 — date de la dernière relance envoyée (distincte de created_at). */
+  derniere_relance_at?: string | null;
 }
 
 /** Lien ligne PSP ↔ commande (`psp_command_links`). */
@@ -354,6 +356,47 @@ export const statutConsultationGlobal = (
 /** Devis retenu d'une opération (statut 'retenu') — null si aucun. */
 export const devisRetenuDe = (devis: DevisSuivi[]): DevisSuivi | null =>
   devis.find((d) => d.statut === "retenu") ?? null;
+
+/**
+ * V8.4 §11 — CHRONOLOGIE DE CONSULTATION d'un devis (événements ordonnés).
+ * Dérivée à la lecture depuis psp_devis (aucune table d'historique parallèle) :
+ *   1. demande (création)          → created_at
+ *   2. relance (dernière envoyée)  → derniere_relance_at (si présente)
+ *   3. devis reçu                  → date_devis (statut reçu/a_analyser/retenu/non_retenu)
+ *   4. devis retenu                → statut = retenu (événement dérivé, même date)
+ */
+export type EvenementConsultation = {
+  type: "demande" | "relance" | "devis_recu" | "devis_retenu";
+  libelle: string;
+  date: string | null;
+};
+
+export const chronologieConsultationDevis = (devis: DevisSuivi): EvenementConsultation[] => {
+  const evenements: EvenementConsultation[] = [];
+  const demande = dateDemandeDevis(devis);
+  if (demande)
+    evenements.push({ type: "demande", libelle: "Demande de devis", date: demande.toISOString() });
+  const relance = isoDate(devis.derniere_relance_at);
+  if (relance)
+    evenements.push({ type: "relance", libelle: "Relance envoyée", date: relance.toISOString() });
+  const recu = isoDate(devis.date_devis);
+  if (recu && devisRecuPour(devis)) {
+    evenements.push({ type: "devis_recu", libelle: "Devis reçu", date: recu.toISOString() });
+  }
+  if (devis.statut === "retenu") {
+    evenements.push({
+      type: "devis_retenu",
+      libelle: "Devis retenu",
+      date: recu ? recu.toISOString() : null,
+    });
+  }
+  return evenements.sort((a, b) => String(a.date ?? "").localeCompare(String(b.date ?? "")));
+};
+
+export const chronologieConsultationEntreprise = (devis: DevisSuivi[]): EvenementConsultation[] => {
+  const tout = devis.flatMap((d) => chronologieConsultationDevis(d));
+  return tout.sort((a, b) => String(a.date ?? "").localeCompare(String(b.date ?? "")));
+};
 
 /**
  * Un devis est « reçu » dès qu'une réponse de l'entreprise est disponible,
@@ -670,6 +713,7 @@ export const VARIABLES_MAIL: VariableMail[] = [
   { cle: "CORPS_ETAT", libelle: "Corps d'état" },
   { cle: "ADRESSE", libelle: "Adresse du patrimoine" },
   { cle: "DATE_RETOUR", libelle: "Date souhaitée de retour" },
+  { cle: "DATE_DEMANDE", libelle: "Date de la demande initiale (relance)" },
 ];
 
 export interface ModeleMail {

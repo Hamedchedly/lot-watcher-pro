@@ -38,11 +38,16 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { money0 } from "@/lib/formats";
-import { getPspEntreprisesSuggestions } from "@/lib/psp.prep.supabase.functions";
+import {
+  enregistrerRelanceDevis,
+  getPspEntreprisesSuggestions,
+} from "@/lib/psp.prep.supabase.functions";
 import {
   MAIL_MODELES,
+  chronologieConsultationEntreprise,
   composerMail,
   construireMailto,
+  dateLimiteReponse,
   dateRetourParDefaut,
   type ConsultationEntreprise,
 } from "@/lib/psp.suivi.foundation";
@@ -203,43 +208,69 @@ export default function SuiviOperationFiche({
                 <p className="text-[11px] text-muted-foreground">Aucune donnée disponible.</p>
               ) : (
                 <ul className="space-y-1">
-                  {c.entreprises.map((e) => (
-                    <li
-                      key={e.fournisseur_id ?? e.entreprise}
-                      className="flex flex-wrap items-center gap-x-3 gap-y-0.5 rounded border border-dashed px-2 py-1 text-[11px]"
-                    >
-                      <span className="font-semibold">{e.entreprise}</span>
-                      <span className="text-muted-foreground">
-                        Demande le {fmtDate(e.date_demande)}
-                      </span>
-                      {e.date_devis && (
-                        <span className="text-muted-foreground">
-                          Devis reçu le {fmtDate(e.date_devis)}
-                        </span>
-                      )}
-                      <span>
-                        {e.statut_consultation === "devis_retenu" ? "Devis retenu" : e.statut_devis}
-                      </span>
-                      <span className="font-semibold">
-                        {e.montant == null ? "—" : money0(e.montant)}
-                      </span>
-                      {e.relance_necessaire ? (
-                        <>
-                          <Badge className="bg-amber-100 text-amber-800 text-[9px]">
-                            Relance nécessaire
-                          </Badge>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-6 text-[9px]"
-                            onClick={() => setRelance(e)}
-                          >
-                            <Mail className="size-3" /> Préparer une relance
-                          </Button>
-                        </>
-                      ) : null}
-                    </li>
-                  ))}
+                  {c.entreprises.map((e) => {
+                    const chrono = chronologieConsultationEntreprise(e.devis);
+                    return (
+                      <li
+                        key={e.fournisseur_id ?? e.entreprise}
+                        className="rounded border border-dashed px-2 py-1 text-[11px]"
+                      >
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
+                          <span className="font-semibold">{e.entreprise}</span>
+                          <span className="text-muted-foreground">
+                            Demande le {fmtDate(e.date_demande)}
+                          </span>
+                          {e.devis[0]?.derniere_relance_at && (
+                            <span className="text-muted-foreground">
+                              Dernière relance le {fmtDate(e.devis[0].derniere_relance_at)}
+                            </span>
+                          )}
+                          {e.date_devis && (
+                            <span className="text-muted-foreground">
+                              Devis reçu le {fmtDate(e.date_devis)}
+                            </span>
+                          )}
+                          <span>
+                            {e.statut_consultation === "devis_retenu"
+                              ? "Devis retenu"
+                              : e.statut_devis}
+                          </span>
+                          <span className="font-semibold">
+                            {e.montant == null ? "—" : money0(e.montant)}
+                          </span>
+                          {e.relance_necessaire ? (
+                            <>
+                              <Badge className="bg-amber-100 text-amber-800 text-[9px]">
+                                Relance nécessaire
+                              </Badge>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-6 text-[9px]"
+                                onClick={() => setRelance(e)}
+                              >
+                                <Mail className="size-3" /> Préparer une relance
+                              </Button>
+                            </>
+                          ) : null}
+                        </div>
+                        {/* V8.4 §11 — chronologie de consultation (dérivée de psp_devis) */}
+                        {chrono.length > 0 && (
+                          <ul className="mt-1 space-y-0.5 border-t border-dashed pt-1 text-[10px] text-muted-foreground">
+                            {chrono.map((ev) => (
+                              <li
+                                key={`${ev.type}-${ev.date ?? ev.libelle}`}
+                                className="flex gap-2"
+                              >
+                                <span>{fmtDate(ev.date)}</span>
+                                <span>→ {ev.libelle}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
 
@@ -351,6 +382,7 @@ export default function SuiviOperationFiche({
             operation={operation}
             email={emailRelance}
             onClose={() => setRelance(null)}
+            onRelanceEnregistree={refresh}
           />
         )}
       </DialogContent>
@@ -407,19 +439,27 @@ function RelanceDialog({
   operation,
   email,
   onClose,
+  onRelanceEnregistree,
 }: {
   entreprise: ConsultationEntreprise;
   operation: SuiviOperationVue;
   email: string | null;
   onClose: () => void;
+  /** V8.4 — recharge la fiche après « Marquer comme envoyée ». */
+  onRelanceEnregistree: () => Promise<void>;
 }) {
   const p = operation.programmation;
+  // V8.4 §5 — date limite : explicite sinon created_at + 21 jours.
+  const devisRef = entreprise.devis[0];
+  const dateLimite = devisRef ? dateLimiteReponse(devisRef) : null;
   const variables = {
     TR: operation.identite.tranche,
     NATURE_TRAVAUX: p.nature ?? "",
     CORPS_ETAT: p.corps_etat ?? "",
     ADRESSE: p.adresse ?? "",
-    DATE_RETOUR: dateRetourParDefaut(new Date()),
+    DATE_RETOUR: dateLimite
+      ? dateLimite.toLocaleDateString("fr-FR")
+      : dateRetourParDefaut(new Date()),
     DATE_DEMANDE: entreprise.date_demande
       ? new Date(entreprise.date_demande).toLocaleDateString("fr-FR")
       : "dernière demande",
@@ -430,7 +470,26 @@ function RelanceDialog({
   );
   const [sujet, setSujet] = useState(modele.sujet);
   const [corps, setCorps] = useState(modele.corps);
+  const [enregistre, setEnregistre] = useState(false);
+  const [erreur, setErreur] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const enregistrer = useServerFn(enregistrerRelanceDevis);
   const mailto = construireMailto({ email, sujet, corps });
+
+  const marquerEnvoyee = async () => {
+    if (!devisRef || saving) return;
+    setSaving(true);
+    setErreur(null);
+    try {
+      await enregistrer({ data: { id: devisRef.id, motif: "Relance de demande de devis" } });
+      setEnregistre(true);
+      await onRelanceEnregistree();
+    } catch (e) {
+      setErreur(String((e as Error)?.message ?? e));
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
@@ -446,6 +505,18 @@ function RelanceDialog({
             )}
           </DialogDescription>
         </DialogHeader>
+        {/* V8.4 §5 — date limite de réponse */}
+        <p className="text-[11px] text-muted-foreground">
+          Demande le {fmtDate(entreprise.date_demande)} · Date souhaitée de réponse :{" "}
+          <span className="font-semibold">
+            {dateLimite ? dateLimite.toLocaleDateString("fr-FR") : "—"}
+          </span>
+          {devisRef?.derniere_relance_at && (
+            <span className="ml-2">
+              · Dernière relance le {fmtDate(devisRef.derniere_relance_at)}
+            </span>
+          )}
+        </p>
         <div className="space-y-2">
           <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
             Sujet
@@ -490,7 +561,18 @@ function RelanceDialog({
               <Mail className="size-3" /> Ouvrir dans ma messagerie (mailto:)
             </a>
           </Button>
+          {/* V8.4 §10 — action explicite après ouverture du mail (jamais automatique) */}
+          <Button
+            size="sm"
+            variant={enregistre ? "outline" : "default"}
+            className="h-7 text-[10px]"
+            disabled={saving || !devisRef}
+            onClick={marquerEnvoyee}
+          >
+            {enregistre ? "✓ Relance enregistrée" : "Marquer comme envoyée"}
+          </Button>
         </DialogFooter>
+        {erreur && <p className="text-[11px] font-semibold text-red-700">{erreur}</p>}
         <p className="text-[10px] text-muted-foreground">
           Le mail s'ouvre en BROUILLON dans votre messagerie — PAT S11 ne prétend jamais avoir
           envoyé le mail. « Relance nécessaire » reste dérivée jusqu'à réception d'un devis.
