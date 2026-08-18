@@ -1,9 +1,11 @@
 /**
- * V8.2 — SUIVI OPÉRATION (route /suivi).
+ * V8.6.1 §4-§8 — SUIVI OPÉRATIONNEL ANNUEL (route /suivi).
  *
- * Tableau des opérations de la programmation PSP (socle V8.1) + fiche
- * opération organisée selon l'arborescence cible (Programmation · Consultation ·
- * Devis · Commandes → Travaux). Lecture seule, aucun MOCK, Dashboard inchangé.
+ * /suivi est le REGISTRE OPÉRATIONNEL ANNUEL : sélecteur d'année (défaut 2026),
+ * état par défaut « Sans commande » (« ce qui doit encore être commandé »), puis
+ * En cours / Terminées / À vérifier / Toutes. Alimenté par les données RÉELLES
+ * (commandes de l'exercice + opérations de la préparation programmées sur
+ * l'année ou hors PSP). Aucun MOCK, Dashboard inchangé.
  */
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -13,20 +15,29 @@ import { ArrowLeft, FileSearch, Loader2, Plus, Workflow } from "lucide-react";
 
 import NouvelleOperationDialog from "@/components/suivi/NouvelleOperationDialog";
 import PspCommandesARapprocherPanel from "@/components/suivi/PspCommandesARapprocherPanel";
+import PspCorrespondanceCommandeDialog from "@/components/suivi/PspCorrespondanceCommandeDialog";
 import SuiviOperationFiche from "@/components/suivi/SuiviOperationFiche";
 import SuiviTable from "@/components/suivi/SuiviTable";
 import { Button } from "@/components/ui/button";
-import { getPspSuiviOperations } from "@/lib/psp.prep.supabase.functions";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { getPspSuiviAnnuel, getPspSuiviOperations } from "@/lib/psp.prep.supabase.functions";
+import type { LigneRegistreAnnuel } from "@/lib/psp.suivi.view";
 import type { SuiviOperationVue } from "@/lib/psp.suivi.foundation";
 
 export const Route = createFileRoute("/suivi")({
   head: () => ({
     meta: [
-      { title: "Opérations — PSP" },
+      { title: "Opérations — Suivi annuel PSP" },
       {
         name: "description",
         content:
-          "Registre opérationnel unique : toutes les opérations (PSP et hors PSP), consultation, devis, commandes et travaux.",
+          "Registre opérationnel annuel : opérations de l'année, commandes, engagements, paiements et travaux.",
       },
     ],
   }),
@@ -34,38 +45,60 @@ export const Route = createFileRoute("/suivi")({
 });
 
 function SuiviPage() {
-  const fetchSuivi = useServerFn(getPspSuiviOperations);
+  const fetchRegistre = useServerFn(getPspSuiviAnnuel);
+  const fetchOperations = useServerFn(getPspSuiviOperations);
   const queryClient = useQueryClient();
-  const { data, isLoading, error } = useQuery({
-    queryKey: ["psp-suivi-operations"],
-    queryFn: () => fetchSuivi(),
+
+  // V8.6.1 §4/§8 — année sélectionnée (défaut 2026).
+  const [annee, setAnnee] = useState<number>(2026);
+
+  const { data: registre, isLoading } = useQuery({
+    queryKey: ["psp-suivi-annuel", annee],
+    queryFn: () => fetchRegistre({ data: { annee } }),
     staleTime: 1000 * 30,
     retry: 1,
   });
+  // Opérations complètes (fiches) — chargées en parallèle, jamais modifiées ici.
+  const { data: operationsData } = useQuery({
+    queryKey: ["psp-suivi-operations"],
+    queryFn: () => fetchOperations(),
+    staleTime: 1000 * 60,
+    retry: 1,
+  });
+  const operations = (operationsData?.operations ?? []) as SuiviOperationVue[];
+  const parPspLigneId = new Map(operations.map((o) => [o.identite.id, o]));
+
+  const lignes = (registre?.lignes ?? []) as LigneRegistreAnnuel[];
+  const anneesDisponibles = (registre?.anneesDisponibles ?? [2026]) as number[];
 
   const [selection, setSelection] = useState<SuiviOperationVue | null>(null);
+  const [commandeSelection, setCommandeSelection] = useState<string | null>(null);
   const [nouvelle, setNouvelle] = useState(false);
   const [aRapprocher, setARapprocher] = useState(false);
 
-  const programmation = data?.programmation ?? null;
-  const operations = (data?.operations ?? []) as SuiviOperationVue[];
-
-  /**
-   * V8.3 — recharge le registre après création/enregistrement (demande de devis)
-   * et maintient la sélection à jour si la fiche est ouverte.
-   */
+  /** V8.3/V8.6.1 — recharge le registre après création/enregistrement. */
   const refresh = async () => {
+    await queryClient.invalidateQueries({ queryKey: ["psp-suivi-annuel", annee] });
     await queryClient.invalidateQueries({ queryKey: ["psp-suivi-operations"] });
     const d = await queryClient.fetchQuery({
-      queryKey: ["psp-suivi-operations"],
-      queryFn: () => fetchSuivi(),
+      queryKey: ["psp-suivi-annuel", annee],
+      queryFn: () => fetchRegistre({ data: { annee } }),
     });
     if (selection) {
-      const miseAJour = (d.operations ?? []).find(
-        (o: SuiviOperationVue) => o.identite.id === selection.identite.id,
-      );
-      if (miseAJour) setSelection(miseAJour);
+      const vue = parPspLigneId.get(selection.identite.id);
+      if (vue) setSelection(vue);
     }
+    void d;
+  };
+
+  const ouvrirLigne = (l: LigneRegistreAnnuel) => {
+    if (l.type === "operation" && l.pspLigneId) {
+      const vue = parPspLigneId.get(l.pspLigneId);
+      if (vue) setSelection(vue);
+      return;
+    }
+    // Ligne « commande » non rattachée → dialogue de correspondance (V8.6 §4).
+    if (l.type === "commande" && l.id) setCommandeSelection(l.id);
   };
 
   return (
@@ -77,14 +110,30 @@ function SuiviPage() {
               <Workflow className="size-5 text-primary" /> Opérations
             </h1>
             <p className="text-sm text-muted-foreground">
-              {programmation
-                ? `Programmation ${programmation.annee_debut}–${programmation.annee_fin} · v${programmation.version} · ${programmation.statut}`
-                : "Aucune programmation officielle"}
+              Registre opérationnel annuel — données réelles du fichier annuel + commandes.
             </p>
           </div>
-          {/* V8.3 §3/§21 — créer une opération (PSP ou HORS PSP) directement ici. */}
+          {/* V8.6.1 §4 — sélecteur d'année (défaut 2026). */}
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
+              Année
+            </span>
+            <Select value={String(annee)} onValueChange={(v) => setAnnee(Number(v))}>
+              <SelectTrigger className="h-8 w-24 text-[11px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {anneesDisponibles.map((a) => (
+                  <SelectItem key={a} value={String(a)}>
+                    {a}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          {/* V8.6.1 §2 — création UNIQUEMENT hors PSP (l'origine PSP vient de la préparation). */}
           <Button size="sm" onClick={() => setNouvelle(true)}>
-            <Plus className="size-3.5" /> Nouvelle opération
+            <Plus className="size-3.5" /> Nouvelle opération hors PSP
           </Button>
           {/* V8.5.4 — vue globale « Commandes à rapprocher » */}
           <Button size="sm" variant="outline" onClick={() => setARapprocher(true)}>
@@ -109,12 +158,10 @@ function SuiviPage() {
       <main className="mx-auto max-w-7xl space-y-4 px-4 py-6 sm:px-6">
         {isLoading ? (
           <p className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="size-4 animate-spin" /> Chargement du suivi…
+            <Loader2 className="size-4 animate-spin" /> Chargement du suivi annuel…
           </p>
-        ) : error || !data ? (
-          <p className="text-sm text-muted-foreground">Aucune donnée disponible.</p>
         ) : (
-          <SuiviTable operations={operations} onOpen={setSelection} />
+          <SuiviTable lignes={lignes} annee={annee} onOpen={ouvrirLigne} />
         )}
       </main>
 
@@ -125,11 +172,18 @@ function SuiviPage() {
           onRefresh={refresh}
         />
       )}
+      {commandeSelection && (
+        <PspCorrespondanceCommandeDialog
+          commandeId={commandeSelection}
+          open={!!commandeSelection}
+          onClose={() => setCommandeSelection(null)}
+          onRattache={refresh}
+        />
+      )}
       {nouvelle && (
         <NouvelleOperationDialog
           open={nouvelle}
           onClose={() => setNouvelle(false)}
-          programmationId={programmation?.id ?? null}
           onCreated={refresh}
         />
       )}

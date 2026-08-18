@@ -93,10 +93,22 @@ export function useRecherchePatrimoine(options: {
 
   // ── Hiérarchie adresse ──
   const [adressePanelOuvert, setAdressePanelOuvert] = useState(false);
-  const [niveauAdresse, setNiveauAdresse] = useState<"rues" | "numeros">("rues");
+  // V8.6.1 §3 — rue du périmètre existant (modification) : la recherche existante
+  // est visible (qRue initialisé) et la sélection est directement modifiable.
+  const rueInitiale = useMemo(
+    () => initialPerimetres.find((p) => p.rue)?.rue ?? null,
+    [initialPerimetres],
+  );
+  // V8.6.1 §3 — en modification, une rue existante amène directement au niveau
+  // « numéros » : la sélection existante est visible et modifiable.
+  const [niveauAdresse, setNiveauAdresse] = useState<"rues" | "numeros">(
+    rueInitiale ? "numeros" : "rues",
+  );
   /** V7.5 §5 — garages masqués par défaut (filtre d'affichage uniquement). */
   const [afficherGarages, setAfficherGarages] = useState(false);
-  const [qRue, setQRue] = useState("");
+  // V8.6.1 §3 — le champ de recherche des rues est initialisé avec la rue du
+  // périmètre existant (modification) : la recherche existante est visible.
+  const [qRue, setQRue] = useState(rueInitiale ?? "");
   const [rues, setRues] = useState<Array<{ rue: string; ville: string | null; nb_lots: number }>>(
     [],
   );
@@ -117,6 +129,20 @@ export function useRecherchePatrimoine(options: {
 
   const [modifie, setModifie] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // V8.6.1 §3 — restauration de la hiérarchie adresse en modification : les
+  // numéros de la rue du périmètre initial sont rechargés pour que la sélection
+  // existante soit visible et modifiable (aucune donnée écrite).
+  useEffect(() => {
+    const rueInit = rueInitiale;
+    const trInit = options.initial?.tranche;
+    if (rueInit && trInit) {
+      void rechercheNumerosFn({ data: { tranche: trInit, rue: rueInit } }).then((n) =>
+        setNumeros((n ?? []) as string[]),
+      );
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const referenceTranche = tranche ? reference?.tranches.get(tranche) : undefined;
 

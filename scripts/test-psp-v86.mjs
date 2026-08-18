@@ -428,8 +428,11 @@ check(
   routeSuivi.includes("invalidateQueries") && routeSuivi.includes("fetchQuery"),
 );
 check(
-  "X. cohérence Préparation PSP ↔ /suivi : mêmes tables psp_lignes + PspOperationForm réutilisé",
-  nouvelleDialog.includes("createPspOperationComplete") &&
+  // V8.6.1 §2 — /suivi ne crée plus d'opération PSP (elle vient de la préparation) :
+  // la création depuis /suivi passe UNIQUEMENT par createPspOperationHorsPsp.
+  "X. cohérence Préparation PSP ↔ /suivi : mêmes tables psp_lignes + création depuis /suivi = hors PSP",
+  nouvelleDialog.includes("createPspOperationHorsPsp") &&
+    !nouvelleDialog.includes("createPspOperationComplete") &&
     supabaseFn.includes('.from("psp_lignes")') &&
     routeSuivi.includes("getPspSuiviOperations"),
 );

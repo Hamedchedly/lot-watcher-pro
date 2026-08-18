@@ -26,6 +26,11 @@ import {
   construireSuiviOperation,
 } from "./psp.suivi.foundation.ts";
 import {
+  construireLigneRegistreAnnuel,
+  type CommandeAnnuelle,
+  type LigneRegistreAnnuel,
+} from "./psp.suivi.view.ts";
+import {
   proposerRapprochements,
   type OperationRapprochement,
   type LienRapprochement,
@@ -1834,9 +1839,236 @@ export const getPspSuiviOperations = createServerFn({ method: "POST" })
   });
 
 /**
- * Modification ATOMIQUE (V7.3) : ligne + remplacement du périmètre via le RPC
- * public.update_psp_operation. Échec → aucun résidu.
+ * V8.6.1 §4-§8 — REGISTRE OPÉRATIONNEL ANNUEL.
+ *
+ * Pour une année N, construit les lignes du registre à partir des données
+ * RÉELLES : commandes de l'exercice (travaux_commandes, lecture seule) + les
+ * opérations de la préparation programmées sur l'année ou hors PSP (psp_lignes).
+ * Aucune écriture, aucun MOCK, aucune représentation parallèle :
+ *   · une commande liée à une opération → UNE seule ligne (type 'operation') ;
+ *   · une commande non liée → ligne 'commande' (origine dérivée de la ligne
+ *     budgétaire du fichier annuel : ligne budgétaire = PSP, sinon Hors PSP) ;
+ *   · une opération programmée/hors PSP sans commande → ligne 'operation'
+ *     (état 'sans_commande').
  */
+export const getPspSuiviAnnuel = createServerFn({ method: "POST" })
+  .validator((d: unknown) => z.object({ annee: z.number().int().min(2000).max(2100) }).parse(d))
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
+    const db = supabaseAdmin as any;
+    const annee = data.annee;
+
+    // Années disponibles : exercices réels des commandes + années de préparation.
+    const [anneesCmdR, commandesR, progR, lignesR, perimR, devisR, liensR] = await Promise.all([
+      db.from("travaux_commandes").select("annee_exercice"),
+      db
+        .from("travaux_commandes")
+        .select(
+          "id, numero_commande, tranche_code, adresse, nature_analytique, corps_etat, charge_clientele, ligne_budget, descriptif, budget, fournisseur, numero_fournisseur, etat_commande, engage, paye, solde, etat_travaux, date_demarrage, date_fin_travaux, annee_exercice",
+        )
+        .eq("annee_exercice", annee)
+        .eq("actif", true),
+      db
+        .from("psp_programmations")
+        .select("annee_debut, annee_fin, statut")
+        .eq("type", "officielle")
+        .order("version", { ascending: false })
+        .limit(1),
+      db.from("psp_lignes").select("*"),
+      db.from("psp_ligne_patrimoine").select("*"),
+      db.from("psp_devis").select("*"),
+      db.from("psp_command_links").select("*"),
+    ]);
+    if (commandesR.error) throw new Error(`Lecture du registre : ${commandesR.error.message}`);
+
+    const anneesDisponibles = [
+      ...new Set([
+        ...(anneesCmdR.data ?? [])
+          .map((c: any) => c.annee_exercice)
+          .filter((a: any) => typeof a === "number"),
+        ...(progR.data?.[0]?.annee_debut != null
+          ? Array.from(
+              {
+                length:
+                  (progR.data[0].annee_fin ?? progR.data[0].annee_debut) -
+                  progR.data[0].annee_debut +
+                  1,
+              },
+              (_, i) => progR.data[0].annee_debut + i,
+            )
+          : []),
+      ]),
+    ].sort() as number[];
+
+    const commandes = (commandesR.data ?? []) as any[];
+    const lignes = (lignesR.data ?? []) as any[];
+    const perim = (perimR.data ?? []) as any[];
+    const devis = (devisR.data ?? []) as any[];
+    const liens = (liensR.data ?? []) as any[];
+
+    // Patrimoine : tranches → sous-secteur → CC (règle §1A).
+    const codes = [
+      ...new Set(
+        commandes
+          .map((c) => c.tranche_code)
+          .concat(lignes.map((l) => l.tranche_code))
+          .filter(Boolean),
+      ),
+    ] as string[];
+    const tranches = codes.length
+      ? ((
+          await db
+            .from("tranches")
+            .select("code, libelle, localite, sous_secteur")
+            .in("code", codes)
+        ).data ?? [])
+      : [];
+    const sousSecteurs = [
+      ...new Set(tranches.map((t: any) => t.sous_secteur).filter(Boolean)),
+    ] as string[];
+    const ccRows = sousSecteurs.length
+      ? ((
+          await db
+            .from("psp_charges_clientele")
+            .select("sous_secteur, identifiant_personnel")
+            .in("sous_secteur", sousSecteurs)
+            .eq("actif", true)
+        ).data ?? [])
+      : [];
+    const ccPar = new Map<string, string | null>(
+      ccRows.map((r: any) => [r.sous_secteur, r.identifiant_personnel]),
+    );
+    const tranchePar = new Map(tranches.map((t: any) => [t.code, t]));
+
+    // ── Construction des lignes du registre (aucune écriture) ──
+    const commandesAnnuelle: CommandeAnnuelle[] = commandes.map((c: any) => ({
+      id: c.id,
+      numero_commande: c.numero_commande,
+      tranche_code: c.tranche_code,
+      adresse: c.adresse,
+      corps_etat: c.corps_etat,
+      nature_analytique: c.nature_analytique,
+      charge_clientele: c.charge_clientele,
+      ligne_budget: c.ligne_budget,
+      descriptif: c.descriptif,
+      budget: c.budget,
+      fournisseur: c.fournisseur,
+      etat_commande: c.etat_commande,
+      engage: c.engage,
+      paye: c.paye,
+      solde: c.solde,
+      etat_travaux: c.etat_travaux,
+      date_demarrage: c.date_demarrage,
+      date_fin_travaux: c.date_fin_travaux,
+      annee_exercice: c.annee_exercice,
+    }));
+
+    const commandesParId = new Map(commandesAnnuelle.map((c) => [c.id, c]));
+    const commandeIdParLigne = new Map(
+      liens.filter((l: any) => l.psp_ligne_id).map((l: any) => [l.psp_ligne_id, l.commande_id]),
+    );
+    const commandesLieesId = new Set(liens.map((l: any) => l.commande_id));
+    const lignesRegistre: LigneRegistreAnnuel[] = [];
+    const perimPar: Record<string, unknown[]> = {};
+    for (const p of perim) (perimPar[p.psp_ligne_id] ??= []).push(p);
+
+    // A. Opérations PAT S11 : programmées sur l'année, hors PSP, ou liées à une
+    //    commande de l'exercice (une SEULE ligne — jamais de doublon).
+    for (const ligne of lignes) {
+      const progAnnee = Number((ligne.programme ?? {})[String(annee)] ?? 0) || 0;
+      const horsPsp = ligne.origine === "hors_psp";
+      const commandeIdLiee = commandeIdParLigne.get(ligne.id);
+      const commandeLiee = commandeIdLiee ? commandesParId.get(commandeIdLiee) : undefined;
+      if (!horsPsp && progAnnee <= 0 && !commandeLiee) continue;
+
+      const tranche: any = tranchePar.get(ligne.tranche_code);
+      const vue = construireSuiviOperation({
+        ligne: {
+          id: ligne.id,
+          programmation_id: ligne.programmation_id,
+          tranche_code: ligne.tranche_code,
+          categorie: ligne.categorie,
+          corps_etat_code: ligne.corps_etat_code,
+          corps_etat: ligne.corps_etat,
+          nature_travaux: ligne.nature_travaux,
+          programme: ligne.programme ?? {},
+          ligne_budget: ligne.ligne_budget,
+          remarques: ligne.remarques,
+          origine: ligne.origine,
+          statut: ligne.statut,
+          priorite: ligne.priorite,
+          created_at: ligne.created_at,
+          updated_at: ligne.updated_at,
+        },
+        perimetres: (perimPar[ligne.id] ?? []) as never,
+        devis: devis.filter((d: any) => d.psp_ligne_id === ligne.id) as never,
+        liens: liens.filter((l: any) => l.psp_ligne_id === ligne.id) as never,
+        commandes: (commandeLiee ? [commandeLiee] : []) as never,
+        patrimoine: {
+          adresse: tranche
+            ? [tranche.libelle, tranche.localite].filter(Boolean).join(" – ") || null
+            : null,
+          cc: tranche?.sous_secteur ? (ccPar.get(tranche.sous_secteur) ?? null) : null,
+          sous_secteur: tranche?.sous_secteur ?? null,
+        },
+        exercice: annee,
+      });
+
+      lignesRegistre.push(
+        construireLigneRegistreAnnuel({
+          type: "operation",
+          id: ligne.id,
+          pspLigneId: ligne.id,
+          origine: horsPsp ? "hors_psp" : "psp",
+          tranche: ligne.tranche_code,
+          sousSecteur: tranche?.sous_secteur ?? null,
+          cc: tranche?.sous_secteur ? (ccPar.get(tranche.sous_secteur) ?? null) : null,
+          corpsEtat: ligne.corps_etat,
+          nature: ligne.nature_travaux,
+          adresse: vue.programmation.adresse,
+          ligneBudget: ligne.ligne_budget,
+          budget: commandeLiee?.budget ?? null,
+          programmeAnnee: progAnnee || null,
+          commande: (commandeLiee ?? null) as CommandeAnnuelle | null,
+          consultation: {
+            nb_demandes: vue.consultation.nb_demandes,
+            nb_devis_recus: vue.consultation.nb_devis_recus,
+            statut: vue.consultation.statut,
+            statut_label: vue.consultation.statut_label,
+          },
+        }),
+      );
+    }
+
+    // B. Commandes annuelles NON liées à une opération → ligne 'commande'
+    //    (données réelles du fichier annuel importé ; origine dérivée de la
+    //    ligne budgétaire : présente = PSP, absente = Hors PSP).
+    for (const c of commandesAnnuelle) {
+      if (commandesLieesId.has(c.id)) continue;
+      const tranche: any = tranchePar.get(c.tranche_code);
+      const lb = (c.ligne_budget ?? "").trim();
+      lignesRegistre.push(
+        construireLigneRegistreAnnuel({
+          type: "commande",
+          id: c.id,
+          pspLigneId: null,
+          origine: lb ? "psp" : "hors_psp",
+          tranche: c.tranche_code ?? "—",
+          sousSecteur: tranche?.sous_secteur ?? null,
+          cc: tranche?.sous_secteur ? (ccPar.get(tranche.sous_secteur) ?? null) : null,
+          corpsEtat: c.corps_etat,
+          nature: c.descriptif,
+          adresse: c.adresse,
+          ligneBudget: c.ligne_budget,
+          budget: c.budget,
+          commande: c,
+        }),
+      );
+    }
+
+    return { annee, anneesDisponibles, lignes: lignesRegistre };
+  });
+
 export const updatePspOperationComplete = createServerFn({ method: "POST" })
   .validator((d: unknown) =>
     z

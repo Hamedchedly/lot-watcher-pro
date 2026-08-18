@@ -276,3 +276,227 @@ export const etapesAvancement = (op: SuiviOperationVue): EtapeAvancement[] => {
     { code: "termine", label: "Terminé", atteint: ex === "travaux_termines" },
   ];
 };
+
+// ── V8.6.1 — REGISTRE OPÉRATIONNEL ANNUEL (dérivé des données RÉELLES) ─────────
+//
+// Le registre annuel répond à « qu'est-ce qui est réellement prévu cette année,
+// qu'est-ce qui a été commandé et où en sont les travaux ? ». Les états sont
+// DÉRIVÉS des données financières réelles (jamais inventés) :
+//   · SANS COMMANDE  — aucune commande ;
+//   · EN COURS       — commande + (payé vide OU payé < engagé) ;
+//   · TERMINÉE       — commande + |payé − engagé| < 0,01 (tolérance décimales) ;
+//   · À VÉRIFIER     — incohérences (engagé vide avec commande, payé > engagé…).
+
+export type EtatSuiviAnnuel = "sans_commande" | "en_cours" | "terminee" | "a_verifier";
+
+export const ETAT_SUIVI_LABEL: Record<EtatSuiviAnnuel, string> = {
+  sans_commande: "Sans commande",
+  en_cours: "En cours",
+  terminee: "Terminée",
+  a_verifier: "À vérifier",
+};
+
+/** Dérive l'état opérationnel annuel (§6) — données RÉELLES, tolérance 0,01 €. */
+export const deriverEtatSuiviAnnuel = (input: {
+  numeroCommande: string | null;
+  engage: number | null;
+  paye: number | null;
+}): EtatSuiviAnnuel => {
+  const { numeroCommande } = input;
+  if (!numeroCommande) return "sans_commande";
+  const e = typeof input.engage === "number" && Number.isFinite(input.engage) ? input.engage : null;
+  const p = typeof input.paye === "number" && Number.isFinite(input.paye) ? input.paye : null;
+  // §6.4 — commande existante mais engagé vide/invalide → À vérifier.
+  if (e === null || e <= 0) return "a_verifier";
+  // §6.2 — payé vide → En cours.
+  if (p === null) return "en_cours";
+  // §6.3 — payé = engagé (tolérance 0,01) → Terminée.
+  if (Math.abs(p - e) < 0.01) return "terminee";
+  // §6.4 — payé > engagé → À vérifier.
+  if (p > e) return "a_verifier";
+  // §6.2 — payé < engagé → En cours.
+  return "en_cours";
+};
+
+/** Une commande annuelle réelle (travaux_commandes, lecture seule). */
+export type CommandeAnnuelle = {
+  id: string;
+  numero_commande: string | null;
+  tranche_code: string | null;
+  adresse: string | null;
+  corps_etat: string | null;
+  nature_analytique: string | null;
+  charge_clientele: string | null;
+  ligne_budget: string | null;
+  descriptif: string | null;
+  budget: number | null;
+  fournisseur: string | null;
+  etat_commande: string | null;
+  engage: number | null;
+  paye: number | null;
+  solde: number | null;
+  etat_travaux: string | null;
+  date_demarrage: string | null;
+  date_fin_travaux: string | null;
+  annee_exercice: number | null;
+};
+
+/**
+ * Ligne du registre annuel. `type: "operation"` = opération PAT S11 (psp_lignes,
+ * éventuellement rattachée à une commande) ; `type: "commande"` = commande
+ * annuelle non encore rattachée (données réelles du fichier annuel importé).
+ */
+export type LigneRegistreAnnuel = {
+  type: "operation" | "commande";
+  /** psp_lignes.id (operation) ou travaux_commandes.id (commande). */
+  id: string;
+  pspLigneId: string | null;
+  origine: "psp" | "hors_psp";
+  tranche: string;
+  sous_secteur: string | null;
+  cc: string | null;
+  corps_etat: string | null;
+  nature: string | null;
+  adresse: string | null;
+  ligne_budget: string | null;
+  budget: number | null;
+  programme_annee: number | null;
+  commande: CommandeAnnuelle | null;
+  etat_annuel: EtatSuiviAnnuel;
+  consultation: {
+    nb_demandes: number;
+    nb_devis_recus: number;
+    statut: string;
+    statut_label: string;
+  };
+  execution: {
+    etat_travaux: string | null;
+    date_demarrage: string | null;
+    date_fin: string | null;
+  };
+};
+
+/** Construit une ligne du registre annuel (données RÉELLES, aucun MOCK). */
+export const construireLigneRegistreAnnuel = (input: {
+  type: "operation" | "commande";
+  id: string;
+  pspLigneId: string | null;
+  origine: "psp" | "hors_psp";
+  tranche: string;
+  sousSecteur?: string | null;
+  cc?: string | null;
+  corpsEtat?: string | null;
+  nature?: string | null;
+  adresse?: string | null;
+  ligneBudget?: string | null;
+  budget?: number | null;
+  programmeAnnee?: number | null;
+  commande?: CommandeAnnuelle | null;
+  consultation?: {
+    nb_demandes: number;
+    nb_devis_recus: number;
+    statut: string;
+    statut_label: string;
+  };
+}): LigneRegistreAnnuel => {
+  const commande = input.commande ?? null;
+  const etat_annuel = deriverEtatSuiviAnnuel({
+    numeroCommande: commande?.numero_commande ?? null,
+    engage: commande?.engage ?? null,
+    paye: commande?.paye ?? null,
+  });
+  return {
+    type: input.type,
+    id: input.id,
+    pspLigneId: input.pspLigneId,
+    origine: input.origine,
+    tranche: input.tranche,
+    sous_secteur: input.sousSecteur ?? null,
+    cc: input.cc ?? null,
+    corps_etat: input.corpsEtat ?? null,
+    nature: input.nature ?? null,
+    adresse: input.adresse ?? null,
+    ligne_budget: input.ligneBudget ?? null,
+    budget: input.budget ?? null,
+    programme_annee: input.programmeAnnee ?? null,
+    commande,
+    etat_annuel,
+    consultation: input.consultation ?? {
+      nb_demandes: 0,
+      nb_devis_recus: 0,
+      statut: "a_lancer",
+      statut_label: "Aucune demande",
+    },
+    execution: {
+      etat_travaux: commande?.etat_travaux ?? null,
+      date_demarrage: commande?.date_demarrage ?? null,
+      date_fin: commande?.date_fin_travaux ?? null,
+    },
+  };
+};
+
+/** Filtres du registre annuel (V8.6.1 §7 — interface simple, 4 filtres max). */
+export type FiltresRegistreAnnuel = {
+  annee: number;
+  etat: "toutes" | EtatSuiviAnnuel;
+  origine: "toutes" | "psp" | "hors_psp";
+  recherche: string;
+};
+
+export const FILTRES_REGISTRE_DEFAUT = (annee: number): FiltresRegistreAnnuel => ({
+  annee,
+  etat: "sans_commande",
+  origine: "toutes",
+  recherche: "",
+});
+
+/** Applique les filtres du registre annuel (année, état, origine, recherche). */
+export const filtrerRegistreAnnuel = (
+  lignes: LigneRegistreAnnuel[],
+  filtres: FiltresRegistreAnnuel,
+): LigneRegistreAnnuel[] => {
+  const r = texte(filtres.recherche);
+  return lignes.filter((l) => {
+    if (filtres.etat !== "toutes" && l.etat_annuel !== filtres.etat) return false;
+    if (filtres.origine !== "toutes" && l.origine !== filtres.origine) return false;
+    if (r) {
+      const haystack = texte(
+        [
+          l.tranche,
+          l.adresse,
+          l.corps_etat,
+          l.nature,
+          l.cc,
+          l.sous_secteur,
+          l.commande?.numero_commande ?? "",
+          l.commande?.fournisseur ?? "",
+          l.ligne_budget ?? "",
+        ].join(" "),
+      );
+      if (!haystack.includes(r)) return false;
+    }
+    return true;
+  });
+};
+
+/** KPI du registre annuel (dérivés — aucun montant inventé). */
+export const kpiRegistreAnnuel = (lignes: LigneRegistreAnnuel[]) => {
+  const somme = (vs: Array<number | null | undefined>) =>
+    vs.reduce<number>((s, v) => s + (typeof v === "number" ? v : 0), 0);
+  const commandes = lignes.map((l) => l.commande).filter((c): c is CommandeAnnuelle => !!c);
+  return {
+    operations: lignes.length,
+    // V8.6.1 — 7 KPI conventionnels (tableau lisible, §12) : les états
+    // détaillés (Sans commande / En cours / Terminées / À vérifier) restent
+    // disponibles via le filtre État et les badges du tableau.
+    budgetProgramme: somme(lignes.map((l) => l.programme_annee ?? l.budget)),
+    budgetCommande: somme(commandes.map((c) => c.budget)),
+    budgetEngage: somme(commandes.map((c) => c.engage)),
+    budgetPaye: somme(commandes.map((c) => c.paye)),
+    travauxEnCours: lignes.filter((l) => l.etat_annuel === "en_cours").length,
+    terminees: lignes.filter((l) => l.etat_annuel === "terminee").length,
+    // Détails des états (badges + filtre) — jamais affichés comme KPI.
+    sansCommande: lignes.filter((l) => l.etat_annuel === "sans_commande").length,
+    aVerifier: lignes.filter((l) => l.etat_annuel === "a_verifier").length,
+  };
+};

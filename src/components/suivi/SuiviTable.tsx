@@ -1,82 +1,74 @@
 /**
- * V8.2.2 — OPÉRATIONS : tableau principal (registre opérationnel unique).
+ * V8.6.1 §6-§8 — REGISTRE ANNUEL : tableau principal (état + origine + recherche).
  *
- * Simplifié : 10 colonnes, 7 KPI, 3 filtres (Recherche / Origine / État).
- * Les montants détaillés restent dans la fiche. Aucun MOCK.
+ * États DÉRIVÉS des données financières réelles (jamais inventés) :
+ *   · SANS COMMANDE — aucune commande ;
+ *   · EN COURS — commande + (payé vide OU payé < engagé) ;
+ *   · TERMINÉE — commande + |payé − engagé| < 0,01 ;
+ *   · À VÉRIFIER — incohérences financières.
+ * Vue par défaut : « Sans commande » (ce qui doit encore être commandé).
  */
 import { useMemo, useState } from "react";
-import { ArrowDown, ArrowUp, Search } from "lucide-react";
+import { Search } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { money0 } from "@/lib/formats";
 import {
-  FILTRES_SUIVI_VIDES,
-  filtrerOperationsSuivi,
-  kpiSuivi,
-  trierOperationsSuivi,
-  type CleTriSuivi,
-  type FiltresSuivi,
+  ETAT_SUIVI_LABEL,
+  FILTRES_REGISTRE_DEFAUT,
+  filtrerRegistreAnnuel,
+  kpiRegistreAnnuel,
+  type EtatSuiviAnnuel,
+  type FiltresRegistreAnnuel,
+  type LigneRegistreAnnuel,
 } from "@/lib/psp.suivi.view";
-import type { SuiviOperationVue } from "@/lib/psp.suivi.foundation";
 
 const selectCls =
   "h-8 rounded-md border bg-card px-2 text-[10px] text-foreground focus:outline-none";
 
+const ETATS: Array<"toutes" | EtatSuiviAnnuel> = [
+  "toutes",
+  "sans_commande",
+  "en_cours",
+  "terminee",
+  "a_verifier",
+];
+
+const ETAT_BADGE: Record<EtatSuiviAnnuel, "default" | "secondary" | "outline" | "destructive"> = {
+  sans_commande: "outline",
+  en_cours: "secondary",
+  terminee: "default",
+  a_verifier: "destructive",
+};
+
 export default function SuiviTable({
-  operations,
+  lignes,
+  annee,
   onOpen,
 }: {
-  operations: SuiviOperationVue[];
-  onOpen: (op: SuiviOperationVue) => void;
+  lignes: LigneRegistreAnnuel[];
+  annee: number;
+  onOpen: (l: LigneRegistreAnnuel) => void;
 }) {
-  const [filtres, setFiltres] = useState<FiltresSuivi>(FILTRES_SUIVI_VIDES);
-  const set = (patch: Partial<FiltresSuivi>) => setFiltres((f) => ({ ...f, ...patch }));
-  const kpi = useMemo(() => kpiSuivi(operations), [operations]);
+  // V8.6.1 §8 — vue par défaut « Sans commande ».
+  const [filtres, setFiltres] = useState<FiltresRegistreAnnuel>(() =>
+    FILTRES_REGISTRE_DEFAUT(annee),
+  );
+  const set = (patch: Partial<FiltresRegistreAnnuel>) => setFiltres((f) => ({ ...f, ...patch }));
 
-  // V8.4.1 — tri par clic sur les en-têtes (moteur UNIQUE trierOperationsSuivi).
-  const [cleTri, setCleTri] = useState<CleTriSuivi | null>(null);
-  const [asc, setAsc] = useState(true);
-
-  const visibles = useMemo(() => {
-    const filtresApliques = filtrerOperationsSuivi(operations, filtres);
-    return cleTri ? trierOperationsSuivi(filtresApliques, cleTri, asc) : filtresApliques;
-  }, [operations, filtres, cleTri, asc]);
-
-  const basculerTri = (cle: CleTriSuivi) => {
-    if (cleTri === cle) {
-      setAsc((v) => !v);
-    } else {
-      setCleTri(cle);
-      setAsc(true);
-    }
-  };
-
-  const Th = ({ cle, children }: { cle: CleTriSuivi; children: React.ReactNode }) => {
-    const actif = cleTri === cle;
-    return (
-      <th
-        className="cursor-pointer select-none px-2 py-1.5 font-bold hover:bg-muted/60"
-        onClick={() => basculerTri(cle)}
-        title="Trier"
-      >
-        <span className="inline-flex items-center gap-1">
-          {children}
-          {actif ? (
-            asc ? (
-              <ArrowUp className="size-2.5" />
-            ) : (
-              <ArrowDown className="size-2.5" />
-            )
-          ) : null}
-        </span>
-      </th>
-    );
-  };
+  const kpi = useMemo(() => kpiRegistreAnnuel(lignes), [lignes]);
+  const visibles = useMemo(
+    () =>
+      [...filtrerRegistreAnnuel(lignes, filtres)].sort((a, b) =>
+        a.tranche.localeCompare(b.tranche, "fr", { numeric: true }),
+      ),
+    [lignes, filtres],
+  );
 
   return (
     <div className="space-y-3">
-      {/* KPI — limités (V8.2.2) */}
+      {/* KPI — 7 conventionnels (V8.2.2 conservés), états détaillés en badges/filtre */}
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
         <Kpi label="Opérations" value={String(kpi.operations)} />
         <Kpi label="Budget programmé" value={money0(kpi.budgetProgramme)} />
@@ -86,137 +78,139 @@ export default function SuiviTable({
         <Kpi label="Travaux en cours" value={String(kpi.travauxEnCours)} />
         <Kpi label="Terminées" value={String(kpi.terminees)} />
       </div>
-      {/* Filtres — 3 uniquement (Recherche / Origine / État) */}
+      {/* Filtres — État + Origine + Recherche */}
       <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-card p-2">
+        <label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+          État
+        </label>
+        <select
+          className={selectCls}
+          value={filtres.etat}
+          onChange={(e) => set({ etat: e.target.value as FiltresRegistreAnnuel["etat"] })}
+        >
+          {ETATS.map((e) => (
+            <option key={e} value={e}>
+              {e === "toutes" ? "Toutes" : ETAT_SUIVI_LABEL[e]}
+            </option>
+          ))}
+        </select>
+        <label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+          Origine
+        </label>
+        <select
+          className={selectCls}
+          value={filtres.origine}
+          onChange={(e) => set({ origine: e.target.value as FiltresRegistreAnnuel["origine"] })}
+        >
+          <option value="toutes">Toutes</option>
+          <option value="psp">PSP</option>
+          <option value="hors_psp">Hors PSP</option>
+        </select>
         <div className="relative">
           <Search className="absolute left-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground" />
           <Input
             className="h-8 w-56 pl-7 text-[11px]"
-            placeholder="Recherche : TR, adresse, corps d'état, entreprise, n° commande…"
+            placeholder="TR / adresse / CC / corps d'état / commande / fournisseur…"
             value={filtres.recherche}
             onChange={(e) => set({ recherche: e.target.value })}
           />
         </div>
-        <select
-          className={selectCls}
-          value={filtres.origine}
-          onChange={(e) => set({ origine: e.target.value as "toutes" | "psp" | "hors_psp" })}
-        >
-          <option value="toutes">Origine : toutes</option>
-          <option value="psp">PSP</option>
-          <option value="hors_psp">Hors PSP</option>
-        </select>
-        <select
-          className={selectCls}
-          value={filtres.etat}
-          onChange={(e) =>
-            set({
-              etat: e.target.value as
-                | "toutes"
-                | "consultation"
-                | "commande"
-                | "travaux_en_cours"
-                | "travaux_termines"
-                | "a_rapprocher",
-            })
-          }
-        >
-          <option value="toutes">État : toutes</option>
-          <option value="consultation">Consultation</option>
-          <option value="commande">Commande</option>
-          <option value="travaux_en_cours">Travaux en cours</option>
-          <option value="travaux_termines">Travaux terminés</option>
-          <option value="a_rapprocher">À rapprocher</option>
-        </select>
-      </div>{" "}
-      {/* Tableau — 10 colonnes (détails dans la fiche) */}
+      </div>
+
+      {/* Tableau */}
       <div className="overflow-x-auto rounded-lg border bg-card">
-        <table className="w-full min-w-[860px] text-left text-[11px]">
+        <table className="w-full min-w-[900px] text-[11px]">
           <thead>
-            <tr className="border-b bg-muted/40 text-[9px] uppercase tracking-wider text-muted-foreground">
-              <Th cle="nature">Opération</Th>
-              <Th cle="tranche">TR</Th>
-              <Th cle="sous_secteur">Sous-secteur</Th>
-              <Th cle="cc">CC</Th>
-              <Th cle="corps_etat">Corps d&apos;état</Th>
-              <Th cle="montant">Programmation</Th>
-              <Th cle="consultation">Consultation</Th>
-              <Th cle="devis">Devis</Th>
-              <Th cle="commande">Commande</Th>
-              <Th cle="travaux">Travaux</Th>
+            <tr className="border-b bg-muted/50 text-left text-[10px] uppercase tracking-wider text-muted-foreground">
+              <th className="px-2 py-1.5 font-bold">Opération</th>
+              <th className="px-2 py-1.5 font-bold">TR</th>
+              <th className="px-2 py-1.5 font-bold">Sous-secteur</th>
+              <th className="px-2 py-1.5 font-bold">CC</th>
+              <th className="px-2 py-1.5 font-bold">Corps d&apos;état</th>
+              <th className="px-2 py-1.5 font-bold">Programmation</th>
+              <th className="px-2 py-1.5 font-bold">Consultation</th>
+              <th className="px-2 py-1.5 font-bold">Devis</th>
+              <th className="px-2 py-1.5 font-bold">Commande</th>
+              <th className="px-2 py-1.5 font-bold">Travaux</th>
             </tr>
           </thead>
           <tbody>
             {visibles.length === 0 ? (
               <tr>
-                <td colSpan={10} className="px-2 py-6 text-center text-muted-foreground">
-                  Aucune donnée disponible.
+                <td className="px-2 py-3 text-muted-foreground" colSpan={10}>
+                  Aucune donnée disponible. — pour cette année / ce filtre, les données réelles
+                  (fichier annuel + opérations de la préparation) ne contiennent aucune ligne.
                 </td>
               </tr>
             ) : (
-              visibles.map((op) => (
+              visibles.map((l) => (
                 <tr
-                  key={op.identite.id}
-                  onClick={() => onOpen(op)}
-                  className="cursor-pointer border-b transition-colors last:border-0 hover:bg-muted/40"
+                  key={l.id}
+                  className="cursor-pointer border-b border-dashed hover:bg-muted/40"
+                  onClick={() => onOpen(l)}
+                  title={
+                    l.type === "operation"
+                      ? "Ouvrir la fiche opération"
+                      : "Commande non rattachée — voir les opérations existantes"
+                  }
                 >
                   <td className="px-2 py-1.5">
-                    <p className="font-semibold">{op.programmation.nature ?? "Sans nature"}</p>
-                    <Badge variant="outline" className="text-[9px]">
-                      {op.identite.origine === "hors_psp" ? "Hors PSP" : "PSP"}
+                    <Badge variant={l.origine === "hors_psp" ? "secondary" : "outline"}>
+                      {l.origine === "hors_psp" ? "Hors PSP" : "PSP"}
                     </Badge>
                   </td>
-                  <td className="px-2 py-1.5 font-bold">{op.identite.tranche}</td>
-                  <td className="px-2 py-1.5">{op.programmation.sous_secteur ?? "—"}</td>
-                  <td className="px-2 py-1.5">{op.programmation.cc ?? "—"}</td>
-                  <td className="px-2 py-1.5">{op.programmation.corps_etat ?? "—"}</td>
+                  <td className="px-2 py-1.5 font-bold">{l.tranche}</td>
+                  <td className="px-2 py-1.5">{l.sous_secteur ?? "—"}</td>
+                  <td className="px-2 py-1.5">{l.cc ?? "—"}</td>
+                  <td className="px-2 py-1.5">{l.corps_etat ?? "—"}</td>
                   <td className="px-2 py-1.5">
-                    {op.identite.origine === "hors_psp" ? (
-                      <span className="text-muted-foreground">Hors programme</span>
-                    ) : (
-                      <>
-                        <p className="font-bold">{op.programmation.annee_premiere ?? "—"}</p>
-                        <p className="text-[9px] text-muted-foreground">
-                          {money0(op.programmation.montant_total)}
-                        </p>
-                      </>
-                    )}
+                    <p className="font-semibold">{l.ligne_budget ?? "—"}</p>
+                    <p className="text-[9px] text-muted-foreground">
+                      {l.type === "operation"
+                        ? l.programme_annee != null && l.programme_annee > 0
+                          ? `Programmé ${annee} : ${money0(l.programme_annee)}`
+                          : "Hors programme"
+                        : l.budget != null
+                          ? `Budget : ${money0(l.budget)}`
+                          : "—"}
+                    </p>
                   </td>
                   <td className="px-2 py-1.5">
-                    {op.consultation.nb_entreprises_consultees > 0 ? (
-                      <span className={op.consultation.relance_necessaire ? "text-amber-700" : ""}>
-                        {op.consultation.nb_entreprises_consultees} entreprise(s)
-                        {op.consultation.relance_necessaire ? " · Relance" : ""}
+                    {l.consultation.nb_demandes > 0 ? (
+                      <span>
+                        {l.consultation.nb_demandes} demande(s)
+                        {l.consultation.statut_label ? ` · ${l.consultation.statut_label}` : ""}
                       </span>
                     ) : (
-                      <span className="text-muted-foreground">Pas de consultation</span>
+                      <span className="text-muted-foreground">Aucune demande</span>
                     )}
                   </td>
                   <td className="px-2 py-1.5">
-                    {op.consultation.statut === "devis_retenu" ? (
-                      <span className="font-semibold text-emerald-700">Devis retenu</span>
-                    ) : op.consultation.nb_devis_recus > 0 ? (
-                      <span>{op.consultation.nb_devis_recus} reçu(s)</span>
+                    {l.consultation.nb_devis_recus > 0 ? (
+                      <span>{l.consultation.nb_devis_recus} reçu(s)</span>
                     ) : (
                       <span className="text-muted-foreground">—</span>
                     )}
                   </td>
                   <td className="px-2 py-1.5">
-                    {op.commandes.nb_commandes === 0 ? (
-                      <span className="text-muted-foreground">—</span>
+                    {l.commande?.numero_commande ? (
+                      <>
+                        <p className="font-semibold">{l.commande.numero_commande}</p>
+                        <p className="text-[9px] text-muted-foreground">
+                          {l.commande.fournisseur ?? "—"}
+                        </p>
+                      </>
                     ) : (
-                      <p className="font-semibold">
-                        {op.commandes.liees[0]?.numero_commande ?? "—"}
-                        {op.commandes.nb_commandes > 1
-                          ? ` (+${op.commandes.nb_commandes - 1})`
-                          : ""}
-                      </p>
+                      <span className="text-muted-foreground">—</span>
                     )}
                   </td>
                   <td className="px-2 py-1.5">
-                    <Badge variant="outline" className="text-[9px]">
-                      {op.execution.statut_label}
+                    <Badge variant={ETAT_BADGE[l.etat_annuel]} className="text-[9px]">
+                      {ETAT_SUIVI_LABEL[l.etat_annuel]}
                     </Badge>
+                    {l.commande?.etat_travaux && (
+                      <p className="text-[9px] text-muted-foreground">{l.commande.etat_travaux}</p>
+                    )}
                   </td>
                 </tr>
               ))
@@ -225,8 +219,9 @@ export default function SuiviTable({
         </table>
       </div>
       <p className="text-[10px] text-muted-foreground">
-        {visibles.length} opération(s) affichée(s) sur {operations.length} — cliquez pour ouvrir la
-        fiche (détails financiers et parcours complet).
+        {visibles.length} ligne(s) affichée(s) sur {lignes.length} pour {annee} — cliquez pour
+        ouvrir la fiche (opération) ou le dialogue de correspondance (commande non rattachée). Les
+        états sont dérivés des montants réels (payé / engagé) et des données importées.
       </p>
     </div>
   );
