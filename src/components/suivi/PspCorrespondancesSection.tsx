@@ -165,7 +165,8 @@ export default function PspCorrespondancesSection({
   if (propositions.length === 0) {
     return (
       <p className="rounded border border-dashed px-2 py-1.5 text-[11px] text-muted-foreground">
-        Aucune correspondance suffisamment fiable sur les commandes disponibles.
+        Aucune commande à rapprocher — ce bloc sert uniquement à rattacher une commande réellement
+        importée à cette opération ; il ne crée jamais d&apos;opération ni de commande.
       </p>
     );
   }

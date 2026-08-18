@@ -1940,6 +1940,29 @@ export const getPspSuiviOperations = createServerFn({ method: "POST" })
   });
 
 /**
+ * V8.8.3 — EXERCICE DE MATÉRIALISATION d'une ligne 'suivi' (fichier annuel N).
+ * Projection stricte : une ligne annuelle sans commande est suivie UNIQUEMENT sur
+ * l'exercice N du fichier qui l'a matérialisée. Dérivation sans état stocké :
+ *  · clé de `programme` dont le montant est > 0 (cas normal : programme[N]=budget) ;
+ *  · sinon parse de la remarque « import annuel NNNN » écrite par la matérialisation ;
+ *  · sinon aucun (ligne orpheline → invisible des années futures).
+ */
+export const exerciceLigneSuivi = (ligne: {
+  origine?: string | null;
+  programme?: Record<string, number> | null;
+  remarques?: string | null;
+}): number | null => {
+  if (ligne.origine !== "suivi") return null;
+  const prog = ligne.programme ?? {};
+  const annees = Object.keys(prog)
+    .map(Number)
+    .filter((a) => Number.isFinite(a) && (prog[String(a)] ?? 0) > 0);
+  if (annees.length > 0) return Math.max(...annees);
+  const m = /import annuel\s+(\d{4})/i.exec(ligne.remarques ?? "");
+  return m ? Number(m[1]) : null;
+};
+
+/**
  * V8.6.1 §4-§8 — REGISTRE OPÉRATIONNEL ANNUEL.
  *
  * Pour une année N, construit les lignes du registre à partir des données
@@ -2097,12 +2120,35 @@ export const getPspSuiviAnnuel = createServerFn({ method: "POST" })
     for (const ligne of lignes) {
       const progAnnee = Number((ligne.programme ?? {})[String(annee)] ?? 0) || 0;
       const horsPsp = ligne.origine === "hors_psp";
-      // V8.6.2 — une ligne annuelle matérialisée ('suivi') est TOUJOURS à suivre
-      // sur son exercice, même sans budget annuel renseigné.
+      // V8.6.2 — une ligne annuelle matérialisée ('suivi') est suivie sur SON
+      // exercice uniquement (année de matérialisation dérivée du programme ou
+      // de la remarque « import annuel N »). Elle ne doit JAMAIS apparaître dans
+      // les années futures (projection stricte, V8.8.3).
       const origineSuivi = ligne.origine === "suivi";
       const commandeIdLiee = commandeIdParLigne.get(ligne.id);
       const commandeLiee = commandeIdLiee ? commandesParId.get(commandeIdLiee) : undefined;
-      if (!horsPsp && !origineSuivi && progAnnee <= 0 && !commandeLiee) continue;
+
+      // V8.8.3 — projection annuelle STRICTE :
+      //  · une ligne 'preparation' n'apparaît sur l'année N que si programme[N]>0
+      //    (ou si une commande RÉELLE de l'exercice lui est liée) ;
+      //  · une ligne 'suivi' matérialisée depuis le fichier annuel N n'apparaît
+      //    que sur son exercice de matérialisation (jamais sur les années futures) ;
+      //  · un devis (psp_devis) ne détermine JAMAIS l'année de suivi.
+      let visibleAnnee = progAnnee > 0 || horsPsp || Boolean(commandeLiee) || origineSuivi;
+      if (visibleAnnee) {
+        if (
+          origineSuivi &&
+          progAnnee <= 0 &&
+          !commandeLiee &&
+          annee !== exerciceLigneSuivi(ligne)
+        ) {
+          visibleAnnee = false;
+        }
+        if (!origineSuivi && !horsPsp && progAnnee <= 0 && !commandeLiee) {
+          visibleAnnee = false;
+        }
+      }
+      if (!visibleAnnee) continue;
 
       const tranche: any = tranchePar.get(ligne.tranche_code);
       const vue = construireSuiviOperation({
