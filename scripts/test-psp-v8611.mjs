@@ -28,7 +28,7 @@ const fichier = (p) => readFileSync(src(p), "utf8");
 const supabaseFn = fichier("lib/psp.prep.supabase.functions.ts");
 const routeSuivi = fichier("routes/suivi.tsx");
 const fiche = fichier("components/suivi/SuiviOperationFiche.tsx");
-const nouvelleDialog = fichier("components/suivi/NouvelleOperationDialog.tsx");
+const travauxFn = fichier("lib/travaux.functions.ts");
 const suiviView = fichier("lib/psp.suivi.view.ts");
 const tableau = fichier("components/suivi/SuiviTable.tsx");
 const prepTable = fichier("components/preparation-psp/PspTable.tsx");
@@ -144,9 +144,13 @@ check(
   supabaseFn.includes("Cette commande est déjà rattachée à une autre opération."),
 );
 check(
-  "C. création depuis /suivi = UNIQUEMENT hors PSP (pas d'opération PSP arbitraire)",
-  nouvelleDialog.includes("Nouvelle opération hors PSP") &&
-    !nouvelleDialog.includes("createPspOperationComplete"),
+  // V8.6.2 — aucune création manuelle générique dans /suivi ; la matérialisation
+  // des lignes annuelles sans commande se fait à l'import (origine='suivi').
+  "C. aucune création manuelle dans /suivi — matérialisation à l'import (origine 'suivi')",
+  !routeSuivi.includes("NouvelleOperationDialog") &&
+    !routeSuivi.includes("Nouvelle opération") &&
+    travauxFn.includes("materialiserLignesSansCommande") &&
+    travauxFn.includes('origine: "suivi"'),
 );
 
 // ════════════ D. IMPORTS / DASHBOARD (§8-§9 / §11-D) ═════════════════════════

@@ -39,7 +39,6 @@ const correspondanceDlg = fichier("components/suivi/PspCorrespondanceCommandeDia
 const rechercheDlg = fichier("components/suivi/PspRechercheCommandeDialog.tsx");
 const panneauRapproche = fichier("components/suivi/PspCommandesARapprocherPanel.tsx");
 const fiche = fichier("components/suivi/SuiviOperationFiche.tsx");
-const nouvelleDialog = fichier("components/suivi/NouvelleOperationDialog.tsx");
 const routeSuivi = fichier("routes/suivi.tsx");
 const foundation = fichier("lib/psp.suivi.foundation.ts");
 const migrationV6 = readFileSync(
@@ -116,8 +115,13 @@ check(
   supabaseFn.includes('p_origine: data.origine ?? "preparation"'),
 );
 check(
-  "A. le formulaire PSP/hors PSP est UNIQUE (PspOperationForm réutilisé, aucun écran parallèle)",
-  nouvelleDialog.includes("PspOperationForm"),
+  // V8.6.2 — le formulaire reste UNIQUE (PspOperationForm) ; la création manuelle
+  // générique est retirée de /suivi. Une opération annuelle sans commande est
+  // MATÉRIALISÉE par l'import annuel dans psp_lignes (origine='suivi').
+  "A. une seule entité opérationnelle : psp_lignes + matérialisation origine 'suivi' à l'import",
+  supabaseFn.includes('.from("psp_lignes")') &&
+    fichier("lib/travaux.functions.ts").includes("materialiserLignesSansCommande") &&
+    fichier("lib/travaux.functions.ts").includes('origine: "suivi"'),
 );
 check(
   "B. opération hors PSP : createPspOperationHorsPsp définit origine 'hors_psp'",
@@ -428,13 +432,15 @@ check(
   routeSuivi.includes("invalidateQueries") && routeSuivi.includes("fetchQuery"),
 );
 check(
-  // V8.6.1 §2 — /suivi ne crée plus d'opération PSP (elle vient de la préparation) :
-  // la création depuis /suivi passe UNIQUEMENT par createPspOperationHorsPsp.
-  "X. cohérence Préparation PSP ↔ /suivi : mêmes tables psp_lignes + création depuis /suivi = hors PSP",
-  nouvelleDialog.includes("createPspOperationHorsPsp") &&
-    !nouvelleDialog.includes("createPspOperationComplete") &&
+  // V8.6.2 — /suivi n'a PLUS de création manuelle générique : une opération
+  // annuelle vient de la préparation PSP ou du fichier annuel (matérialisée à
+  // l'import, origine='suivi' dans psp_lignes).
+  "X. cohérence Préparation PSP ↔ /suivi : mêmes tables psp_lignes + aucune création manuelle dans /suivi",
+  !routeSuivi.includes("NouvelleOperationDialog") &&
+    !routeSuivi.includes("Nouvelle opération") &&
     supabaseFn.includes('.from("psp_lignes")') &&
-    routeSuivi.includes("getPspSuiviOperations"),
+    routeSuivi.includes("getPspSuiviOperations") &&
+    fichier("lib/travaux.functions.ts").includes('origine: "suivi"'),
 );
 
 // ════════════ Y. HISTORIQUE COMPLET (création / modif / relance / rattachement / RETRAIT) ═══

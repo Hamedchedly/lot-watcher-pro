@@ -2001,14 +2001,18 @@ export const getPspSuiviAnnuel = createServerFn({ method: "POST" })
     const perimPar: Record<string, unknown[]> = {};
     for (const p of perim) (perimPar[p.psp_ligne_id] ??= []).push(p);
 
-    // A. Opérations PAT S11 : programmées sur l'année, hors PSP, ou liées à une
-    //    commande de l'exercice (une SEULE ligne — jamais de doublon).
+    // A. Opérations PAT S11 : programmées sur l'année, hors PSP, liées à une
+    //    commande de l'exercice, ou matérialisées par l'import (origine='suivi',
+    //    V8.6.2 — une seule ligne, jamais de doublon).
     for (const ligne of lignes) {
       const progAnnee = Number((ligne.programme ?? {})[String(annee)] ?? 0) || 0;
       const horsPsp = ligne.origine === "hors_psp";
+      // V8.6.2 — une ligne annuelle matérialisée ('suivi') est TOUJOURS à suivre
+      // sur son exercice, même sans budget annuel renseigné.
+      const origineSuivi = ligne.origine === "suivi";
       const commandeIdLiee = commandeIdParLigne.get(ligne.id);
       const commandeLiee = commandeIdLiee ? commandesParId.get(commandeIdLiee) : undefined;
-      if (!horsPsp && progAnnee <= 0 && !commandeLiee) continue;
+      if (!horsPsp && !origineSuivi && progAnnee <= 0 && !commandeLiee) continue;
 
       const tranche: any = tranchePar.get(ligne.tranche_code);
       const vue = construireSuiviOperation({
@@ -2048,7 +2052,16 @@ export const getPspSuiviAnnuel = createServerFn({ method: "POST" })
           type: "operation",
           id: ligne.id,
           pspLigneId: ligne.id,
-          origine: horsPsp ? "hors_psp" : "psp",
+          // V8.6.2 — une ligne 'suivi' : origine affichée dérivée de la ligne
+          // budgétaire (présente = opération issue du PSP annuel, absente = hors
+          // PSP annuel). Jamais transformée en préparation PSP.
+          origine: horsPsp
+            ? "hors_psp"
+            : origineSuivi
+              ? (ligne.ligne_budget ?? "").trim()
+                ? "psp"
+                : "hors_psp"
+              : "psp",
           tranche: ligne.tranche_code,
           sousSecteur: tranche?.sous_secteur ?? null,
           cc: tranche?.sous_secteur ? (ccPar.get(tranche.sous_secteur) ?? null) : null,

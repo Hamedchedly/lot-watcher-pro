@@ -46,6 +46,8 @@ export type TravauxParseIssue = {
   nature_analytique?: string | null;
   ligne_budget?: string | null;
   descriptif?: string | null;
+  /** V8.6.2 — corps d'état porté pour la matérialisation / anti-doublon. */
+  corps_etat?: string | null;
   budget?: number | null;
   adresse?: string | null;
   charge_clientele?: string | null;
@@ -189,6 +191,8 @@ export function parseTravauxWorkbook(data: ArrayBuffer): ParsedTravaux {
         nature_analytique: text(raw["nature_analytique"]),
         ligne_budget: text(raw["ligne_budget"]),
         descriptif: text(raw["descriptif"]),
+        // V8.6.2 — corps d'état porté (anti-doublon à la matérialisation).
+        corps_etat: text(raw["corps_etat"]),
         budget: number(raw["budget"]),
         adresse: text(raw["adresse"]),
         charge_clientele: text(raw["charge_clientele"]),

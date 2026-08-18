@@ -11,9 +11,8 @@ import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Link, createFileRoute } from "@tanstack/react-router";
-import { ArrowLeft, FileSearch, Loader2, Plus, Workflow } from "lucide-react";
+import { ArrowLeft, FileSearch, Loader2, Workflow } from "lucide-react";
 
-import NouvelleOperationDialog from "@/components/suivi/NouvelleOperationDialog";
 import PspCommandesARapprocherPanel from "@/components/suivi/PspCommandesARapprocherPanel";
 import PspCorrespondanceCommandeDialog from "@/components/suivi/PspCorrespondanceCommandeDialog";
 import SuiviOperationFiche from "@/components/suivi/SuiviOperationFiche";
@@ -74,7 +73,6 @@ function SuiviPage() {
 
   const [selection, setSelection] = useState<SuiviOperationVue | null>(null);
   const [commandeSelection, setCommandeSelection] = useState<string | null>(null);
-  const [nouvelle, setNouvelle] = useState(false);
   const [aRapprocher, setARapprocher] = useState(false);
 
   /** V8.3/V8.6.1 — recharge le registre après création/enregistrement. */
@@ -132,10 +130,9 @@ function SuiviPage() {
               </SelectContent>
             </Select>
           </div>
-          {/* V8.6.1 §2 — création UNIQUEMENT hors PSP (l'origine PSP vient de la préparation). */}
-          <Button size="sm" onClick={() => setNouvelle(true)}>
-            <Plus className="size-3.5" /> Nouvelle opération hors PSP
-          </Button>
+          {/* V8.6.2 — plus de création manuelle générique depuis /suivi : une
+              opération annuelle vient de la PRÉPARATION PSP ou du FICHIER ANNUEL
+              (matérialisée par l'import, origine='suivi'). */}
           {/* V8.5.4 — vue globale « Commandes à rapprocher » */}
           <Button size="sm" variant="outline" onClick={() => setARapprocher(true)}>
             <FileSearch className="size-3.5" /> Commandes à rapprocher
@@ -190,13 +187,6 @@ function SuiviPage() {
           open={!!commandeSelection}
           onClose={() => setCommandeSelection(null)}
           onRattache={refresh}
-        />
-      )}
-      {nouvelle && (
-        <NouvelleOperationDialog
-          open={nouvelle}
-          onClose={() => setNouvelle(false)}
-          onCreated={refresh}
         />
       )}
       {aRapprocher && (

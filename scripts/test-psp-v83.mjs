@@ -345,11 +345,22 @@ check(
 // ── V8.3 UI — registre ───────────────────────────────────────────────────────
 const suiviSrc = source("src/routes/suivi.tsx");
 const tableSrc = source("src/components/suivi/SuiviTable.tsx");
-const dialogSrc = source("src/components/suivi/NouvelleOperationDialog.tsx");
+const travauxFnSrc = source("src/lib/travaux.functions.ts");
 const formSrc = source("src/components/preparation-psp/PspOperationForm.tsx");
 const routeTree = source("src/routeTree.gen.ts");
-check("V1. « + Nouvelle opération » dans /suivi", suiviSrc.includes("Nouvelle opération"));
-check("V2. dialogue réutilise PspOperationForm", dialogSrc.includes("PspOperationForm"));
+// V8.6.2 — la création manuelle générique est retirée de /suivi : une opération
+// annuelle vient de la PRÉPARATION PSP ou du FICHIER ANNUEL (matérialisée par
+// l'import dans psp_lignes avec origine='suivi').
+check(
+  "V1. aucune création manuelle générique dans /suivi (V8.6.2)",
+  !suiviSrc.includes("NouvelleOperationDialog") && !suiviSrc.includes("Nouvelle opération"),
+);
+check(
+  "V2. matérialisation des lignes annuelles sans commande (origine 'suivi') à l'import",
+  travauxFnSrc.includes("materialiserLignesSansCommande") &&
+    travauxFnSrc.includes('origine: "suivi"') &&
+    travauxFnSrc.includes("Numéro de commande manquant"),
+);
 check(
   "V3. formulaire masque les montants en hors PSP",
   formSrc.includes("horsPsp") && formSrc.includes("Hors programmation PSP"),

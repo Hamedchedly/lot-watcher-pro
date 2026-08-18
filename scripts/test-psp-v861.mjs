@@ -30,8 +30,8 @@ const fichier = (p) => readFileSync(src(p), "utf8");
 const hookRecherche = fichier("components/preparation-psp/useRecherchePatrimoine.ts");
 const routeSuivi = fichier("routes/suivi.tsx");
 const suiviTable = fichier("components/suivi/SuiviTable.tsx");
-const nouvelleDialog = fichier("components/suivi/NouvelleOperationDialog.tsx");
 const supabaseFn = fichier("lib/psp.prep.supabase.functions.ts");
+const travauxFn = fichier("lib/travaux.functions.ts");
 const suiviView = fichier("lib/psp.suivi.view.ts");
 const fiche = fichier("components/suivi/SuiviOperationFiche.tsx");
 
@@ -205,10 +205,13 @@ check(
   supabaseFn.includes('origine: "hors_psp"') && supabaseFn.includes("programmation_id: null"),
 );
 check(
-  "V2. la création depuis /suivi est UNIQUEMENT hors PSP (§2)",
-  nouvelleDialog.includes("Nouvelle opération hors PSP") &&
-    !nouvelleDialog.includes("createPspOperationComplete") &&
-    !nouvelleDialog.includes('setOrigine("psp")'),
+  // V8.6.2 — plus de création manuelle générique dans /suivi : une opération
+  // annuelle sans commande est MATÉRIALISÉE par l'import (origine='suivi').
+  "V2. aucune création manuelle dans /suivi — matérialisation à l'import (origine 'suivi')",
+  !routeSuivi.includes("NouvelleOperationDialog") &&
+    !routeSuivi.includes("Nouvelle opération") &&
+    travauxFn.includes("materialiserLignesSansCommande") &&
+    travauxFn.includes('origine: "suivi"'),
 );
 
 // ════════════ W–AD. ÉTAT DÉRIVÉ / INTANGIBILITÉ / MOCK / PURGE ═══════════════

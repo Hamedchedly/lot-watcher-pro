@@ -652,7 +652,13 @@ export const construireSuiviOperation = (input: {
       id: ligne.id,
       tranche: ligne.tranche_code,
       categorie: ligne.categorie,
-      origine: ligne.origine === "hors_psp" ? "hors_psp" : "psp",
+      // V8.6.2 — une ligne annuelle matérialisée ('suivi') SANS ligne budgétaire
+      // est une opération hors PSP annuel ; avec ligne budgétaire = PSP annuel.
+      origine:
+        ligne.origine === "hors_psp" ||
+        (ligne.origine === "suivi" && !(ligne.ligne_budget ?? "").trim())
+          ? "hors_psp"
+          : "psp",
     },
     programmation: {
       ligne,
