@@ -57,7 +57,12 @@ import {
   dateRetourParDefaut,
   type ConsultationEntreprise,
 } from "@/lib/psp.suivi.foundation";
-import { comparatifDevis, etapesAvancement } from "@/lib/psp.suivi.view";
+import {
+  comparatifDevis,
+  deriverEtatSuiviAnnuel,
+  etapesAvancement,
+  ETAT_SUIVI_LABEL,
+} from "@/lib/psp.suivi.view";
 import type { SuiviOperationVue } from "@/lib/psp.suivi.foundation";
 
 const fmtDate = (v: string | null | undefined): string =>
@@ -79,6 +84,23 @@ export default function SuiviOperationFiche({
   const cmd = operation.commandes;
   const ex = operation.execution;
   const comparatif = comparatifDevis(operation.consultation.entreprises.flatMap((e) => e.devis));
+  // V8.6.1.1 §3 — ÉTAT RÉEL / SYSTÈME : dérivé des montants réels des commandes
+  // liées (payé / engagé). Aucune valeur inventée.
+  const etatsCommandes = cmd.liees.map((l) =>
+    deriverEtatSuiviAnnuel({
+      numeroCommande: l.numero_commande ?? null,
+      engage: l.engage,
+      paye: l.paye,
+    }),
+  );
+  const etatReel =
+    etatsCommandes.length === 0
+      ? "sans_commande"
+      : etatsCommandes.includes("a_verifier")
+        ? "a_verifier"
+        : etatsCommandes.includes("en_cours")
+          ? "en_cours"
+          : "terminee";
   const refresh = onRefresh ?? (async () => undefined);
 
   // Entreprises suggérées (données réelles — socle V8.1). Réutilisées pour
@@ -375,6 +397,52 @@ export default function SuiviOperationFiche({
                 <span className="text-muted-foreground">
                   Dernier état travaux : {ex.etat_travaux ?? "—"}
                 </span>
+              </div>
+            </Section>
+            {/* V8.6.1.1 §3 — ÉTAT RÉEL / SYSTÈME vs ÉTAT DE PILOTAGE (manuel). */}
+            <Section title="État de suivi" icon={FileSearch}>
+              <div className="space-y-1.5 rounded border border-dashed px-2 py-1.5 text-[11px]">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+                    État réel / système
+                  </span>
+                  <Badge className="text-[10px]">{ETAT_SUIVI_LABEL[etatReel]}</Badge>
+                  <span className="text-[10px] text-muted-foreground">
+                    (dérivé automatiquement des commandes importées : payé / engagé)
+                  </span>
+                </div>
+                {cmd.liees.map((l) => {
+                  const e = deriverEtatSuiviAnnuel({
+                    numeroCommande: l.numero_commande ?? null,
+                    engage: l.engage,
+                    paye: l.paye,
+                  });
+                  return (
+                    <p key={l.lien_id} className="text-[10px] text-muted-foreground">
+                      {l.numero_commande ?? "—"} : Commandé {money0(l.budget)} · Engagé{" "}
+                      {l.engage == null ? "—" : money0(l.engage)} · Payé{" "}
+                      {l.paye == null ? "—" : money0(l.paye)} →{" "}
+                      <span className="font-semibold">{ETAT_SUIVI_LABEL[e]}</span>
+                    </p>
+                  );
+                })}
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-dashed pt-1">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+                    État importé
+                  </span>
+                  <span className="text-[10px]">
+                    {cmd.liees[0]?.etat_commande ?? "—"} · {ex.etat_travaux ?? "—"}
+                  </span>
+                  <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+                    Consultation
+                  </span>
+                  <span className="text-[10px]">{c.statut_label}</span>
+                </div>
+                <p className="border-t border-dashed pt-1 text-[10px] text-muted-foreground">
+                  État de pilotage (manuel, ex. « Devis demandé », « Bloquée ») : proposé — une
+                  colonne dédiée sera ajoutée après validation de la migration (aucune modification
+                  de schéma appliquée ici).
+                </p>
               </div>
             </Section>
             {/* V8.5.2 — REVUE DES CORRESPONDANCES COMMANDES (lecture seule) */}

@@ -1401,6 +1401,25 @@ export const createPspOperationHorsPsp = createServerFn({ method: "POST" })
       );
     }
 
+    // V8.6.1.1 §6 — GARDE ANTI-DOUBLON : si une opération existe déjà avec la même
+    // TR ET le même corps d'état ET la même nature, on refuse la création (utilisez
+    // l'opération existante — jamais de deuxième copie). Une TR peut porter
+    // plusieurs opérations de natures différentes (cas légitimes conservés).
+    const { data: existantes } = await db
+      .from("psp_lignes")
+      .select("id, tranche_code, corps_etat, nature_travaux, origine")
+      .eq("tranche_code", data.trancheCode);
+    const doublon = (existantes ?? []).find(
+      (l: any) =>
+        (l.corps_etat ?? "").trim().toLowerCase() === corps.toLowerCase() &&
+        (l.nature_travaux ?? "").trim().toLowerCase() === nature.toLowerCase(),
+    );
+    if (corps && nature && doublon) {
+      throw new Error(
+        `Opération refusée : une opération existe déjà sur la TR ${data.trancheCode} avec le même corps d'état et la même nature (${doublon.origine === "hors_psp" ? "hors PSP" : "préparation PSP"}). Utilisez l'opération existante ou modifiez la nature.`,
+      );
+    }
+
     const { data: ligne, error } = await db
       .from("psp_lignes")
       .insert({
@@ -1859,26 +1878,36 @@ export const getPspSuiviAnnuel = createServerFn({ method: "POST" })
     const annee = data.annee;
 
     // Années disponibles : exercices réels des commandes + années de préparation.
-    const [anneesCmdR, commandesR, progR, lignesR, perimR, devisR, liensR] = await Promise.all([
-      db.from("travaux_commandes").select("annee_exercice"),
-      db
-        .from("travaux_commandes")
-        .select(
-          "id, numero_commande, tranche_code, adresse, nature_analytique, corps_etat, charge_clientele, ligne_budget, descriptif, budget, fournisseur, numero_fournisseur, etat_commande, engage, paye, solde, etat_travaux, date_demarrage, date_fin_travaux, annee_exercice",
-        )
-        .eq("annee_exercice", annee)
-        .eq("actif", true),
-      db
-        .from("psp_programmations")
-        .select("annee_debut, annee_fin, statut")
-        .eq("type", "officielle")
-        .order("version", { ascending: false })
-        .limit(1),
-      db.from("psp_lignes").select("*"),
-      db.from("psp_ligne_patrimoine").select("*"),
-      db.from("psp_devis").select("*"),
-      db.from("psp_command_links").select("*"),
-    ]);
+    const [anneesCmdR, commandesR, progR, lignesR, perimR, devisR, liensR, sansCmdImportR] =
+      await Promise.all([
+        db.from("travaux_commandes").select("annee_exercice"),
+        db
+          .from("travaux_commandes")
+          .select(
+            "id, numero_commande, tranche_code, adresse, nature_analytique, corps_etat, charge_clientele, ligne_budget, descriptif, budget, fournisseur, numero_fournisseur, etat_commande, engage, paye, solde, etat_travaux, date_demarrage, date_fin_travaux, annee_exercice",
+          )
+          .eq("annee_exercice", annee)
+          .eq("actif", true),
+        db
+          .from("psp_programmations")
+          .select("annee_debut, annee_fin, statut")
+          .eq("type", "officielle")
+          .order("version", { ascending: false })
+          .limit(1),
+        db.from("psp_lignes").select("*"),
+        db.from("psp_ligne_patrimoine").select("*"),
+        db.from("psp_devis").select("*"),
+        db.from("psp_command_links").select("*"),
+        // V8.6.1.1 — les lignes annuelles SANS commande du fichier sont rejetées à
+        // l'import (marqueurs « Numéro de commande manquant », données non
+        // persistées). On expose LEUR NOMBRE en lecture seule (travaux_import_details
+        // reste INTANGIBLE) pour un bandeau informatif dans /suivi.
+        db
+          .from("travaux_import_details")
+          .select("id", { count: "exact", head: true })
+          .eq("type", "erreur")
+          .eq("message", "Numéro de commande manquant"),
+      ]);
     if (commandesR.error) throw new Error(`Lecture du registre : ${commandesR.error.message}`);
 
     const anneesDisponibles = [
@@ -2066,7 +2095,14 @@ export const getPspSuiviAnnuel = createServerFn({ method: "POST" })
       );
     }
 
-    return { annee, anneesDisponibles, lignes: lignesRegistre };
+    return {
+      annee,
+      anneesDisponibles,
+      lignes: lignesRegistre,
+      // Nombre de lignes annuelles SANS commande vues dans les imports (données
+      // non persistées — marqueurs travaux_import_details, lecture seule).
+      lignesSansCommandeImport: sansCmdImportR?.count ?? 0,
+    };
   });
 
 export const updatePspOperationComplete = createServerFn({ method: "POST" })
