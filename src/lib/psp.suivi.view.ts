@@ -190,7 +190,11 @@ export type KpiSuivi = {
   terminees: number;
 };
 
-/** KPI du tableau Opérations (V8.2.2 — limités, aucun MOCK). */
+/**
+ * LEGACY / TESTS HISTORIQUES — non utilisé par l'UI actuelle.
+ * V8.6.3 : l'UI /suivi utilise `kpiRegistreAnnuel` ; `kpiSuivi` est conservé
+ * uniquement pour les suites historiques V8.2/V8.2.2/V8.6. Ne pas supprimer.
+ */
 export const kpiSuivi = (operations: SuiviOperationVue[]): KpiSuivi => {
   const somme = (vs: number[]) => vs.reduce((s, v) => s + v, 0);
   return {

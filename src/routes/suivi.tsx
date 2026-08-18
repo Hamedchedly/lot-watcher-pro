@@ -70,6 +70,7 @@ function SuiviPage() {
   const lignes = (registre?.lignes ?? []) as LigneRegistreAnnuel[];
   const anneesDisponibles = (registre?.anneesDisponibles ?? [2026]) as number[];
   const lignesSansCommandeImport = (registre?.lignesSansCommandeImport ?? 0) as number;
+  const lignesSuiviMaterialisees = (registre?.lignesSuiviMaterialisees ?? 0) as number;
 
   const [selection, setSelection] = useState<SuiviOperationVue | null>(null);
   const [commandeSelection, setCommandeSelection] = useState<string | null>(null);
@@ -153,14 +154,15 @@ function SuiviPage() {
         </div>
       </header>
 
-      {/* V8.6.1.1 — lignes annuelles SANS commande vues dans les imports (données
-          non persistées — bandeau informatif, aucune solution parallèle). */}
+      {/* V8.6.2/3 — lignes annuelles SANS commande vues dans les imports : le
+          bandeau distingue les lignes DÉTECTÉES des lignes MATÉRIALISÉES en
+          opérations (les marqueurs travaux_import_details restent conservés). */}
       {lignesSansCommandeImport > 0 && (
         <div className="border-b border-amber-300 bg-amber-50 px-4 py-2 text-[11px] text-amber-800">
-          {lignesSansCommandeImport} ligne(s) annuelle(s) SANS commande présentes dans les imports
-          du fichier annuel (« Numéro de commande manquant ») — leurs données métier ne sont pas
-          persistées par le moteur d'import. Elles restent visibles ici en tant qu'opérations « Sans
-          commande » une fois créées/rattachées.
+          {lignesSansCommandeImport} ligne(s) sans commande détectées dans les imports du fichier
+          annuel · {lignesSuiviMaterialisees} matérialisée(s) en opérations. Les marqueurs d'import
+          restent conservés (traçabilité) ; seules les lignes fiables (TR + corps d'état ou nature)
+          deviennent des opérations « Sans commande » dans le registre.
         </div>
       )}
 

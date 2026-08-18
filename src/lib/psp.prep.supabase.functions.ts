@@ -1025,7 +1025,13 @@ export const rechercherLotsAdresse = createServerFn({ method: "POST" })
     );
   });
 
-/** Crée un report source → cible (la ligne cible porte origine='report'). */
+/**
+ * LEGACY — ne pas utiliser pour le suivi opérationnel actuel.
+ * V8.6.3 : gel de `psp_reports` (0 ligne ; la revue des reports V3/V4 est
+ * masquée du parcours utilisateur). Comportement inchangé.
+ *
+ * Crée un report source → cible (la ligne cible porte origine='report').
+ */
 export const createPspReport = createServerFn({ method: "POST" })
   .validator((d: unknown) => reportInput.parse(d))
   .handler(async ({ data }) => {
@@ -2115,6 +2121,8 @@ export const getPspSuiviAnnuel = createServerFn({ method: "POST" })
       // Nombre de lignes annuelles SANS commande vues dans les imports (données
       // non persistées — marqueurs travaux_import_details, lecture seule).
       lignesSansCommandeImport: sansCmdImportR?.count ?? 0,
+      // V8.6.3 — lignes 'suivi' déjà matérialisées en opérations (origine='suivi').
+      lignesSuiviMaterialisees: lignes.filter((l: any) => l.origine === "suivi").length,
     };
   });
 

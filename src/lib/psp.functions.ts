@@ -362,6 +362,10 @@ export const finalizePspImport = createServerFn({ method: "POST" })
   });
 
 /**
+ * LEGACY — ne pas utiliser pour le suivi opérationnel actuel.
+ * V8.6.3 : gel de `psp_command_analysis` (0 ligne, API sans usage UI).
+ * Comportement inchangé (conservé pour compatibilité / tests historiques).
+ *
  * Enregistre ou met à jour l'analyse courante d'une commande dans
  * `psp_command_analysis`. Clé d'upsert : `numero_commande_interne` (= COMN_NUM).
  * `numero_commande` (= COMC_NOLIG) est conservé comme attribut (nullable, non unique).
@@ -416,6 +420,10 @@ export const savePspCommandAnalysis = createServerFn({ method: "POST" })
   });
 
 /**
+ * LEGACY — ne pas utiliser pour le suivi opérationnel actuel.
+ * V8.6.3 : gel de `psp_patrimoine_context` (0 ligne, API sans usage UI).
+ * Comportement inchangé (conservé pour compatibilité / tests historiques).
+ *
  * Enregistre ou met à jour le contexte patrimonial dans `psp_patrimoine_context`.
  * Clé métier : `er_id` (upsert). Le contexte est hérité du niveau supérieur par
  * défaut ; une exception (exception: true) s'applique au niveau inférieur.
@@ -466,7 +474,8 @@ export const savePspPatrimoineContext = createServerFn({ method: "POST" })
       )
       .select("*")
       .single();
-    if (saveError) throw new Error(`Enregistrement du contexte ${aEnregistrer.er_id} : ${saveError.message}`);
+    if (saveError)
+      throw new Error(`Enregistrement du contexte ${aEnregistrer.er_id} : ${saveError.message}`);
     return saved;
   });
 
@@ -495,6 +504,8 @@ export const savePspFeedback = createServerFn({ method: "POST" })
       .select("*")
       .single();
     if (error)
-      throw new Error(`Enregistrement du feedback (${data.cible_type} ${data.cible_id}) : ${error.message}`);
+      throw new Error(
+        `Enregistrement du feedback (${data.cible_type} ${data.cible_id}) : ${error.message}`,
+      );
     return saved;
   });

@@ -1,10 +1,15 @@
-import { Flag, Layers, List, Users } from "lucide-react";
+import { Layers, List, Users } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
 /** Modes d'affichage du module (V2 + V3). */
 export type ModeAffichage = "tranche" | "charge" | "detail" | "reports";
 
+// V8.6.3 — L'option « reports » (revue V3/V4, identité TR+C) est MASQUÉE du
+// parcours principal : elle n'est plus cohérente avec l'architecture actuelle
+// (une opération = une psp_lignes, identité = psp_lignes.id). Le type
+// ModeAffichage et les composants legacy restent disponibles (tests, données
+// historiques) mais l'accès UI est désactivé.
 const MODES: Array<{
   valeur: ModeAffichage;
   label: string;
@@ -13,7 +18,7 @@ const MODES: Array<{
   { valeur: "detail", label: "Détail", icone: List },
   { valeur: "tranche", label: "Par tranche", icone: Layers },
   { valeur: "charge", label: "Par chargé de clientèle", icone: Users },
-  { valeur: "reports", label: "Revue des reports", icone: Flag },
+  // 'reports' retiré de MODES (V8.6.3 — LEGACY V3/V4, non accessible depuis l'UI).
 ];
 
 /**
