@@ -51,6 +51,8 @@ export interface LignePspSuivi {
   origine: string;
   statut: string | null;
   priorite: string | null;
+  /** V8.8 §9 — état de pilotage manuel (colonne additive, migration à valider). */
+  etat_pilotage?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
 }
@@ -510,7 +512,14 @@ const somme = (vs: Array<number | null | undefined>): number =>
 // ── Vue métier agrégée (getPspSuiviOperation) ───────────────────────────────
 
 export interface SuiviOperationVue {
-  identite: { id: string; tranche: string; categorie: PspCategorie; origine: "psp" | "hors_psp" };
+  identite: {
+    id: string;
+    tranche: string;
+    categorie: PspCategorie;
+    origine: "psp" | "hors_psp";
+    /** V8.8 §9 — état de pilotage manuel (optionnel, migration à valider). */
+    etat_pilotage?: string | null;
+  };
   programmation: {
     ligne: LignePspSuivi;
     perimetre: PerimetreSuivi[];
@@ -659,6 +668,7 @@ export const construireSuiviOperation = (input: {
         (ligne.origine === "suivi" && !(ligne.ligne_budget ?? "").trim())
           ? "hors_psp"
           : "psp",
+      etat_pilotage: ligne.etat_pilotage ?? null,
     },
     programmation: {
       ligne,

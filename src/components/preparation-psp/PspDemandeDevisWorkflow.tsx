@@ -12,7 +12,11 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { CheckSquare, Mail, RefreshCcw, Square } from "lucide-react";
+import { CheckSquare, Mail, RefreshCcw, Search, Square } from "lucide-react";
+
+import PspFournisseurSearch, {
+  type FournisseurSelection,
+} from "@/components/preparation-psp/PspFournisseurSearch";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -96,6 +100,8 @@ export default function PspDemandeDevisWorkflow({
   const [sujet, setSujet] = useState("");
   const [corps, setCorps] = useState("");
   const [enregistre, setEnregistre] = useState(false);
+  // V8.8 §2 — entreprise libre choisie hors suggestions (référentiel fournisseurs).
+  const [entrepriseLibre, setEntrepriseLibre] = useState<FournisseurSelection | null>(null);
 
   const variables = {
     TR: operation.tranche,
@@ -122,6 +128,21 @@ export default function PspDemandeDevisWorkflow({
   const basculer = (id: string) =>
     setSelectionIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   const selection = (suggestions ?? []).filter((s) => selectionIds.includes(s.fournisseur_id));
+  // V8.8 §2 — l'entreprise libre sélectionnée rejoint la sélection (hors suggestions).
+  const selectionLibre: SuggestionAvecEmail[] = entrepriseLibre
+    ? [
+        {
+          fournisseur_id: entrepriseLibre.id ?? `libre:${entrepriseLibre.nom}`,
+          nom: entrepriseLibre.nom,
+          correspondance: "aucune",
+          etiquettes: ["Hors suggestions"],
+          commandes_corps_etat: 0,
+          commandes_total: 0,
+          email: null,
+        },
+      ]
+    : [];
+  const selectionComplete = [...selectionLibre, ...selection];
   const mailto = editeur ? construireMailto({ email: editeur.email, sujet, corps }) : "";
 
   const enregistrerDemande = async () => {
@@ -141,8 +162,8 @@ export default function PspDemandeDevisWorkflow({
     setEnregistre(true);
     await onEnvoye();
     // Enchaînement : préparer la demande de l'entreprise suivante (si plusieurs).
-    const idx = selection.findIndex((s) => s.fournisseur_id === editeur.fournisseur_id);
-    const suivant = selection[idx + 1] ?? null;
+    const idx = selectionComplete.findIndex((s) => s.fournisseur_id === editeur.fournisseur_id);
+    const suivant = selectionComplete[idx + 1] ?? null;
     if (suivant) {
       setEditeur(suivant);
     } else {
@@ -207,14 +228,34 @@ export default function PspDemandeDevisWorkflow({
         <Button
           size="sm"
           className="h-7 text-[10px]"
-          disabled={figee || selection.length === 0}
-          onClick={() => setEditeur(selection[0] ?? null)}
+          disabled={figee || selectionComplete.length === 0}
+          onClick={() => setEditeur(selectionComplete[0] ?? null)}
         >
           <Mail className="size-3" /> Préparer la demande de devis
         </Button>
         <span className="text-[9px] text-muted-foreground">
-          {selection.length} entreprise(s) sélectionnée(s)
+          {selectionComplete.length} entreprise(s) sélectionnée(s)
         </span>
+      </div>
+
+      {/* V8.8 §2 — recherche libre d'une AUTRE entreprise (référentiel fournisseurs) */}
+      <div className="mt-2 border-t border-dashed pt-2">
+        <p className="mb-1 text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+          <Search className="mr-1 inline size-3" />
+          Rechercher une autre entreprise
+        </p>
+        <PspFournisseurSearch
+          value={entrepriseLibre?.nom ?? ""}
+          onSelect={(f) => {
+            setEntrepriseLibre(f);
+            if (f?.nom)
+              setSelectionIds((prev) => [
+                ...prev.filter((x) => x.startsWith("libre:")),
+                `libre:${f.nom}`,
+              ]);
+          }}
+          placeholder="Rechercher dans le référentiel fournisseurs…"
+        />
       </div>
 
       {/* Éditeur de mail (une entreprise à la fois) */}

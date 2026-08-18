@@ -178,6 +178,92 @@ const STATUT_EXECUTION_RANG: Record<string, number> = {
   travaux_termines: 4,
 };
 
+// ── V8.8 §8 — TRI CLIQUABLE DU REGISTRE ANNUEL ──────────────────────────────────
+// Extension du MÊME moteur de tri (V8.4.1, trierOperationsSuivi) aux lignes du
+// registre annuel (LigneRegistreAnnuel). Aucun moteur de tri parallèle : mêmes
+// rangs (consultation / exécution), même règle 1 clic ↑ / 2 clics ↓ / nouvelle
+// colonne → ascendant, tri appliqué APRÈS les filtres (année, recherche, métier).
+
+export type CleTriRegistre =
+  | "operation"
+  | "origine"
+  | "tranche"
+  | "adresse"
+  | "cc"
+  | "corps_etat"
+  | "descriptif"
+  | "programmation"
+  | "consultation"
+  | "devis"
+  | "commande"
+  | "travaux";
+
+export const COLONNES_TRI_REGISTRE: Array<{ cle: CleTriRegistre | null; label: string }> = [
+  { cle: "operation", label: "Opération" },
+  { cle: "origine", label: "Origine" },
+  { cle: "tranche", label: "TR" },
+  { cle: "adresse", label: "Adresse" },
+  { cle: "cc", label: "CC" },
+  { cle: "corps_etat", label: "Corps d'état" },
+  { cle: "descriptif", label: "Descriptif" },
+  { cle: "programmation", label: "Programmation" },
+  { cle: "consultation", label: "Consultation" },
+  { cle: "devis", label: "Devis" },
+  { cle: "commande", label: "Commande" },
+  { cle: "travaux", label: "Travaux" },
+];
+
+/** Valeur de tri d'une ligne du registre (mêmes règles que trierOperationsSuivi). */
+export const valeurTriRegistre = (l: LigneRegistreAnnuel, cle: CleTriRegistre): string | number => {
+  switch (cle) {
+    case "operation":
+      return l.type === "operation" ? `op ${l.nature ?? ""}` : `cmd ${l.tranche}`;
+    case "origine":
+      return l.origine === "hors_psp" ? "Hors PSP" : "PSP";
+    case "tranche":
+      return l.tranche;
+    case "adresse":
+      return l.adresse ?? "";
+    case "cc":
+      return l.cc ?? "";
+    case "corps_etat":
+      return l.corps_etat ?? "";
+    case "descriptif":
+      return l.nature ?? "";
+    case "programmation":
+      return l.programme_annee ?? l.budget ?? 0;
+    case "consultation":
+      return STATUT_CONSULTATION_RANG[l.consultation.statut] ?? 0;
+    case "devis":
+      return l.consultation.statut === "devis_retenu"
+        ? 3
+        : l.consultation.nb_devis_recus > 0
+          ? 2
+          : l.consultation.nb_demandes > 0
+            ? 1
+            : 0;
+    case "commande":
+      return l.commande?.numero_commande ?? "";
+    case "travaux":
+      return STATUT_EXECUTION_RANG[l.execution.etat_travaux ?? ""] ?? 0;
+  }
+};
+
+/** Tri cliquable du registre — appliquer APRÈS les filtres. 1 clic ↑, 2 clics ↓. */
+export const trierLignesRegistre = (
+  lignes: LigneRegistreAnnuel[],
+  cle: CleTriRegistre,
+  asc: boolean,
+): LigneRegistreAnnuel[] => {
+  const dir = asc ? 1 : -1;
+  return [...lignes].sort((a, b) => {
+    const va = valeurTriRegistre(a, cle);
+    const vb = valeurTriRegistre(b, cle);
+    if (typeof va === "number" && typeof vb === "number") return (va - vb) * dir;
+    return String(va).localeCompare(String(vb), "fr", { sensitivity: "base" }) * dir;
+  });
+};
+
 // ── KPI ──────────────────────────────────────────────────────────────────────
 
 export type KpiSuivi = {

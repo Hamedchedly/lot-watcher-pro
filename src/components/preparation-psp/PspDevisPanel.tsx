@@ -22,7 +22,7 @@ import {
   type PspDevis,
   type PspOperation,
 } from "@/lib/psp.prep";
-import { DEVIS_STATUT_LABELS } from "@/lib/psp.prep.v7";
+import { DEVIS_STATUT_LABELS, libelleEntrepriseAvecId } from "@/lib/psp.prep.v7";
 import { cn } from "@/lib/utils";
 
 export type DevisEdit = {
@@ -282,7 +282,15 @@ export default function PspDevisPanel({
               ) : (
                 <div className="flex flex-wrap items-center justify-between gap-1">
                   <span className="flex flex-wrap items-center gap-1.5 text-xs font-medium">
-                    <span className="font-black">{d.entreprise}</span>
+                    {/* V8.8 §1 — nom absent → « Fournisseur n°… » / « Entreprise non
+                        renseignée » (aucune valeur vide, aucun nom inventé). */}
+                    <span className="font-black">
+                      {libelleEntrepriseAvecId(
+                        d.entreprise,
+                        (d as PspDevis & { numero_fournisseur?: string | null }).numero_fournisseur,
+                        d.fournisseur_id,
+                      )}
+                    </span>
                     {d.document_reference ? (
                       <span className="font-mono text-[10px] text-muted-foreground">
                         N° {d.document_reference}

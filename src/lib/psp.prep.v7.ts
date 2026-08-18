@@ -252,6 +252,39 @@ export const statutConsultationDepuisDevis = (
   return { code: "aucune", label: STATUT_CONSULTATION_PREP_LABELS.aucune };
 };
 
+/**
+ * V8.8 §1 — LIBELLÉ D'ENTREPRISE robuste : ne jamais afficher de valeur vide.
+ *   · nom présent          → nom ;
+ *   · nom absent + n°      → « Fournisseur n°123456 » ;
+ *   · nom absent + id UUID → « Entreprise non renseignée — Fournisseur n°… » si
+ *     un numéro est disponible, sinon « Entreprise non renseignée ».
+ * Aucun nom inventé.
+ */
+export const libelleEntreprise = (
+  nom: string | null | undefined,
+  numeroFournisseur?: string | null | undefined,
+): string => {
+  const n = (nom ?? "").trim();
+  const num = (numeroFournisseur ?? "").trim();
+  if (n) return n;
+  if (num) return `Fournisseur n°${num}`;
+  return "Entreprise non renseignée";
+};
+
+/**
+ * V8.8 §1 — variante avec fournisseur_id (UUID) : si aucun numéro lisible,
+ * affiche « Entreprise non renseignée » (jamais un UUID brut).
+ */
+export const libelleEntrepriseAvecId = (
+  nom: string | null | undefined,
+  numeroFournisseur?: string | null | undefined,
+  fournisseurId?: string | null | undefined,
+): string => {
+  const base = libelleEntreprise(nom, numeroFournisseur);
+  if (base !== "Entreprise non renseignée") return base;
+  return fournisseurId ? "Entreprise non renseignée" : base;
+};
+
 // ── 6. Enveloppes — type de la carte clé `${annee}|${categorie}` (jamais stocké) ──
 export type EnveloppeMap = Record<string, number>;
 

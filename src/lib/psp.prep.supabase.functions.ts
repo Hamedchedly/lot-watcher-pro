@@ -679,6 +679,81 @@ export const updatePspLigneStatutPriorite = createServerFn({ method: "POST" })
     return ligne;
   });
 
+/** Validateur du statut de pilotage manuel (V8.8 §9) — valeurs BORNÉES, aucun
+ *  état inventé. Le statut de pilotage reste DISTINCT de l'état réel dérivé. */
+const etatPilotageInput = z.object({
+  id: z.string().uuid(),
+  etatPilotage: z
+    .enum([
+      "a_traiter",
+      "devis_a_demander",
+      "devis_demande",
+      "devis_recu",
+      "commande_a_passer",
+      "en_cours",
+      "bloquee",
+      "prioritaire",
+      "a_cloturer",
+    ])
+    .nullable(),
+});
+
+/** Libellés du statut de pilotage manuel (affichage UI — aucun état stocké ici). */
+export const ETAT_PILOTAGE_LABELS: Record<string, string> = {
+  a_traiter: "À traiter",
+  devis_a_demander: "Devis à demander",
+  devis_demande: "Devis demandé",
+  devis_recu: "Devis reçu",
+  commande_a_passer: "Commande à passer",
+  en_cours: "En cours",
+  bloquee: "Bloquée",
+  prioritaire: "Prioritaire",
+  a_cloturer: "À clôturer",
+};
+
+/**
+ * V8.8 §9 — STATUT DE PILOTAGE MANUEL.
+ *  · persisté dans `psp_lignes.etat_pilotage` (migration additive à valider) ;
+ *  · historisé dans `psp_ligne_historique` (operation='modification', delta) ;
+ *  · ne touche JAMAIS travaux_commandes ni les tables d'import ;
+ *  · ne remplace jamais l'état réel dérivé (payé/engagé).
+ */
+export const updatePspLigneEtatPilotage = createServerFn({ method: "POST" })
+  .validator((d: unknown) => etatPilotageInput.parse(d))
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
+    const db = supabaseAdmin as any;
+
+    const { data: ligne, error: upErr } = await db
+      .from("psp_lignes")
+      .update({ etat_pilotage: data.etatPilotage })
+      .eq("id", data.id)
+      .select("id, etat_pilotage")
+      .single();
+    if (upErr) {
+      if (String(upErr.message).toLowerCase().includes("does not exist")) {
+        throw new Error(
+          "Colonne etat_pilotage absente — exécuter la migration V8.8 (SQL fourni) avant d'utiliser le statut de pilotage.",
+        );
+      }
+      throw new Error(`Mise à jour du statut de pilotage : ${upErr.message}`);
+    }
+
+    // Historisation dans psp_ligne_historique (table EXISTANTE, opération
+    // 'modification' autorisée par le CHECK — même pattern delta que les autres).
+    await db.from("psp_ligne_historique").insert({
+      ligne_id: data.id,
+      operation: "modification",
+      motif: data.etatPilotage
+        ? `Changement de l'état de pilotage → ${data.etatPilotage}`
+        : "Retrait de l'état de pilotage",
+      avant: { etat_pilotage: null },
+      apres: { etat_pilotage: data.etatPilotage },
+    });
+
+    return ligne;
+  });
+
 /** Recherche progressive de tranches (code/libellé/localité) — réutilisée par l'UI. */
 export const rechercherTranches = createServerFn({ method: "POST" })
   .validator((d: unknown) => rechercheTranchesInput.parse(d))
@@ -1884,7 +1959,7 @@ export const getPspSuiviAnnuel = createServerFn({ method: "POST" })
     const annee = data.annee;
 
     // Années disponibles : exercices réels des commandes + années de préparation.
-    const [anneesCmdR, commandesR, progR, lignesR, perimR, devisR, liensR, sansCmdImportR] =
+    const [anneesCmdR, commandesR, progR, lignesR, perimR, devisR, liensR, importsExerciceR] =
       await Promise.all([
         db.from("travaux_commandes").select("annee_exercice"),
         db
@@ -1904,17 +1979,25 @@ export const getPspSuiviAnnuel = createServerFn({ method: "POST" })
         db.from("psp_ligne_patrimoine").select("*"),
         db.from("psp_devis").select("*"),
         db.from("psp_command_links").select("*"),
-        // V8.6.1.1 — les lignes annuelles SANS commande du fichier sont rejetées à
-        // l'import (marqueurs « Numéro de commande manquant », données non
-        // persistées). On expose LEUR NOMBRE en lecture seule (travaux_import_details
-        // reste INTANGIBLE) pour un bandeau informatif dans /suivi.
-        db
-          .from("travaux_import_details")
-          .select("id", { count: "exact", head: true })
-          .eq("type", "erreur")
-          .eq("message", "Numéro de commande manquant"),
+        // V8.8 §4 — imports de l'exercice demandé (pour compter les lignes annuelles
+        // sans commande de CET exercice, pas le cumul tous exercices).
+        db.from("import_travaux").select("id").eq("annee_exercice", annee),
       ]);
     if (commandesR.error) throw new Error(`Lecture du registre : ${commandesR.error.message}`);
+
+    // V8.8 §4 — nombre de lignes annuelles SANS commande détectées dans les imports
+    // de l'exercice demandé (travaux_import_details, lecture seule — INTANGIBLE).
+    const importIdsExercice = (importsExerciceR.data ?? []).map((i: any) => i.id);
+    let sansCmdImportR: { count: number | null } = { count: null };
+    if (importIdsExercice.length > 0) {
+      const r = await db
+        .from("travaux_import_details")
+        .select("id", { count: "exact", head: true })
+        .eq("type", "erreur")
+        .eq("message", "Numéro de commande manquant")
+        .in("import_id", importIdsExercice);
+      sansCmdImportR = { count: r.count ?? 0 };
+    }
 
     const anneesDisponibles = [
       ...new Set([

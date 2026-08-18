@@ -40,13 +40,22 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { money0 } from "@/lib/formats";
 import {
   enregistrerRelanceDevis,
+  ETAT_PILOTAGE_LABELS,
   getPspEntreprisesSuggestions,
   getPspLignesHistorique,
+  updatePspLigneEtatPilotage,
 } from "@/lib/psp.prep.supabase.functions";
 import {
   MAIL_MODELES,
@@ -102,6 +111,24 @@ export default function SuiviOperationFiche({
           ? "en_cours"
           : "terminee";
   const refresh = onRefresh ?? (async () => undefined);
+
+  // V8.8 §9 — statut de pilotage manuel (distinct de l'état réel dérivé).
+  const setPilotageFn = useServerFn(updatePspLigneEtatPilotage);
+  const [pilotage, setPilotage] = useState<string | null>(operation.identite.etat_pilotage ?? null);
+  const [pilotageBusy, setPilotageBusy] = useState(false);
+  const changerPilotage = async (v: string | null) => {
+    if (pilotageBusy) return;
+    setPilotageBusy(true);
+    try {
+      await setPilotageFn({ data: { id: operation.identite.id, etatPilotage: v } });
+      setPilotage(v);
+      await refresh();
+    } catch {
+      // Migration non appliquée ou erreur : on laisse la valeur précédente.
+    } finally {
+      setPilotageBusy(false);
+    }
+  };
 
   // Entreprises suggérées (données réelles — socle V8.1). Réutilisées pour
   // retrouver l'email d'un fournisseur déjà consulté (relance).
@@ -451,11 +478,37 @@ export default function SuiviOperationFiche({
                   </span>
                   <span className="text-[10px]">{c.statut_label}</span>
                 </div>
-                <p className="border-t border-dashed pt-1 text-[10px] text-muted-foreground">
-                  État de pilotage (manuel, ex. « Devis demandé », « Bloquée ») : proposé — une
-                  colonne dédiée sera ajoutée après validation de la migration (aucune modification
-                  de schéma appliquée ici).
-                </p>
+                {/* V8.8 §9 — ÉTAT DE PILOTAGE MANUEL (distinct de l'état réel dérivé
+                    et de l'état importé ; historisé dans psp_ligne_historique). */}
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-dashed pt-1">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+                    Statut de pilotage (manuel)
+                  </span>
+                  <Select
+                    value={pilotage ?? "aucun"}
+                    onValueChange={(v) => void changerPilotage(v === "aucun" ? null : v)}
+                  >
+                    <SelectTrigger className="h-7 w-[180px] text-[10px]">
+                      <SelectValue placeholder="—" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="aucun">—</SelectItem>
+                      {Object.entries(ETAT_PILOTAGE_LABELS).map(([v, l]) => (
+                        <SelectItem key={v} value={v}>
+                          {l}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {pilotage && (
+                    <span className="text-[10px] text-muted-foreground">
+                      {ETAT_PILOTAGE_LABELS[pilotage] ?? pilotage}
+                    </span>
+                  )}
+                  <span className="text-[10px] text-muted-foreground">
+                    (ne remplace pas l'état réel dérivé ni l'état importé)
+                  </span>
+                </div>
               </div>
             </Section>
             {/* V8.5.2 — REVUE DES CORRESPONDANCES COMMANDES (lecture seule) */}

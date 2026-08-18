@@ -29,25 +29,31 @@ export default function PspFournisseurSearch({
   const [sug, setSug] = useState<
     Array<{ id: string; nom: string; ville: string | null; codes: string[] }>
   >([]);
+  // V8.8 §1 — la recherche ne se déclenche QUE sur frappe utilisateur (onChange),
+  // jamais à l'initialisation : à l'ouverture/modification d'une demande existante,
+  // aucun dropdown ne doit s'ouvrir automatiquement. La valeur enregistrée reste
+  // affichée ; le combobox ne s'ouvre qu'au clic volontaire dans le champ.
+  const [rechercheActive, setRechercheActive] = useState("");
 
   // Synchronise le texte si le parent change la sélection.
   useEffect(() => setQ(value), [value]);
 
   useEffect(() => {
-    if (q.trim().length < 2) {
+    const r = rechercheActive.trim();
+    if (r.length < 2) {
       setSug([]);
       return;
     }
     const t = setTimeout(() => {
-      void fournisseursFn({ data: { q: q.trim() } }).then((r) => {
+      void fournisseursFn({ data: { q: r } }).then((res) => {
         setSug(
-          (r ?? []) as Array<{ id: string; nom: string; ville: string | null; codes: string[] }>,
+          (res ?? []) as Array<{ id: string; nom: string; ville: string | null; codes: string[] }>,
         );
       });
     }, 250);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q]);
+  }, [rechercheActive]);
 
   return (
     <div className="relative">
@@ -55,6 +61,7 @@ export default function PspFournisseurSearch({
         value={q}
         onChange={(e) => {
           setQ(e.target.value);
+          setRechercheActive(e.target.value);
           // Toute modification invalide la sélection précédente.
           onSelect(null);
         }}
@@ -72,6 +79,7 @@ export default function PspFournisseurSearch({
               onClick={() => {
                 onSelect({ id: f.id, nom: f.nom });
                 setQ(f.nom);
+                setRechercheActive("");
                 setSug([]);
               }}
             >
@@ -91,6 +99,8 @@ export default function PspFournisseurSearch({
           title="Effacer la recherche"
           onClick={() => {
             setQ("");
+            setRechercheActive("");
+            setSug([]);
             onSelect(null);
           }}
         >
