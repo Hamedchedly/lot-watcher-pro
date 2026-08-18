@@ -34,6 +34,7 @@ import {
   createPspCommandLink,
   rechercherOperationsPourCommande,
 } from "@/lib/psp.prep.supabase.functions";
+import { libelleEntreprise } from "@/lib/psp.prep.v7";
 import { determinerRelationPeriode } from "@/lib/psp.suivi.rapprochement";
 
 const fmtMontant = (v: number | null | undefined): string => {
@@ -170,7 +171,7 @@ export default function PspCorrespondanceCommandeDialog({
               <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
                 <Badge variant="outline">{commande.tranche_code ?? "TR —"}</Badge>
                 <span className="font-semibold">
-                  {commande.fournisseur ?? commande.numero_fournisseur ?? "Entreprise —"}
+                  {libelleEntreprise(commande.fournisseur, commande.numero_fournisseur)}
                 </span>
                 <span>Commandé : {fmtMontant(commande.budget)}</span>
                 <span>Exercice : {commande.annee_exercice ?? "—"}</span>
@@ -262,7 +263,10 @@ export default function PspCorrespondanceCommandeDialog({
                         <span>Corps d'état : {operation?.corps_etat ?? "—"}</span>
                         <span>Nature : {operation?.nature_travaux ?? "—"}</span>
                         <span>Programmé : {fmtMontant(operation?.montant_total)}</span>
-                        <span>Entreprise : {commande?.fournisseur ?? "—"}</span>
+                        <span>
+                          Entreprise :{" "}
+                          {libelleEntreprise(commande?.fournisseur, commande?.numero_fournisseur)}
+                        </span>
                         <span>
                           Année commande : {commande?.annee_exercice ?? "—"}
                           {p.annees_programmation?.length
@@ -325,8 +329,10 @@ export default function PspCorrespondanceCommandeDialog({
               {aRattacher && (
                 <div className="space-y-1 text-[11px]">
                   <p>
-                    Commande : {commande?.fournisseur ?? "—"} · Commandé :{" "}
-                    {fmtMontant(commande?.budget)} · Exercice : {commande?.annee_exercice ?? "—"}
+                    Commande :{" "}
+                    {libelleEntreprise(commande?.fournisseur, commande?.numero_fournisseur)} ·
+                    Commandé : {fmtMontant(commande?.budget)} · Exercice :{" "}
+                    {commande?.annee_exercice ?? "—"}
                   </p>
                   <p>
                     Opération existante : TR {aRattacher.operation?.tranche_code ?? "—"} · Score :{" "}

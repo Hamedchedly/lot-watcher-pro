@@ -104,6 +104,8 @@ export interface CommandeTravauxSuivi {
   numero_commande: string | null;
   tranche_code: string | null;
   fournisseur: string | null;
+  /** V8.8.2 §1 — numéro fournisseur (affiché si le nom manque). */
+  numero_fournisseur: string | null;
   descriptif: string | null;
   corps_etat: string | null;
   etat_commande: string | null;
@@ -418,6 +420,8 @@ export interface CommandeLieeSuivi {
   commande_id: string;
   numero_commande: string | null;
   entreprise: string | null;
+  /** V8.8.2 §1 — numéro fournisseur (affiché si le nom manque). */
+  numero_fournisseur: string | null;
   date_import: string | null;
   descriptif: string | null;
   budget: number | null;
@@ -466,6 +470,7 @@ export const rattacherCommandes = (
       commande_id: cmd.id,
       numero_commande: cmd.numero_commande,
       entreprise: cmd.fournisseur,
+      numero_fournisseur: cmd.numero_fournisseur,
       date_import: cmd.date_import,
       descriptif: cmd.descriptif,
       budget: cmd.budget,

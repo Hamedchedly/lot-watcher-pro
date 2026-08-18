@@ -1586,7 +1586,7 @@ export const getPspSuiviOperation = createServerFn({ method: "POST" })
       const { data: cmd, error: eC } = await db
         .from("travaux_commandes")
         .select(
-          "id, numero_commande, tranche_code, fournisseur, descriptif, corps_etat, etat_commande, etat_travaux, budget, engage, paye, solde, created_at, date_demarrage, date_fin_travaux, annee_exercice",
+          "id, numero_commande, tranche_code, fournisseur, numero_fournisseur, descriptif, corps_etat, etat_commande, etat_travaux, budget, engage, paye, solde, created_at, date_demarrage, date_fin_travaux, annee_exercice",
         )
         .in("id", commandeIds);
       if (eC) throw new Error(`Lecture des commandes liées : ${eC.message}`);
@@ -1835,7 +1835,7 @@ export const getPspSuiviOperations = createServerFn({ method: "POST" })
       const { data: cmd } = await db
         .from("travaux_commandes")
         .select(
-          "id, numero_commande, tranche_code, fournisseur, descriptif, corps_etat, etat_commande, etat_travaux, budget, engage, paye, solde, created_at, date_demarrage, date_fin_travaux, annee_exercice",
+          "id, numero_commande, tranche_code, fournisseur, numero_fournisseur, descriptif, corps_etat, etat_commande, etat_travaux, budget, engage, paye, solde, created_at, date_demarrage, date_fin_travaux, annee_exercice",
         )
         .in("id", commandeIds);
       commandes = (cmd ?? []).map((c: any) => ({
@@ -1843,6 +1843,7 @@ export const getPspSuiviOperations = createServerFn({ method: "POST" })
         numero_commande: c.numero_commande,
         tranche_code: c.tranche_code,
         fournisseur: c.fournisseur,
+        numero_fournisseur: c.numero_fournisseur,
         descriptif: c.descriptif,
         corps_etat: c.corps_etat,
         etat_commande: c.etat_commande,

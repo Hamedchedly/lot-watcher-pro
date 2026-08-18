@@ -72,6 +72,7 @@ import {
   etapesAvancement,
   ETAT_SUIVI_LABEL,
 } from "@/lib/psp.suivi.view";
+import { libelleEntreprise } from "@/lib/psp.prep.v7";
 import type { SuiviOperationVue } from "@/lib/psp.suivi.foundation";
 
 const fmtDate = (v: string | null | undefined): string =>
@@ -287,7 +288,11 @@ export default function SuiviOperationFiche({
                         className="rounded border border-dashed px-2 py-1 text-[11px]"
                       >
                         <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
-                          <span className="font-semibold">{e.entreprise}</span>
+                          <span className="font-semibold">
+                            {/* V8.8.2 §1 — entreprise sans nom → « Fournisseur n°… »
+                                ou « Entreprise non renseignée » (aucune valeur vide). */}
+                            {libelleEntreprise(e.entreprise)}
+                          </span>
                           <span className="text-muted-foreground">
                             Demande le {fmtDate(e.date_demande)}
                           </span>
@@ -406,7 +411,10 @@ export default function SuiviOperationFiche({
                       className="grid grid-cols-2 gap-x-3 gap-y-0.5 rounded border border-dashed px-2 py-1 text-[11px] sm:grid-cols-4"
                     >
                       <span className="font-semibold">{l.numero_commande ?? "—"}</span>
-                      <span>{l.entreprise ?? "—"}</span>
+                      <span>
+                        {/* V8.8.2 §1 — entreprise sans nom → « Fournisseur n°… ». */}
+                        {libelleEntreprise(l.entreprise, l.numero_fournisseur)}
+                      </span>
                       <span>{l.budget == null ? "—" : money0(l.budget)}</span>
                       <span>
                         Engagé {l.engage == null ? "—" : money0(l.engage)} · Payé{" "}

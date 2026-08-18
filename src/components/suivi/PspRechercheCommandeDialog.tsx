@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { createPspCommandLink, rechercherCommandes } from "@/lib/psp.prep.supabase.functions";
+import { libelleEntreprise } from "@/lib/psp.prep.v7";
 
 const fmtMontant = (v: number | null | undefined): string => {
   if (v == null) return "—";
@@ -149,7 +150,7 @@ export default function PspRechercheCommandeDialog({
                   </span>
                 </div>
                 <div className="mt-0.5 grid grid-cols-2 gap-x-3 gap-y-0.5 text-[10px] text-muted-foreground sm:grid-cols-3">
-                  <span>{c.fournisseur ?? c.numero_fournisseur ?? "Entreprise —"}</span>
+                  <span>{libelleEntreprise(c.fournisseur, c.numero_fournisseur)}</span>
                   <span>{c.adresse ?? "Adresse —"}</span>
                   <span>Commandé : {fmtMontant(c.budget)}</span>
                   <span>{c.corps_etat ?? "Corps d'état —"}</span>
