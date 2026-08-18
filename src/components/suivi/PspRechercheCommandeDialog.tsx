@@ -10,6 +10,7 @@ import { useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { Search } from "lucide-react";
 
+import PspCorrespondanceCommandeDialog from "@/components/suivi/PspCorrespondanceCommandeDialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -59,6 +60,8 @@ export default function PspRechercheCommandeDialog({
   const [chargement, setChargement] = useState(false);
   const [erreur, setErreur] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  // V8.6 §4 — correspondances d'une commande avec les opérations existantes.
+  const [commandeCorrespondance, setCommandeCorrespondance] = useState<string | null>(null);
 
   const lancerRecherche = async () => {
     if (!q.trim()) return;
@@ -154,14 +157,25 @@ export default function PspRechercheCommandeDialog({
                 </div>
                 <div className="mt-1 flex items-center gap-2">
                   {!c.rapprochement.dejaLie ? (
-                    <Button
-                      size="sm"
-                      className="h-6 text-[10px]"
-                      disabled={busyId === c.id}
-                      onClick={() => rattacher(c.id)}
-                    >
-                      {busyId === c.id ? "Rattachement…" : "Rattacher"}
-                    </Button>
+                    <>
+                      <Button
+                        size="sm"
+                        className="h-6 text-[10px]"
+                        disabled={busyId === c.id}
+                        onClick={() => rattacher(c.id)}
+                      >
+                        {busyId === c.id ? "Rattachement…" : "Rattacher"}
+                      </Button>
+                      {/* V8.6 §4 — correspondances de la commande avec les opérations existantes. */}
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-6 text-[10px]"
+                        onClick={() => setCommandeCorrespondance(c.id)}
+                      >
+                        Opérations correspondantes
+                      </Button>
+                    </>
                   ) : (
                     <span className="text-[10px] text-muted-foreground">
                       {c.rapprochement.pspLigneId
@@ -180,6 +194,14 @@ export default function PspRechercheCommandeDialog({
           </ul>
         )}
       </DialogContent>
+      {commandeCorrespondance && (
+        <PspCorrespondanceCommandeDialog
+          commandeId={commandeCorrespondance}
+          open={!!commandeCorrespondance}
+          onClose={() => setCommandeCorrespondance(null)}
+          onRattache={onRattache ?? (async () => undefined)}
+        />
+      )}
     </Dialog>
   );
 }

@@ -20,6 +20,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { getPspCommandesARapprocher } from "@/lib/psp.prep.supabase.functions";
+import PspCorrespondanceCommandeDialog from "@/components/suivi/PspCorrespondanceCommandeDialog";
 
 type LigneCompacte = {
   commande: {
@@ -86,6 +87,8 @@ export default function PspCommandesARapprocherPanel({
   } | null>(null);
   const [chargement, setChargement] = useState(false);
   const [erreur, setErreur] = useState<string | null>(null);
+  // V8.6 §4 — correspondance détaillée d'une commande avec les opérations existantes.
+  const [commandeCorrespondance, setCommandeCorrespondance] = useState<string | null>(null);
 
   const ouvrir = async () => {
     if (data) return;
@@ -189,6 +192,16 @@ export default function PspCommandesARapprocherPanel({
                         </span>
                       )}
                       <span className="ml-auto flex items-center gap-2">
+                        {c.etat !== "deja_rattachee" && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-6 text-[10px]"
+                            onClick={() => setCommandeCorrespondance(c.commande.id)}
+                          >
+                            Correspondance
+                          </Button>
+                        )}
                         {cible && (
                           <Button
                             size="sm"
@@ -210,6 +223,17 @@ export default function PspCommandesARapprocherPanel({
               })}
             </ul>
           </>
+        )}
+        {commandeCorrespondance && (
+          <PspCorrespondanceCommandeDialog
+            commandeId={commandeCorrespondance}
+            open={!!commandeCorrespondance}
+            onClose={() => setCommandeCorrespondance(null)}
+            onRattache={async () => {
+              // V8.6 — après rattachement, le panneau se referme ; le registre sera
+              // rafraîchi au prochain chargement (aucune écriture ici).
+            }}
+          />
         )}
       </DialogContent>
     </Dialog>

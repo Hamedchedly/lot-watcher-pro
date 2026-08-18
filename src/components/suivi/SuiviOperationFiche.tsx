@@ -16,6 +16,8 @@ import {
   FileSearch,
   FileText,
   GitBranch,
+  History,
+  Loader2,
   Mail,
   MapPin,
   RefreshCcw,
@@ -44,6 +46,7 @@ import { money0 } from "@/lib/formats";
 import {
   enregistrerRelanceDevis,
   getPspEntreprisesSuggestions,
+  getPspLignesHistorique,
 } from "@/lib/psp.prep.supabase.functions";
 import {
   MAIL_MODELES,
@@ -395,6 +398,10 @@ export default function SuiviOperationFiche({
               onClose={() => setRechercheCommandeOuverte(false)}
               onRattache={refresh}
             />
+            {/* V8.6 §12 — HISTORIQUE de l'opération (psp_ligne_historique, table EXISTANTE). */}
+            <Section title="Historique" icon={History}>
+              <HistoriqueSection pspLigneId={operation.identite.id} />
+            </Section>
             <Separator className="my-4" />
             <div className="flex justify-end">
               <Button variant="outline" size="sm" onClick={onClose}>
@@ -451,6 +458,78 @@ function Cell({
       <p className="text-[9px] text-muted-foreground">{label}</p>
       <p className={`font-semibold ${strong ? "text-primary" : ""}`}>{value}</p>
     </div>
+  );
+}
+
+/**
+ * V8.6 §12 — HISTORIQUE de l'opération (psp_ligne_historique, table EXISTANTE).
+ *
+ * Affiche les événements réels : création, modifications (dont rattachement et
+ * retrait de commande), relances, reports, annulations. Aucune écriture —
+ * lecture seule via `getPspLignesHistorique` (batch).
+ */
+const LIBELLES_HISTORIQUE: Record<string, string> = {
+  creation: "Opération créée",
+  modification: "Opération modifiée",
+  report: "Report d'exercice",
+  annulation: "Annulation",
+  conflit_categorie: "Conflit de catégorie",
+  relance: "Relance envoyée",
+};
+
+const libelleHistorique = (operation: string, motif: string | null): string => {
+  const m = (motif ?? "").toLowerCase();
+  if (operation === "modification") {
+    if (m.includes("rattachement") && m.includes("retrait")) return "Rattachement retiré";
+    if (m.includes("rattachement")) return "Commande rattachée";
+  }
+  return LIBELLES_HISTORIQUE[operation] ?? "Événement";
+};
+
+function HistoriqueSection({ pspLigneId }: { pspLigneId: string }) {
+  const fetchHist = useServerFn(getPspLignesHistorique);
+  const { data, isLoading } = useQuery({
+    queryKey: ["psp-ligne-historique", pspLigneId],
+    queryFn: () => fetchHist({ data: { ids: [pspLigneId] } }),
+    staleTime: 1000 * 30,
+    retry: 1,
+  });
+  const entrees = (data ?? []) as Array<{
+    id: string;
+    operation: string;
+    motif: string | null;
+    created_at: string | null;
+  }>;
+
+  if (isLoading) {
+    return (
+      <p className="flex items-center gap-2 text-[11px] text-muted-foreground">
+        <Loader2 className="size-3 animate-spin" /> Chargement de l'historique…
+      </p>
+    );
+  }
+  if (entrees.length === 0) {
+    return (
+      <p className="text-[11px] text-muted-foreground">
+        Aucune donnée disponible — pas encore d'événement historisé pour cette opération.
+      </p>
+    );
+  }
+  return (
+    <ul className="space-y-1">
+      {entrees.map((e) => (
+        <li
+          key={e.id}
+          className="flex flex-wrap items-center gap-x-3 gap-y-0.5 rounded border border-dashed px-2 py-1 text-[11px]"
+        >
+          <span className="text-[10px] text-muted-foreground">{fmtDate(e.created_at)}</span>
+          <span className="font-semibold">{libelleHistorique(e.operation, e.motif)}</span>
+          {e.motif && e.motif !== libelleHistorique(e.operation, e.motif) && (
+            <span className="text-[10px] text-muted-foreground">— {e.motif}</span>
+          )}
+        </li>
+      ))}
+    </ul>
   );
 }
 

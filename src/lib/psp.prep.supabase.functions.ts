@@ -1178,12 +1178,38 @@ export const deletePspCommandLink = createServerFn({ method: "POST" })
     const db = supabaseAdmin as any;
     const { data: lien } = await db
       .from("psp_command_links")
-      .select("*")
+      .select("id, commande_id, psp_ligne_id, methode, statut")
       .eq("id", data.id)
       .single();
     if (!lien) throw new Error("Rattachement introuvable.");
+
+    // V8.6 — le numéro de commande est lu en LECTURE SEULE (travaux_commandes intact).
+    let numeroCommande: string | null = null;
+    if (lien.commande_id) {
+      const { data: cmd } = await db
+        .from("travaux_commandes")
+        .select("numero_commande")
+        .eq("id", lien.commande_id)
+        .single();
+      numeroCommande = cmd?.numero_commande ?? null;
+    }
+
     const { error } = await db.from("psp_command_links").delete().eq("id", data.id);
     if (error) throw new Error(`Retrait du rattachement : ${error.message}`);
+
+    // V8.6 §12 — historisation du retrait dans psp_ligne_historique (table EXISTANTE,
+    // operation 'modification' — même pattern delta JSONB que createPspCommandLink).
+    if (lien.psp_ligne_id) {
+      await db.from("psp_ligne_historique").insert({
+        ligne_id: lien.psp_ligne_id,
+        operation: "modification",
+        avant: { type: "rattachement", commande_id: lien.commande_id, lien_id: data.id },
+        apres: { type: "rattachement", commande_id: lien.commande_id, retrait: true },
+        resolu: false,
+        motif: `Retrait du rattachement commande ${numeroCommande ?? lien.commande_id}`,
+      });
+    }
+
     return { ok: true as const, pspLigneId: lien.psp_ligne_id };
   });
 // ── V7.3 — fournisseurs, opérations ATOMIQUES, historique ──────────────────────
@@ -2106,6 +2132,15 @@ export const rechercherOperationsPourCommande = createServerFn({ method: "POST" 
     }));
     const perimPar: Record<string, unknown[]> = {};
     for (const p of perim) (perimPar[p.psp_ligne_id] ??= []).push(p);
+    // V8.6 — premier périmètre (adresse) pour l'affichage « Cette commande semble
+    // correspondre à une opération existante » (jamais une écriture).
+    const adressePar: Record<string, string | null> = {};
+    for (const p of perim) {
+      if (adressePar[p.psp_ligne_id] === undefined && (p as any).rue) {
+        adressePar[p.psp_ligne_id] =
+          `${(p as any).numero ? `${(p as any).numero} ` : ""}${(p as any).rue}`;
+      }
+    }
     const entrPar: Record<string, unknown[]> = {};
     for (const d of devis) {
       (entrPar[d.psp_ligne_id] ??= []).push({
@@ -2173,6 +2208,14 @@ export const rechercherOperationsPourCommande = createServerFn({ method: "POST" 
                 corps_etat: ligne.corps_etat,
                 nature_travaux: ligne.nature_travaux,
                 origine: ligne.origine,
+                // V8.6 — détails demandés par le §4 (montant programmé + adresse
+                // du premier périmètre). Jamais une copie de commande.
+                montant_total:
+                  Object.values(ligne.programme ?? {}).reduce(
+                    (s: number, v: unknown) => s + (Number(v) || 0),
+                    0,
+                  ) || null,
+                adresse: adressePar[ligne.id] ?? null,
               }
             : null,
         };
