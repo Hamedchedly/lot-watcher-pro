@@ -218,6 +218,40 @@ export const DEVIS_STATUT_LABELS: Record<string, string> = {
   annule: "Annulé",
 };
 
+/**
+ * V8.7 §3.2 — STATUT DE CONSULTATION affiché dans la préparation (colonne
+ * « Devis »). DÉRIVÉ exclusivement des `psp_devis.statut` existants — aucun
+ * état stocké, aucun moteur parallèle (même ordre de priorité que le suivi
+ * V8.1 : retenu > reçu > demande envoyée > à demander > aucune). Le montant du
+ * devis reste DISTINCT du budget estimatif et des montants de commande.
+ */
+export type ConsultationPrepCode =
+  "aucune" | "a_demander" | "demande_envoyee" | "devis_recu" | "devis_retenu";
+
+/** Libellés du statut consultation (clé = ConsultationPrepCode — accès typé). */
+export const STATUT_CONSULTATION_PREP_LABELS: Record<ConsultationPrepCode, string> = {
+  aucune: "Aucune demande",
+  a_demander: "Demande à envoyer",
+  demande_envoyee: "Demande envoyée",
+  devis_recu: "Devis reçu",
+  devis_retenu: "Devis retenu",
+};
+
+export const statutConsultationDepuisDevis = (
+  devis: Array<{ statut?: string }>,
+): { code: ConsultationPrepCode; label: string } => {
+  const s = devis.map((d) => d.statut ?? "");
+  if (s.includes("retenu"))
+    return { code: "devis_retenu", label: STATUT_CONSULTATION_PREP_LABELS.devis_retenu };
+  if (s.some((x) => x === "recu" || x === "a_analyser"))
+    return { code: "devis_recu", label: STATUT_CONSULTATION_PREP_LABELS.devis_recu };
+  if (s.includes("demande_envoyee"))
+    return { code: "demande_envoyee", label: STATUT_CONSULTATION_PREP_LABELS.demande_envoyee };
+  if (s.includes("a_demander"))
+    return { code: "a_demander", label: STATUT_CONSULTATION_PREP_LABELS.a_demander };
+  return { code: "aucune", label: STATUT_CONSULTATION_PREP_LABELS.aucune };
+};
+
 // ── 6. Enveloppes — type de la carte clé `${annee}|${categorie}` (jamais stocké) ──
 export type EnveloppeMap = Record<string, number>;
 

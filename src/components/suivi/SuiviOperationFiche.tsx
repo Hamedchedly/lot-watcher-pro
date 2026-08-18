@@ -203,9 +203,19 @@ export default function SuiviOperationFiche({
                     </ul>
                   </div>
                   <div className="grid grid-cols-2 gap-1.5 text-[11px]">
-                    <Cell label="Programmé" value={money0(p.montant_total)} />
-                    <Cell label="Reste" value={money0(p.montant_total - cmd.engage)} strong />
+                    <Cell
+                      label="Budget estimatif"
+                      value={p.montant_total > 0 ? money0(p.montant_total) : "—"}
+                    />
+                    <Cell
+                      label="Reste estimatif"
+                      value={p.montant_total > 0 ? money0(p.montant_total - cmd.engage) : "—"}
+                      strong
+                    />
                   </div>
+                  <p className="text-[9px] text-muted-foreground">
+                    Source : programmation (estimation) — jamais un montant de commande.
+                  </p>
                 </div>
               )}
               {/* Commandes / engagement — données RÉELLES (travaux_commandes liées). */}
@@ -222,6 +232,9 @@ export default function SuiviOperationFiche({
                   strong
                 />
               </div>
+              <p className="mt-1 text-[9px] text-muted-foreground">
+                Source : commandes importées liées (travaux_commandes) — lecture seule.
+              </p>
             </Section>
             {/* ── CONSULTATION ── */}
             <Section title="Consultation" icon={Building2}>

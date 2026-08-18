@@ -199,7 +199,9 @@ check(
 check(
   "BONUS. bandeau « lignes annuelles sans commande » dans /suivi (lecture seule)",
   routeSuivi.includes("lignesSansCommandeImport") &&
-    routeSuivi.includes("Numéro de commande manquant"),
+    routeSuivi.includes("lignesSuiviMaterialisees") &&
+    routeSuivi.includes("détectées dans les imports") &&
+    routeSuivi.includes("matérialisée(s) en opérations"),
 );
 check(
   "BONUS. fiche : distinction État réel / système vs État de pilotage (aucune écriture)",

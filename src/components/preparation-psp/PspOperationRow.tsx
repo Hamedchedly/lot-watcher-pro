@@ -19,6 +19,7 @@ import {
   PRIORITE_LABELS,
   STATUT_LABELS,
   libelleAdressePerimetre,
+  statutConsultationDepuisDevis,
   type LotInfo,
   type PerimetreLigne,
 } from "@/lib/psp.prep.v7";
@@ -71,6 +72,10 @@ export default function PspOperationRow({
   const statut = op.statut ?? "a_definir";
   const priorite = op.priorite ?? "normale";
   const nbDevis = op.devis.length;
+  // V8.7 §3.2 — statut consultation DÉRIVÉ des psp_devis.statut existants
+  // (Aucune demande / Demande à envoyer / Demande envoyée / Devis reçu /
+  // Devis retenu). Aucun état stocké, aucun moteur parallèle.
+  const consultation = statutConsultationDepuisDevis(op.devis);
 
   return (
     <TableRow
@@ -138,7 +143,7 @@ export default function PspOperationRow({
           )}
         >
           <Building2 className="size-3" />
-          {nbDevis > 0 ? `☑ Oui (${nbDevis})` : "☐ Non"}
+          {consultation.code === "aucune" ? "Aucune demande" : `${consultation.label} (${nbDevis})`}
         </button>
       </TableCell>
 
