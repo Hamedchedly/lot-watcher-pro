@@ -18,6 +18,7 @@ import PspSettingsDialog, {
 } from "@/components/preparation-psp/PspSettingsDialog";
 import PspSecteurBadge from "@/components/preparation-psp/PspSecteurBadge";
 import type { DevisEdit } from "@/components/preparation-psp/PspDevisPanel";
+import PspRevueAnciennes from "@/components/preparation-psp/PspRevueAnciennes";
 import PspRevueReports from "@/components/preparation-psp/PspRevueReports";
 import PspTable from "@/components/preparation-psp/PspTable";
 import { Button } from "@/components/ui/button";
@@ -85,6 +86,7 @@ import {
   deletePspDevis,
   deletePspLigne,
   getPspBrouillon,
+  getPspRevueAnciennes,
   savePspEnveloppes,
   updatePspDevis,
   updatePspLigne,
@@ -159,6 +161,7 @@ function PreparationPspPage() {
     id: string;
     statut: string;
     version: number;
+    annee_debut?: number;
   } | null>(null);
   const queryClient = useQueryClient();
   const fetchBrouillon = useServerFn(getPspBrouillon);
@@ -184,6 +187,7 @@ function PreparationPspPage() {
       id: brouillon.programmation.id,
       statut: brouillon.programmation.statut,
       version: brouillon.programmation.version,
+      annee_debut: brouillon.programmation.annee_debut,
     });
     const env: EnveloppeMap = {};
     for (const e of brouillon.enveloppes ?? []) {
@@ -338,6 +342,19 @@ function PreparationPspPage() {
   }, [fichiers2026]);
 
   const suivi2026Disponible = fichiers2026?.disponible === true;
+
+  /** V8.9.1 — Revue des ANCIENNES PROGRAMMATIONS (lecture seule) : source de
+   *  vérité = psp_lignes.programme multi-années. Référence = 2027 (début de la
+   *  programmation officielle). Aucune écriture. */
+  const fetchRevueAnciennes = useServerFn(getPspRevueAnciennes);
+  const { data: revueAnciennes } = useQuery({
+    queryKey: ["psp-revue-anciennes", programmation?.annee_debut ?? 2027],
+    queryFn: () =>
+      fetchRevueAnciennes({ data: { anneeReference: programmation?.annee_debut ?? 2027 } }),
+    staleTime: 1000 * 60 * 5,
+    retry: 1,
+    enabled: Boolean(programmation?.annee_debut),
+  });
 
   /** Historique des conflits/modifications produit par le moteur d'import
    *  (lecture réelle Supabase via getTravauxDashboard ; mock en repli). */
@@ -1109,10 +1126,15 @@ function PreparationPspPage() {
                 </div>
 
                 {mode === "reports" ? (
-                  <PspRevueReports
-                    programmees={programmees2026}
-                    suivi={suivi}
-                    exercice={2027}
+                  <>
+                    <PspRevueAnciennes
+                      entrees={revueAnciennes ?? []}
+                      anneeReference={programmation?.annee_debut ?? 2027}
+                    />
+                    <PspRevueReports
+                      programmees={programmees2026}
+                      suivi={suivi}
+                      exercice={2027}
                     sourceFichiers={suivi2026Disponible}
                     modifications={modifications}
                     confirmees={confirmees}
@@ -1123,6 +1145,7 @@ function PreparationPspPage() {
                     onReevaluer={handleReevaluer}
                     onConfirmerModification={handleConfirmerModification}
                   />
+                  </>
                 ) : (
                   <PspTable
                     mode={mode}

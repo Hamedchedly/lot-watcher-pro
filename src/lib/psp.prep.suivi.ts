@@ -14,6 +14,7 @@
  * Ce module est PUR (testable en Node). Aucune écriture Supabase.
  */
 import { champsDifferents, etatMetier, travauxComparable } from "./travaux.ts";
+import { extraireProgrammationsHistoriques } from "./psp.prep.ts";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -684,3 +685,114 @@ export const HISTORIQUE_MODIFICATIONS_MOCK: Array<{
     created_at: "2026-04-02T14:00:00Z",
   },
 ];
+
+// ── V8.9.1 — REVUE DES ANCIENNES PROGRAMMATIONS (lecture seule, pur) ────────
+
+/**
+ * Ligne brute de psp_lignes suffisante pour la revue des anciennes
+ * programmations. Aucune dépendance Supabase : la server function mappe les
+ * colonnes réelles vers ce type (lecture seule).
+ */
+export type LigneRevueBrute = {
+  id: string;
+  tranche: string;
+  categorie: string;
+  corps_etat: string | null;
+  nature_travaux: string | null;
+  programme: Record<string, number>;
+  origine: string;
+  remarques?: string | null;
+  ligne_budget?: string | null;
+  adresse?: string | null;
+  commande_liee?: {
+    numero_commande: string;
+    etat_commande: string | null;
+    etat_travaux: string | null;
+  } | null;
+  devis?: Array<{
+    statut: string;
+    montant: number | null;
+    entreprise: string | null;
+  }>;
+};
+
+/** État réel d'une ancienne programmation (dérivé — jamais inventé). */
+export type EtatRevueAncienne = "sans_commande" | "en_cours" | "terminee" | "a_verifier";
+
+export const ETAT_REVUE_ANCIENNE_LABEL: Record<EtatRevueAncienne, string> = {
+  sans_commande: "Sans commande",
+  en_cours: "En cours",
+  terminee: "Terminée",
+  a_verifier: "À vérifier",
+};
+
+/** Entrée de la revue : UN couple (opération, année programmée) historique réel. */
+export type RevueAncienneProgrammation = {
+  pspLigneId: string;
+  tranche: string;
+  categorie: string;
+  adresse: string | null;
+  nature: string | null;
+  corps_etat: string | null;
+  annee: number;
+  montant: number;
+  origine: string;
+  ligne_budget: string | null;
+  etat: EtatRevueAncienne;
+  commande: { numero_commande: string; etat_commande: string | null } | null;
+  devis: Array<{ statut: string; montant: number | null; entreprise: string | null }>;
+};
+
+/**
+ * V8.9.1 — CONSTRUIT LA REVUE DES ANCIENNES PROGRAMMATIONS depuis
+ * `psp_lignes.programme` (source de vérité réelle) :
+ *  · une entrée par couple (opération, année < référence, montant > 0) ;
+ *  · aucun doublon psp_lignes (une ligne → autant d'entrées que d'années
+ *    réellement programmées antérieures) ;
+ *  · aucun devis / aucune commande seule ne créent d'entrée ;
+ *  · l'état réel est DÉRIVÉ de la commande liée (ou « Sans commande ») ;
+ *  · aucune donnée historique absente n'est reconstituée.
+ */
+export const construireRevueAnciennesProgrammations = (
+  lignes: LigneRevueBrute[],
+  anneeReference: number,
+): RevueAncienneProgrammation[] => {
+  const sorties: RevueAncienneProgrammation[] = [];
+  for (const ligne of lignes) {
+    const historiques = extraireProgrammationsHistoriques(ligne.programme ?? {}, anneeReference);
+    for (const h of historiques) {
+      const commande = ligne.commande_liee ?? null;
+      let etat: EtatRevueAncienne = "sans_commande";
+      if (commande) {
+        const etatT = (commande.etat_travaux ?? "").trim().toLowerCase();
+        if (etatT.includes("termin") || etatT.includes("clos")) etat = "terminee";
+        else if (etatT.includes("verif") || etatT.includes("controle")) etat = "a_verifier";
+        else etat = "en_cours";
+      }
+      sorties.push({
+        pspLigneId: ligne.id,
+        tranche: ligne.tranche,
+        categorie: ligne.categorie,
+        adresse: ligne.adresse ?? null,
+        nature: ligne.nature_travaux ?? null,
+        corps_etat: ligne.corps_etat ?? null,
+        annee: h.annee,
+        montant: h.montant,
+        origine: ligne.origine,
+        ligne_budget: ligne.ligne_budget ?? null,
+        etat,
+        commande: commande
+          ? {
+              numero_commande: commande.numero_commande,
+              etat_commande: commande.etat_commande,
+            }
+          : null,
+        devis: ligne.devis ?? [],
+      });
+    }
+  }
+  return sorties.sort(
+    (a, b) => a.annee - b.annee || a.tranche.localeCompare(b.tranche, "fr"),
+  );
+};
+

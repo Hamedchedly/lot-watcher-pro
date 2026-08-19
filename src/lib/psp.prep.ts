@@ -1659,6 +1659,54 @@ export const comparerProgrammation = (
 // ── V8.9 — CONSERVATION DES ANNÉES DE PROGRAMMATION (cycle de vie) ───────────
 
 /**
+ * V8.9.1 — EXTRAIT LES PROGRAMMATIONS HISTORIQUES réellement conservées dans
+ * `psp_lignes.programme`.
+ *
+ * Une programmation est « ancienne » (par rapport à une année de référence)
+ * uniquement si :
+ *   · année programmée < année de référence ;
+ *   · programme[année] > 0.
+ *
+ * Chaque couple (année, montant) est retourné INDÉPENDAMMENT (une opération
+ * multi-années produit autant d'entrées que d'années anciennes réellement
+ * présentes). Aucune donnée n'est inventée : un devis, une commande ou la
+ * simple existence de la ligne ne créent PAS d'entrée.
+ *
+ * Exemples (référence 2027) :
+ *   { "2026": 40000, "2027": 50000 } → [{ annee: 2026, montant: 40000 }]
+ *   { "2027": 50000, "2028": 60000 } → []  (2027 = année courante, 2028 = future)
+ *   { "2025": 0, "2026": 3000 }       → [{ annee: 2026, montant: 3000 }]
+ */
+export type ProgrammationHistorique = {
+  annee: number;
+  montant: number;
+};
+
+export const extraireProgrammationsHistoriques = (
+  programme: Record<string, number>,
+  anneeReference: number,
+): ProgrammationHistorique[] => {
+  const out: ProgrammationHistorique[] = [];
+  for (const [anneeStr, montant] of Object.entries(programme ?? {})) {
+    const annee = Number(anneeStr);
+    const valeur = Number(montant) || 0;
+    if (!Number.isFinite(annee)) continue;
+    if (annee >= anneeReference) continue;
+    if (valeur <= 0) continue;
+    out.push({ annee, montant: valeur });
+  }
+  return out.sort((a, b) => a.annee - b.annee);
+};
+
+/** Années réellement programmées (montant > 0) dans un programme — indépendant de la référence. */
+export const anneesProgrammees = (programme: Record<string, number>): number[] =>
+  Object.entries(programme ?? {})
+    .map(([a, m]) => ({ annee: Number(a), montant: Number(m) || 0 }))
+    .filter((x) => Number.isFinite(x.annee) && x.montant > 0)
+    .map((x) => x.annee)
+    .sort((a, b) => a - b);
+
+/**
  * Fusionne un apport de programmation avec le programme existant SANS JAMAIS
  * détruire les anciennes années :
  *  · une clé présente dans `apport` écrase la valeur existante (mise à jour

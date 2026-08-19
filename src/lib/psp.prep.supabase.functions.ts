@@ -47,6 +47,7 @@ import {
 } from "./psp.prep.v7.ts";
 import type { ChargesClienteleReferentiel } from "./psp.prep.data.ts";
 import { fusionnerProgramme } from "./psp.prep.ts";
+import { construireRevueAnciennesProgrammations } from "./psp.prep.suivi.ts";
 
 export type PspLignePersist = {
   id: string;
@@ -2864,3 +2865,100 @@ export const getPspCommandesARapprocher = createServerFn({ method: "POST" })
       commandes: lignesCompacts,
     };
   });
+
+// ── V8.9.1 — REVUE DES ANCIENNES PROGRAMMATIONS (lecture seule) ──────────────
+
+/**
+ * V8.9.1 — CHARGE LA REVUE DES ANCIENNES PROGRAMMATIONS depuis la source de
+ * vérité réelle `psp_lignes.programme` (multi-années).
+ *
+ * Aucune écriture, aucun mock, aucune donnée inventée :
+ *  · toutes les lignes psp_lignes (preparation / report / suivi / hors_psp) ;
+ *  · périmètre patrimonial → adresse de référence (si disponible) ;
+ *  · devis réels (consultation) ;
+ *  · liens psp_command_links → commande liée (états réels travaux/commande).
+ *
+ * La construction des entrées (une par année < référence réellement
+ * programmée) est la fonction PURE `construireRevueAnciennesProgrammations`
+ * (psp.prep.suivi.ts) — aucun moteur parallèle.
+ */
+export const getPspRevueAnciennes = createServerFn({ method: "POST" })
+  .validator((d: unknown) =>
+    z
+      .object({ anneeReference: z.number().int().min(2000).max(2100) })
+      .parse(d ?? { anneeReference: new Date().getFullYear() }),
+  )
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
+    const db = supabaseAdmin as any;
+
+    const [lignesR, perimetresR, devisR, liensR] = await Promise.all([
+      db.from("psp_lignes").select("*"),
+      db.from("psp_ligne_patrimoine").select("psp_ligne_id, rue, numero, tranche_code"),
+      db.from("psp_devis").select("psp_ligne_id, statut, montant, entreprise"),
+      db.from("psp_command_links").select("id, psp_ligne_id, commande_id, statut"),
+    ]);
+    if (lignesR.error) throw new Error(`Lecture des lignes : ${lignesR.error.message}`);
+
+    const lignes = (lignesR.data ?? []) as any[];
+    const perimetres = (perimetresR.data ?? []) as any[];
+    const devis = (devisR.data ?? []) as any[];
+    const liens = (liensR.data ?? []) as any[];
+
+    // Adresse de référence : premier périmètre patrimonial (jamais recopiée en base).
+    const adressePar = new Map<string, string>();
+    for (const p of perimetres) {
+      if (!p.psp_ligne_id) continue;
+      const libelle = [p.rue, p.numero].filter(Boolean).join(" ");
+      if (libelle && !adressePar.has(p.psp_ligne_id)) adressePar.set(p.psp_ligne_id, libelle);
+    }
+
+    // Commandes liées (psp_command_links → travaux_commandes, READ-ONLY).
+    const commandeIds: string[] = [
+      ...new Set(liens.map((l: any) => l.commande_id).filter(Boolean)),
+    ] as string[];
+    let commandesParId = new Map<string, any>();
+    if (commandeIds.length > 0) {
+      const { data: cmd } = await db
+        .from("travaux_commandes")
+        .select("id, numero_commande, etat_commande, etat_travaux")
+        .in("id", commandeIds);
+      commandesParId = new Map((cmd ?? []).map((c: any) => [c.id, c]));
+    }
+    const commandeIdParLigne = new Map(
+      liens
+        .filter((l: any) => l.psp_ligne_id)
+        .map((l: any) => [l.psp_ligne_id, commandesParId.get(l.commande_id) ?? null]),
+    );
+
+    // Devis par ligne (consultation réelle).
+    const devisParLigne = new Map<string, Array<{ statut: string; montant: number | null; entreprise: string | null }>>();
+    for (const d of devis) {
+      if (!d.psp_ligne_id) continue;
+      const liste = devisParLigne.get(d.psp_ligne_id) ?? [];
+      liste.push({
+        statut: d.statut ?? "a_demander",
+        montant: d.montant != null ? Number(d.montant) : null,
+        entreprise: d.entreprise ?? null,
+      });
+      devisParLigne.set(d.psp_ligne_id, liste);
+    }
+
+    const brutes = (lignes ?? []).map((l: any) => ({
+      id: l.id,
+      tranche: l.tranche_code,
+      categorie: l.categorie ?? "GT",
+      corps_etat: l.corps_etat ?? null,
+      nature_travaux: l.nature_travaux ?? null,
+      programme: (l.programme ?? {}) as Record<string, number>,
+      origine: l.origine ?? "preparation",
+      remarques: l.remarques ?? null,
+      ligne_budget: l.ligne_budget ?? null,
+      adresse: adressePar.get(l.id) ?? null,
+      commande_liee: (commandeIdParLigne.get(l.id) as any) ?? null,
+      devis: devisParLigne.get(l.id) ?? [],
+    }));
+
+    return construireRevueAnciennesProgrammations(brutes, data.anneeReference);
+  });
+
