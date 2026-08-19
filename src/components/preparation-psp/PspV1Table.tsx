@@ -12,6 +12,7 @@ import { useMemo, useState } from "react";
 import { ArrowDown, ArrowUp, ChevronsUpDown, Layers } from "lucide-react";
 
 import PspSecteurBadge from "@/components/preparation-psp/PspSecteurBadge";
+import PspV1QuickAddRow from "@/components/preparation-psp/PspV1QuickAddRow";
 import { Badge } from "@/components/ui/badge";
 import {
   Table,
@@ -73,10 +74,21 @@ export default function PspV1Table({
   operations,
   totalParAnnee,
   onOpen,
+  ajoutOuvert,
+  reference,
+  programmationId,
+  onSaved,
+  onAnnuler,
 }: {
   operations: PspOperation[];
   totalParAnnee: Record<string, number>;
   onOpen: (id: string) => void;
+  /** V1 — ligne d'ajout direct (même workflow que /preparation-psp). */
+  ajoutOuvert?: boolean;
+  reference?: import("@/lib/psp.prep.data").ReferencePatrimoine | null;
+  programmationId?: string | null;
+  onSaved?: () => void;
+  onAnnuler?: () => void;
 }) {
   const [tri, setTri] = useState<{ cle: CleTriV1; asc: boolean }>({ cle: "tranche", asc: true });
 
@@ -132,6 +144,14 @@ export default function PspV1Table({
           </TableRow>
         </TableHeader>
         <TableBody>
+          {ajoutOuvert && programmationId ? (
+            <PspV1QuickAddRow
+              programmationId={programmationId}
+              reference={reference ?? null}
+              onSaved={onSaved ?? (() => undefined)}
+              onAnnuler={onAnnuler ?? (() => undefined)}
+            />
+          ) : null}
           {triees.map((op) => {
             const consultation = statutConsultationDepuisDevis(op.devis);
             const statut = op.statut ?? "a_definir";

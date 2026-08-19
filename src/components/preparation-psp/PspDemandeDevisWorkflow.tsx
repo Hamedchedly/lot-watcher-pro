@@ -47,6 +47,7 @@ import {
   construireMailto,
   dateRetourParDefaut,
 } from "@/lib/psp.suivi.foundation";
+import { libelleEntrepriseAvecId } from "@/lib/psp.prep.v7";
 import { createPspDevis, getPspEntreprisesSuggestions } from "@/lib/psp.prep.supabase.functions";
 
 /**
@@ -66,6 +67,8 @@ export interface OperationDemandeDevis {
 type SuggestionAvecEmail = {
   fournisseur_id: string;
   nom: string;
+  /** Numéro fournisseur réel (alias) — libellé robuste si nom absent. */
+  numero?: string | null;
   correspondance: "forte" | "compatible" | "aucune";
   etiquettes: string[];
   /** V8.3 §5 — historique réel des commandes (travaux_commandes). */
@@ -134,6 +137,7 @@ export default function PspDemandeDevisWorkflow({
         {
           fournisseur_id: entrepriseLibre.id ?? `libre:${entrepriseLibre.nom}`,
           nom: entrepriseLibre.nom,
+          numero: entrepriseLibre.numero ?? null,
           correspondance: "aucune",
           etiquettes: ["Hors suggestions"],
           commandes_corps_etat: 0,
@@ -196,7 +200,7 @@ export default function PspDemandeDevisWorkflow({
                   ) : (
                     <Square className="size-3.5 text-muted-foreground" />
                   )}
-                  {s.nom}
+                  {libelleEntrepriseAvecId(s.nom, s.numero ?? null, s.fournisseur_id)}
                 </button>
                 <Badge
                   variant={s.correspondance === "forte" ? "default" : "secondary"}
@@ -262,7 +266,16 @@ export default function PspDemandeDevisWorkflow({
       <Dialog open={editeur !== null} onOpenChange={(o) => !o && setEditeur(null)}>
         <DialogContent className="w-[min(94vw,640px)]">
           <DialogHeader>
-            <DialogTitle className="text-sm">Demande de devis — {editeur?.nom}</DialogTitle>
+            <DialogTitle className="text-sm">
+              Demande de devis —{" "}
+              {editeur
+                ? libelleEntrepriseAvecId(
+                    editeur.nom,
+                    editeur.numero ?? null,
+                    editeur.fournisseur_id,
+                  )
+                : ""}
+            </DialogTitle>
             <DialogDescription>
               Destinataire :{" "}
               {editeur?.email ? (

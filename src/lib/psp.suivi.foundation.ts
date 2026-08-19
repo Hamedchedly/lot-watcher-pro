@@ -857,6 +857,8 @@ export interface ActiviteEntreprise {
 export interface SuggestionEntreprise {
   fournisseur_id: string;
   nom: string;
+  /** Numéro fournisseur réel (alias travaux_commandes) — pour le libellé robuste. */
+  numero?: string | null;
   correspondance: "forte" | "compatible" | "aucune";
   etiquettes: string[];
   commandes_corps_etat: number;
@@ -882,7 +884,7 @@ export const normaliserTexte = (v: string | null | undefined): string =>
  * Aucune activité inventée : sans données, l'entreprise n'est pas suggérée.
  */
 export const recommanderEntreprises = (input: {
-  fournisseurs: Array<{ id: string; nom: string }>;
+  fournisseurs: Array<{ id: string; nom: string; numero?: string | null }>;
   historique: Array<{
     fournisseur_id: string;
     corps_etat: string | null;
@@ -978,6 +980,7 @@ export const recommanderEntreprises = (input: {
     suggestions.push({
       fournisseur_id: f.id,
       nom: f.nom,
+      numero: f.numero ?? null,
       correspondance,
       etiquettes,
       commandes_corps_etat: commandesCorps,

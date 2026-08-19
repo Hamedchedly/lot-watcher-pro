@@ -22,7 +22,6 @@ import { CalendarRange, Eye, FolderClock, Plus, Search } from "lucide-react";
 import { toast } from "sonner";
 
 import PspOperationDetail from "@/components/preparation-psp/PspOperationDetail";
-import PspOperationForm from "@/components/preparation-psp/PspOperationForm";
 import PspRevueAnciennes from "@/components/preparation-psp/PspRevueAnciennes";
 import PspV1Table from "@/components/preparation-psp/PspV1Table";
 import { Badge } from "@/components/ui/badge";
@@ -36,7 +35,6 @@ import {
 import { getPspReferencePatrimoine } from "@/lib/psp.prep.data.functions";
 import {
   PSP_ANNEES,
-  ajouterOperationListe,
   modifierOperationListe,
   supprimerOperationListe,
   type PspAnnee,
@@ -48,7 +46,6 @@ import type { DevisEdit } from "@/components/preparation-psp/PspDevisPanel";
 import type { PspLignePersist } from "@/lib/psp.prep.supabase.functions";
 import {
   createPspDevis,
-  createPspOperationComplete,
   deletePspDevis,
   deletePspLigne,
   getPspBrouillon,
@@ -131,7 +128,7 @@ export default function PspV1Page() {
   const [recherche, setRecherche] = useState("");
   const [categorie, setCategorie] = useState<string>("");
   const [selectedOpId, setSelectedOpId] = useState<string | null>(null);
-  const [formOuvert, setFormOuvert] = useState(false);
+  const [ajoutOuvert, setAjoutOuvert] = useState(false);
 
   // ── Chargement brouillon → PspOperation (même mapping que /preparation-psp) ─
   useEffect(() => {
@@ -226,66 +223,12 @@ export default function PspV1Page() {
   }, [refBrute]);
 
   // ── Handlers réels (réutilisent les server functions existantes) ─────────
-  const createCompleteFn = useServerFn(createPspOperationComplete);
   const updateCompleteFn = useServerFn(updatePspOperationComplete);
   const deleteLigneFn = useServerFn(deletePspLigne);
   const createDevisFn = useServerFn(createPspDevis);
   const updateDevisFn = useServerFn(updatePspDevis);
   const deleteDevisFn = useServerFn(deletePspDevis);
   const statutPrioriteFn = useServerFn(updatePspLigneStatutPriorite);
-
-  const handleAjouter = async (saisie: SaisieOperation) => {
-    if (!programmationId) {
-      toast.error("Brouillon non chargé.");
-      return;
-    }
-    const id = `loc-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
-    setOperations((prev) => {
-      const liste = ajouterOperationListe(prev, saisie, id);
-      const nouvelle = liste[liste.length - 1];
-      if (nouvelle) {
-        nouvelle.sous_secteur = reference?.tranches.get(saisie.tranche)?.sous_secteur ?? null;
-      }
-      return liste;
-    });
-    const programme: Record<string, number> = {};
-    PSP_ANNEES.forEach((a, i) => {
-      programme[String(a)] = Number(saisie.programme[i]) || 0;
-    });
-    try {
-      const ligne = await createCompleteFn({
-        data: {
-          programmationId,
-          trancheCode: saisie.tranche,
-          categorie: saisie.categorie,
-          corpsEtatCode: (saisie.corps_etat.match(/\(([^)]+)\)/)?.[1] ?? null) as string | null,
-          corpsEtat: saisie.corps_etat || null,
-          natureTravaux: saisie.nature_travaux || null,
-          programme,
-          ligneBudget: null,
-          remarques: saisie.remarques ?? null,
-          statut: saisie.statut ?? null,
-          priorite: saisie.priorite ?? null,
-          origine: "preparation",
-          perimetres: (saisie.perimetres ?? []).map((p) => ({
-            niveau: p.niveau as "tranche" | "rue" | "adresse" | "lot",
-            rue: p.rue,
-            numero: p.numero,
-            lotId: p.lot_id,
-          })),
-          devis: undefined,
-        },
-      });
-      setOperations((prev) => prev.map((o) => (o.id === id ? { ...o, id: ligne.id } : o)));
-      setFormOuvert(false);
-      toast.success("Opération persistée (brouillon Supabase).");
-      void queryClient.invalidateQueries({ queryKey: ["psp-v1-brouillon"] });
-      void queryClient.invalidateQueries({ queryKey: ["psp-v1-revue"] });
-    } catch (e) {
-      setOperations((prev) => supprimerOperationListe(prev, id));
-      toast.error(`Échec de la persistance : ${(e as Error).message}`);
-    }
-  };
 
   const handleModifier = async (saisie: SaisieOperation, operation?: PspOperation | null) => {
     const cible = operation ?? operations.find((o) => o.id === selectedOpId) ?? null;
@@ -520,8 +463,14 @@ export default function PspV1Page() {
           </h1>
         </div>
         {niveau === "preparation" ? (
-          <Button size="sm" className="ml-auto gap-2" onClick={() => setFormOuvert(true)}>
-            <Plus className="size-4" /> Ajouter une opération
+          <Button
+            size="sm"
+            className="ml-auto gap-2"
+            variant={ajoutOuvert ? "secondary" : "default"}
+            onClick={() => setAjoutOuvert((o) => !o)}
+          >
+            <Plus className="size-4" />
+            {ajoutOuvert ? "Fermer la ligne d'ajout" : "Ajouter une opération"}
           </Button>
         ) : null}
       </div>
@@ -589,6 +538,15 @@ export default function PspV1Page() {
             operations={filtered}
             totalParAnnee={totalParAnnee}
             onOpen={setSelectedOpId}
+            ajoutOuvert={ajoutOuvert}
+            reference={reference}
+            programmationId={programmationId}
+            onSaved={() => {
+              setAjoutOuvert(false);
+              void queryClient.invalidateQueries({ queryKey: ["psp-v1-brouillon"] });
+              void queryClient.invalidateQueries({ queryKey: ["psp-v1-revue"] });
+            }}
+            onAnnuler={() => setAjoutOuvert(false)}
           />
 
           {selectedOp ? (
@@ -611,17 +569,6 @@ export default function PspV1Page() {
               }}
             />
           ) : null}
-
-          <PspOperationForm
-            open={formOuvert}
-            onClose={() => setFormOuvert(false)}
-            mode="ajout"
-            operation={null}
-            reference={reference}
-            perimetresLigne={[]}
-            lotsParId={lotsParId}
-            onSave={(saisie) => void handleAjouter(saisie)}
-          />
         </>
       ) : null}
 

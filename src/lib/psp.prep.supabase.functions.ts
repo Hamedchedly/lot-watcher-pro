@@ -42,9 +42,11 @@ import {
   detecterRecherchePatrimoine,
   lotsDeAdresse,
   numerosDeRue,
+  resumeSelectionAdresse,
   ruesDeTranche,
   type CorpsEtatReferentiel,
 } from "./psp.prep.v7.ts";
+import { rueDe } from "./adresses.ts";
 import type { ChargesClienteleReferentiel } from "./psp.prep.data.ts";
 import { fusionnerProgramme } from "./psp.prep.ts";
 import { construireRevueAnciennesProgrammations } from "./psp.prep.suivi.ts";
@@ -1735,6 +1737,16 @@ export const getPspEntreprisesSuggestions = createServerFn({ method: "POST" })
         parNumero.set(String(a.identifiant_source).trim(), a.fournisseur_id);
       }
     }
+    // Numéro réel par fournisseur (libellé robuste « Fournisseur n°XXXX » si nom absent).
+    const numeroParFournisseur = new Map<string, string>();
+    for (const a of aliasesR.data ?? []) {
+      if (a.identifiant_source == null) continue;
+      const id = String(a.fournisseur_id ?? "");
+      const numero = String(a.identifiant_source).trim();
+      if (!id || !numero) continue;
+      const precedent = numeroParFournisseur.get(id);
+      if (!precedent || a.source === "travaux_commandes") numeroParFournisseur.set(id, numero);
+    }
     const historique = (commandesR.data ?? [])
       .map((c: any) => ({
         fournisseur_id: parNumero.get(String(c.numero_fournisseur ?? "").trim()),
@@ -1764,6 +1776,7 @@ export const getPspEntreprisesSuggestions = createServerFn({ method: "POST" })
       fournisseurs: (fournisseursR.data ?? []).map((f: any) => ({
         id: f.id as string,
         nom: f.nom as string,
+        numero: numeroParFournisseur.get(f.id as string) ?? null,
       })),
       historique,
       activites,
@@ -2894,7 +2907,9 @@ export const getPspRevueAnciennes = createServerFn({ method: "POST" })
 
     const [lignesR, perimetresR, devisR, liensR] = await Promise.all([
       db.from("psp_lignes").select("*"),
-      db.from("psp_ligne_patrimoine").select("psp_ligne_id, rue, numero, tranche_code"),
+      db
+        .from("psp_ligne_patrimoine")
+        .select("psp_ligne_id, tranche_code, niveau, rue, numero, lot_id"),
       db.from("psp_devis").select("psp_ligne_id, statut, montant, entreprise"),
       db.from("psp_command_links").select("id, psp_ligne_id, commande_id, statut"),
     ]);
@@ -2905,12 +2920,58 @@ export const getPspRevueAnciennes = createServerFn({ method: "POST" })
     const devis = (devisR.data ?? []) as any[];
     const liens = (liensR.data ?? []) as any[];
 
-    // Adresse de référence : premier périmètre patrimonial (jamais recopiée en base).
-    const adressePar = new Map<string, string>();
+    // Adresse de référence RÉELLE depuis psp_ligne_patrimoine (jamais recopiée en
+    // base). Pour un périmètre « lot », le code / l'adresse du lot réel (table
+    // lots) est utilisé ; le libellé est formaté via `resumeSelectionAdresse`
+    // (helper existant — même rendu que la fiche opération).
+    const lotIds: string[] = [
+      ...new Set(perimetres.filter((p: any) => p.lot_id).map((p: any) => p.lot_id)),
+    ];
+    let lotsReferenced = new Map<
+      string,
+      { code_patrimoine: string | null; adresse: string | null }
+    >();
+    if (lotIds.length > 0) {
+      const { data: lotsR } = await db
+        .from("lots")
+        .select("id, code_patrimoine, adresse")
+        .in("id", lotIds);
+      lotsReferenced = new Map((lotsR ?? []).map((l: any) => [l.id, l]));
+    }
+    const selectionParLigne = new Map<
+      string,
+      { rue: string | null; adresses: string[]; lots: string[] }
+    >();
     for (const p of perimetres) {
       if (!p.psp_ligne_id) continue;
-      const libelle = [p.rue, p.numero].filter(Boolean).join(" ");
-      if (libelle && !adressePar.has(p.psp_ligne_id)) adressePar.set(p.psp_ligne_id, libelle);
+      const s = selectionParLigne.get(p.psp_ligne_id) ?? { rue: null, adresses: [], lots: [] };
+      if (p.rue && !s.rue) s.rue = p.rue;
+      if (p.niveau === "adresse" && p.rue && p.numero) {
+        const entree = `${p.numero} ${p.rue}`.trim();
+        if (entree && !s.adresses.includes(entree)) s.adresses.push(entree);
+      }
+      if (p.niveau === "lot" && p.lot_id) {
+        const lot = lotsReferenced.get(p.lot_id);
+        if (lot?.code_patrimoine) {
+          if (!s.lots.includes(lot.code_patrimoine)) s.lots.push(lot.code_patrimoine);
+        } else if (lot?.adresse && !s.adresses.includes(lot.adresse)) {
+          s.adresses.push(lot.adresse);
+        }
+        if (!s.rue && lot?.adresse) {
+          const r = rueDe(lot.adresse);
+          if (r && r !== "Adresse inconnue") s.rue = r;
+        }
+      }
+      selectionParLigne.set(p.psp_ligne_id, s);
+    }
+    const adressePar = new Map<string, string>();
+    for (const [id, s] of selectionParLigne) {
+      const libelle = resumeSelectionAdresse({
+        rue: s.rue,
+        adresses: s.adresses,
+        lots: s.lots.map((code) => ({ code_patrimoine: code })),
+      });
+      if (libelle) adressePar.set(id, libelle);
     }
 
     // Commandes liées (psp_command_links → travaux_commandes, READ-ONLY).
@@ -2932,7 +2993,10 @@ export const getPspRevueAnciennes = createServerFn({ method: "POST" })
     );
 
     // Devis par ligne (consultation réelle).
-    const devisParLigne = new Map<string, Array<{ statut: string; montant: number | null; entreprise: string | null }>>();
+    const devisParLigne = new Map<
+      string,
+      Array<{ statut: string; montant: number | null; entreprise: string | null }>
+    >();
     for (const d of devis) {
       if (!d.psp_ligne_id) continue;
       const liste = devisParLigne.get(d.psp_ligne_id) ?? [];
@@ -2961,4 +3025,3 @@ export const getPspRevueAnciennes = createServerFn({ method: "POST" })
 
     return construireRevueAnciennesProgrammations(brutes, data.anneeReference);
   });
-

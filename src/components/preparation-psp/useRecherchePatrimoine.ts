@@ -144,6 +144,18 @@ export function useRecherchePatrimoine(options: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /**
+   * SYNCHRONISATION RUE ⇄ CHAMP DE RECHERCHE (correction) : dès qu'une rue est
+   * sélectionnée, le champ de recherche des rues (qRue) reflète cette rue.
+   * Ajouter un numéro / ER ne doit JAMAIS effacer la rue sélectionnée : la
+   * sélection de la rue est conservée et le champ reste réellement synchronisé
+   * avec l'état de sélection (jamais un texte statique). Le correctif V8.6.1
+   * (qRue initialisé depuis la rue du périmètre existant) est conservé.
+   */
+  useEffect(() => {
+    if (rue) setQRue(rue);
+  }, [rue]);
+
   const referenceTranche = tranche ? reference?.tranches.get(tranche) : undefined;
 
   /**
@@ -352,6 +364,7 @@ export function useRecherchePatrimoine(options: {
     const r = rueDe(l.adresse);
     const entree = entreeDe(l.adresse);
     setRue(r);
+    setQRue(r);
     setAdressesChoisies(entree ? [entree] : []);
     setLotsDeAdresse((prev) => (entree ? new Map(prev).set(entree, [l]) : new Map(prev)));
     setNiveauAdresse("numeros");
@@ -382,6 +395,7 @@ export function useRecherchePatrimoine(options: {
     const r = rueDe(l.adresse);
     const entree = entreeDe(l.adresse);
     if (r) setRue(r);
+    if (r) setQRue(r);
     if (entree) {
       setAdressesChoisies((prev) => (prev.includes(entree) ? prev : [...prev, entree]));
       setLotsDeAdresse((prev) => (prev.has(entree) ? prev : new Map(prev).set(entree, [l])));
@@ -393,6 +407,7 @@ export function useRecherchePatrimoine(options: {
   /** Sélection d'une rue → passage au niveau NUMÉROS (le panneau ne reste pas sur les rues). */
   const choisirRue = (r: string) => {
     setRue(r);
+    setQRue(r);
     setAdressesChoisies([]);
     setLotsDeAdresse(new Map());
     setLotsChoisis([]);

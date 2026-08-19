@@ -10,8 +10,14 @@ import { useServerFn } from "@tanstack/react-start";
 
 import { Input } from "@/components/ui/input";
 import { rechercherFournisseursDevis } from "@/lib/psp.prep.supabase.functions";
+import { libelleEntreprise } from "@/lib/psp.prep.v7";
 
-export type FournisseurSelection = { id?: string | null; nom: string };
+export type FournisseurSelection = {
+  id?: string | null;
+  nom: string;
+  /** Numéro fournisseur réel (alias) — pour le libellé robuste « Fournisseur n°XXXX ». */
+  numero?: string | null;
+};
 
 export default function PspFournisseurSearch({
   value,
@@ -77,13 +83,13 @@ export default function PspFournisseurSearch({
               type="button"
               className="flex w-full items-center justify-between gap-2 rounded px-2 py-1 text-left text-[10px] hover:bg-accent"
               onClick={() => {
-                onSelect({ id: f.id, nom: f.nom });
-                setQ(f.nom);
+                onSelect({ id: f.id, nom: f.nom, numero: f.codes[0] ?? null });
+                setQ(libelleEntreprise(f.nom, f.codes[0]));
                 setRechercheActive("");
                 setSug([]);
               }}
             >
-              <span className="truncate font-medium">{f.nom}</span>
+              <span className="truncate font-medium">{libelleEntreprise(f.nom, f.codes[0])}</span>
               <span className="flex shrink-0 items-center gap-1 text-muted-foreground">
                 {f.codes[0] ? <span className="font-mono">#{f.codes[0]}</span> : null}
                 {f.ville ? <span>{f.ville}</span> : null}

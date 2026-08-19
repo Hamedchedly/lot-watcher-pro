@@ -30,6 +30,7 @@ import {
   type EtatRevueAncienne,
   type RevueAncienneProgrammation,
 } from "@/lib/psp.prep.suivi";
+import { STATUT_CONSULTATION_PREP_LABELS, statutConsultationDepuisDevis } from "@/lib/psp.prep.v7";
 import { cn } from "@/lib/utils";
 
 const ETAT_BADGE: Record<EtatRevueAncienne, string> = {
@@ -188,7 +189,7 @@ export default function PspRevueAnciennes({
                             ) : null}
                           </>
                         ) : (
-                          <span className="text-[11px] text-muted-foreground">â€”</span>
+                          <span className="text-[11px] text-muted-foreground">Sans commande</span>
                         )}
                       </TableCell>
                       <TableCell>
@@ -198,21 +199,30 @@ export default function PspRevueAnciennes({
                       </TableCell>
                       <TableCell className="text-[11px]">
                         {e.devis.length > 0 ? (
-                          <ul className="space-y-0.5">
-                            {e.devis.map((d, j) => (
-                              <li key={j} className="flex items-center gap-1">
-                                <span className="text-[10px]">{d.entreprise ?? "â€”"}</span>
-                                <Badge variant="outline" className="text-[9px]">
-                                  {d.statut}
-                                </Badge>
-                                {d.montant != null ? (
-                                  <span className="tabnum text-[10px]">{money0(d.montant)}</span>
-                                ) : null}
-                              </li>
-                            ))}
-                          </ul>
+                          <>
+                            <Badge className="mb-1 text-[9px]">
+                              {
+                                STATUT_CONSULTATION_PREP_LABELS[
+                                  statutConsultationDepuisDevis(e.devis).code
+                                ]
+                              }
+                            </Badge>
+                            <ul className="space-y-0.5">
+                              {e.devis.map((d, j) => (
+                                <li key={j} className="flex items-center gap-1">
+                                  <span className="text-[10px]">{d.entreprise ?? "â€”"}</span>
+                                  <Badge variant="outline" className="text-[9px]">
+                                    {d.statut}
+                                  </Badge>
+                                  {d.montant != null ? (
+                                    <span className="tabnum text-[10px]">{money0(d.montant)}</span>
+                                  ) : null}
+                                </li>
+                              ))}
+                            </ul>
+                          </>
                         ) : (
-                          <span className="text-muted-foreground">â€”</span>
+                          <span className="text-muted-foreground">Aucune demande</span>
                         )}
                       </TableCell>
                     </TableRow>
