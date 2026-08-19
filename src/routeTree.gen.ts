@@ -17,6 +17,7 @@ import { Route as ImportRouteImport } from './routes/import'
 import { Route as ImportPspRouteImport } from './routes/import-psp'
 import { Route as ImportTravauxRouteImport } from './routes/import-travaux'
 import { Route as PreparationPspRouteImport } from './routes/preparation-psp'
+import { Route as PreparationPspV1RouteImport } from './routes/preparation-psp-v1'
 import { Route as PspValidationRouteImport } from './routes/psp-validation'
 import { Route as SuiviRouteImport } from './routes/suivi'
 import { Route as FournisseursIndexRouteImport } from './routes/fournisseurs.index'
@@ -62,6 +63,11 @@ const PreparationPspRoute = PreparationPspRouteImport.update({
   path: '/preparation-psp',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PreparationPspV1Route = PreparationPspV1RouteImport.update({
+  id: '/preparation-psp-v1',
+  path: '/preparation-psp-v1',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const PspValidationRoute = PspValidationRouteImport.update({
   id: '/psp-validation',
   path: '/psp-validation',
@@ -93,6 +99,7 @@ export interface FileRoutesByFullPath {
   '/import-psp': typeof ImportPspRoute
   '/import-travaux': typeof ImportTravauxRoute
   '/preparation-psp': typeof PreparationPspRoute
+  '/preparation-psp-v1': typeof PreparationPspV1Route
   '/psp-validation': typeof PspValidationRoute
   '/suivi': typeof SuiviRoute
   '/fournisseurs/$fournisseurId': typeof FournisseursFournisseurIdRoute
@@ -106,6 +113,7 @@ export interface FileRoutesByTo {
   '/import-psp': typeof ImportPspRoute
   '/import-travaux': typeof ImportTravauxRoute
   '/preparation-psp': typeof PreparationPspRoute
+  '/preparation-psp-v1': typeof PreparationPspV1Route
   '/psp-validation': typeof PspValidationRoute
   '/suivi': typeof SuiviRoute
   '/fournisseurs/$fournisseurId': typeof FournisseursFournisseurIdRoute
@@ -121,6 +129,7 @@ export interface FileRoutesById {
   '/import-psp': typeof ImportPspRoute
   '/import-travaux': typeof ImportTravauxRoute
   '/preparation-psp': typeof PreparationPspRoute
+  '/preparation-psp-v1': typeof PreparationPspV1Route
   '/psp-validation': typeof PspValidationRoute
   '/suivi': typeof SuiviRoute
   '/fournisseurs/$fournisseurId': typeof FournisseursFournisseurIdRoute
@@ -137,6 +146,7 @@ export interface FileRouteTypes {
     | '/import-psp'
     | '/import-travaux'
     | '/preparation-psp'
+    | '/preparation-psp-v1'
     | '/psp-validation'
     | '/suivi'
     | '/fournisseurs/$fournisseurId'
@@ -150,6 +160,7 @@ export interface FileRouteTypes {
     | '/import-psp'
     | '/import-travaux'
     | '/preparation-psp'
+    | '/preparation-psp-v1'
     | '/psp-validation'
     | '/suivi'
     | '/fournisseurs/$fournisseurId'
@@ -164,6 +175,7 @@ export interface FileRouteTypes {
     | '/import-psp'
     | '/import-travaux'
     | '/preparation-psp'
+    | '/preparation-psp-v1'
     | '/psp-validation'
     | '/suivi'
     | '/fournisseurs/$fournisseurId'
@@ -179,6 +191,7 @@ export interface RootRouteChildren {
   ImportPspRoute: typeof ImportPspRoute
   ImportTravauxRoute: typeof ImportTravauxRoute
   PreparationPspRoute: typeof PreparationPspRoute
+  PreparationPspV1Route: typeof PreparationPspV1Route
   PspValidationRoute: typeof PspValidationRoute
   SuiviRoute: typeof SuiviRoute
 }
@@ -241,6 +254,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PreparationPspRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/preparation-psp-v1': {
+      id: '/preparation-psp-v1'
+      path: '/preparation-psp-v1'
+      fullPath: '/preparation-psp-v1'
+      preLoaderRoute: typeof PreparationPspV1RouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/psp-validation': {
       id: '/psp-validation'
       path: '/psp-validation'
@@ -295,6 +315,7 @@ const rootRouteChildren: RootRouteChildren = {
   ImportPspRoute: ImportPspRoute,
   ImportTravauxRoute: ImportTravauxRoute,
   PreparationPspRoute: PreparationPspRoute,
+  PreparationPspV1Route: PreparationPspV1Route,
   PspValidationRoute: PspValidationRoute,
   SuiviRoute: SuiviRoute,
 }
