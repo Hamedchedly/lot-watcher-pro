@@ -1655,3 +1655,60 @@ export const comparerProgrammation = (
 
   return { lignes, nouvelles };
 };
+
+// ── V8.9 — CONSERVATION DES ANNÉES DE PROGRAMMATION (cycle de vie) ───────────
+
+/**
+ * Fusionne un apport de programmation avec le programme existant SANS JAMAIS
+ * détruire les anciennes années :
+ *  · une clé présente dans `apport` écrase la valeur existante (mise à jour
+ *    explicite — un montant à 0 = déprogrammation volontaire de CETTE année) ;
+ *  · une clé ABSENTE de `apport` est CONSERVÉE telle quelle.
+ *
+ * Exemple :
+ *   existant = { "2027": 50000, "2028": 55000, "2029": 0, "2030": 30000 }
+ *   apport   = { "2028": 60000, "2031": 10000 }
+ *   résultat = { "2027": 50000, "2028": 60000, "2029": 0, "2030": 30000, "2031": 10000 }
+ *
+ * Règle métier V8.9 : « les anciennes années ne doivent jamais être détruites
+ * simplement parce qu'une nouvelle année est renseignée ».
+ */
+export const fusionnerProgramme = (
+  existant: Record<string, number>,
+  apport: Record<string, number>,
+): Record<string, number> => ({ ...existant, ...apport });
+
+/**
+ * Normalise un programme pour la PERSISTANCE : ne conserve que les montants
+ * strictement positifs (un montant 0 ou négatif devient une clé à 0 — l'année
+ * reste visible dans le JSONB, cohérent avec la projection stricte V8.8.3).
+ * Ne jamais supprimer une clé d'année du périmètre PSP_ANNEES.
+ */
+export const normaliserProgrammePersist = (
+  programme: Record<string, number>,
+): Record<string, number> => {
+  const out: Record<string, number> = {};
+  for (const [annee, montant] of Object.entries(programme)) {
+    const valeur = Math.max(0, Number(montant) || 0);
+    out[annee] = valeur;
+  }
+  return out;
+};
+
+/**
+ * Ajoute (ou met à jour) une année de programmation dans le programme d'une
+ * ligne existante : si la ligne porte déjà un montant sur cette année, il est
+ * REMPLACÉ par le nouveau montant (jamais additionné — une opération = une
+ * seule valeur par année). Toutes les autres années sont conservées.
+ * Retourne le nouveau programme + true si une valeur a changé.
+ */
+export const programmerAnnee = (
+  programme: Record<string, number>,
+  annee: number,
+  montant: number,
+): { programme: Record<string, number>; change: boolean } => {
+  const valeur = Math.max(0, Number(montant) || 0);
+  const actuel = programme[String(annee)] ?? 0;
+  if (actuel === valeur) return { programme, change: false };
+  return { programme: { ...programme, [String(annee)]: valeur }, change: true };
+};

@@ -46,6 +46,7 @@ import {
   type CorpsEtatReferentiel,
 } from "./psp.prep.v7.ts";
 import type { ChargesClienteleReferentiel } from "./psp.prep.data.ts";
+import { fusionnerProgramme } from "./psp.prep.ts";
 
 export type PspLignePersist = {
   id: string;
@@ -364,6 +365,18 @@ export const updatePspLigne = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
     const db = supabaseAdmin as any;
+    // V8.9 — CONSERVATION DES ANNÉES : l'UPDATE direct remplace le JSONB
+    // programme → on fusionne d'abord avec l'existant pour ne jamais perdre
+    // une année absente du payload (ex. édition ciblée d'une seule année).
+    const { data: ligneActuelle } = await db
+      .from("psp_lignes")
+      .select("programme")
+      .eq("id", data.id)
+      .single();
+    const programmeFusionne = fusionnerProgramme(
+      (ligneActuelle?.programme ?? {}) as Record<string, number>,
+      data.programme,
+    );
     const { data: ligne, error } = await db
       .from("psp_lignes")
       .update({
@@ -372,7 +385,7 @@ export const updatePspLigne = createServerFn({ method: "POST" })
         corps_etat_code: data.corpsEtatCode ?? null,
         corps_etat: data.corpsEtat ?? null,
         nature_travaux: data.natureTravaux ?? null,
-        programme: data.programme,
+        programme: programmeFusionne,
         ligne_budget: data.ligneBudget ?? null,
         remarques: data.remarques ?? null,
         statut: data.statut,
@@ -2277,6 +2290,19 @@ export const updatePspOperationComplete = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase-ext/client.server");
     const db = supabaseAdmin as any;
+    // V8.9 — CONSERVATION DES ANNÉES : une modification ciblée (ex. année 2028)
+    // ne doit JAMAIS détruire les autres années programmées (2027/2029/2030/…).
+    // Le RPC update_psp_operation REPLACE le JSONB programme → on fusionne
+    // d'abord avec l'existant, puis on envoie le programme complet fusionné.
+    const { data: ligneActuelle } = await db
+      .from("psp_lignes")
+      .select("programme")
+      .eq("id", data.id)
+      .single();
+    const programmeFusionne = fusionnerProgramme(
+      (ligneActuelle?.programme ?? {}) as Record<string, number>,
+      data.programme,
+    );
     const perimetres = (data.perimetres ?? []).map((p) => ({
       niveau: p.niveau,
       rue: p.rue ?? null,
@@ -2290,7 +2316,7 @@ export const updatePspOperationComplete = createServerFn({ method: "POST" })
       p_corps_etat_code: data.corpsEtatCode ?? null,
       p_corps_etat: data.corpsEtat ?? null,
       p_nature_travaux: data.natureTravaux ?? null,
-      p_programme: data.programme,
+      p_programme: programmeFusionne,
       p_remarques: data.remarques ?? null,
       p_statut: data.statut ?? null,
       p_priorite: data.priorite ?? null,

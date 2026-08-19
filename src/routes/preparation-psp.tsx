@@ -44,8 +44,11 @@ import {
   FILTRES_VIDES,
   PSP_ANNEES,
   ajouterOperationListe,
+  fusionnerProgramme,
   modifierOperationListe,
+  programmerAnnee,
   supprimerOperationListe,
+  totalOperation,
   type FiltresDetail,
   type PspAnnee,
   type PspCategorie,
@@ -395,6 +398,70 @@ function PreparationPspPage() {
       toast.error(figee ? "Programmation figée : report impossible." : "Brouillon non chargé.");
       return;
     }
+    const remarques = `Report de ${ligne.annee_initiale} (programmation ${ligne.annee_initiale} non engagée)`;
+    // V8.9 — REPORT ADDITIF : si une ligne du brouillon porte déjà la même
+    // opération (TR + C + nature normalisée), on AJOUTE l'année cible à son
+    // programme existant (les autres années sont préservées) — jamais un doublon.
+    // Sinon, on crée la ligne cible origine='report' (comportement historique).
+    const norm = (v: string | null | undefined): string =>
+      (v ?? "").toUpperCase().replace(/\s+/g, " ").trim();
+    const candidat = operations.find(
+      (o) =>
+        o.tranche === ligne.tranche &&
+        o.categorie === ligne.categorie &&
+        norm(o.nature_travaux) === norm(ligne.nature_travaux),
+    );
+
+    if (candidat) {
+      const { programme, change } = programmerAnnee(
+        candidat.programme,
+        anneeCible,
+        ligne.montant_programme,
+      );
+      if (!change) {
+        toast.info(`L'opération est déjà programmée en ${anneeCible} (aucun changement).`);
+        return;
+      }
+      setOperations((prev) =>
+        prev.map((o) =>
+          o.id === candidat.id
+            ? { ...o, programme, budget: totalOperation({ ...o, programme }) }
+            : o,
+        ),
+      );
+      setDecisions((prev) =>
+        new Map(prev).set(`${ligne.tranche}|${ligne.categorie}`, `Report ${anneeCible}`),
+      );
+      try {
+        await updateCompleteFn({
+          data: {
+            id: candidat.id,
+            trancheCode: candidat.tranche,
+            categorie: candidat.categorie,
+            corpsEtatCode: candidat.corps_etat_code || null,
+            corpsEtat: candidat.corps_etat || null,
+            natureTravaux: candidat.nature_travaux || null,
+            programme,
+            remarques: candidat.remarques ?? null,
+            statut: candidat.statut ?? null,
+            priorite: candidat.priorite ?? null,
+            perimetres: (perimetresParLigne.get(candidat.id) ?? []).map((p) => ({
+              niveau: p.niveau,
+              rue: p.rue,
+              numero: p.numero,
+              lotId: p.lot_id,
+            })),
+          },
+        });
+        toast.success(
+          `Opération reprogrammée en ${anneeCible} (ligne existante, années préservées).`,
+        );
+      } catch (e) {
+        toast.error(`Report non persisté : ${(e as Error).message}`);
+      }
+      return;
+    }
+
     const saisie: SaisieOperation = {
       tranche: ligne.tranche,
       categorie: ligne.categorie,
@@ -406,7 +473,7 @@ function PreparationPspPage() {
       nature_travaux: ligne.nature_travaux,
       annee: anneeCible as PspAnnee,
       programme: PSP_ANNEES.map((a) => (a === anneeCible ? ligne.montant_programme : 0)),
-      remarques: `Report de ${ligne.annee_initiale} (programmation ${ligne.annee_initiale} non engagée)`,
+      remarques,
     };
     const id = `report-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
     setOperations((prev) => {

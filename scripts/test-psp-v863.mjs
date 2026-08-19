@@ -39,18 +39,27 @@ function check(label, ok, detail = "") {
   }
 }
 
-// ════════════ A/B. REPORTS V3/V4 — masqués de l'UI, non supprimés ═════════════
+// ════════════ A/B. REPORTS — revue restaurée en CONSULTATION (V8.8.3) ══════
+// V8.8.3 §4 — la « Revue des anciennes lignes PSP non commandées » est RESTAURÉE
+// dans /preparation-psp comme fonctionnalité de CONSULTATION / HISTORIQUE, avec
+// un libellé explicite, séparée visuellement de la programmation actuelle. Elle
+// reste non créatrice/non modificative : aucune ligne opérationnelle n'est
+// créée/modifiée (aucune écriture métier).
 check(
-  "A. l'option « Revue des reports » n'est plus dans le sélecteur principal",
-  !grouping.includes('valeur: "reports"') && !grouping.includes('label: "Revue des reports"'),
+  "A. la revue « anciennes lignes PSP non commandées » est visible dans le sélecteur, séparée de la programmation",
+  grouping.includes('valeur: "reports"') &&
+    grouping.includes("Revue des anciennes lignes PSP non commandées") &&
+    grouping.includes("separateur"),
 );
 check(
   "A2. le type ModeAffichage conserve 'reports' (contrat inchangé)",
   grouping.includes('export type ModeAffichage = "tranche" | "charge" | "detail" | "reports"'),
 );
 check(
-  "A3. commentaire LEGACY explicite sur le gel (PspGroupingSelector)",
-  grouping.includes("LEGACY V3/V4") && grouping.includes("non accessible depuis l'UI"),
+  "A3. la revue est une CONSULTATION/HISTORIQUE lecture seule (commentaire explicite)",
+  grouping.includes("CONSULTATION") &&
+    grouping.includes("aucune écriture") &&
+    grouping.includes("aucune deuxième source de vérité"),
 );
 check(
   "B. le composant PspRevueReports n'est PAS supprimé",
@@ -68,9 +77,8 @@ check(
   supabaseFn.includes("export const createPspReport"),
 );
 check(
-  "B4. PspRevueReports n'est plus rendu par le parcours principal (masqué)",
-  preparationRoute.includes("PspRevueReports") === false ||
-    preparationRoute.includes("PspRevueReports") === true,
+  "B4. PspRevueReports reste rendu par le parcours principal (mode « reports »)",
+  preparationRoute.includes("PspRevueReports") && preparationRoute.includes('mode === "reports"'),
 );
 
 // ════════════ C. BANDEAU — détectées vs matérialisées ═════════════════════════
