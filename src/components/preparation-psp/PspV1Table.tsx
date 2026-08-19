@@ -1,5 +1,5 @@
 /**
- * V1 VISUELLE — Tableau structuré de la programmation PSP (lecture seule).
+ * V1 VISUELLE — Tableau structuré de la programmation PSP (données RÉELLES).
  *
  * · Colonnes fixes d'IDENTIFICATION (TR, adresse, descriptif, corps d'état,
  *   ligne budgétaire) ;
@@ -23,8 +23,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { money0 } from "@/lib/formats";
-import { PSP_ANNEES } from "@/lib/psp.prep";
-import type { SuiviOperationVue } from "@/lib/psp.suivi.foundation";
+import { PSP_ANNEES, montantAnnee, totalOperation, type PspOperation } from "@/lib/psp.prep";
+import { statutConsultationDepuisDevis } from "@/lib/psp.prep.v7";
 import { cn } from "@/lib/utils";
 
 const STATUT_PSP_STYLES: Record<string, string> = {
@@ -34,30 +34,28 @@ const STATUT_PSP_STYLES: Record<string, string> = {
 };
 
 const CONSULTATION_STYLES: Record<string, string> = {
-  pas_consulte: "border-slate-200 bg-slate-50 text-slate-600",
-  demande_a_envoyer: "border-amber-200 bg-amber-50 text-amber-700",
-  en_attente: "border-emerald-200 bg-emerald-50 text-emerald-700",
-  relance_necessaire: "border-orange-200 bg-orange-50 text-orange-700",
+  aucune: "border-slate-200 bg-slate-50 text-slate-600",
+  a_demander: "border-amber-200 bg-amber-50 text-amber-700",
+  demande_envoyee: "border-emerald-200 bg-emerald-50 text-emerald-700",
   devis_recu: "border-emerald-200 bg-emerald-50 text-emerald-700",
   devis_retenu: "border-emerald-300 bg-emerald-100 text-emerald-800",
-  consultation_abandonnee: "border-slate-200 bg-slate-100 text-slate-500",
 };
 
 type CleTriV1 = "tranche" | "nature" | "adresse" | "corps_etat" | "total";
 
-const trier = (ops: SuiviOperationVue[], cle: CleTriV1, asc: boolean): SuiviOperationVue[] => {
-  const valeur = (o: SuiviOperationVue): string | number => {
+const trier = (ops: PspOperation[], cle: CleTriV1, asc: boolean): PspOperation[] => {
+  const valeur = (o: PspOperation): string | number => {
     switch (cle) {
       case "tranche":
-        return o.identite.tranche;
+        return o.tranche;
       case "nature":
-        return o.programmation.nature ?? "";
+        return o.nature_travaux ?? "";
       case "adresse":
-        return o.programmation.adresse ?? "";
+        return o.adresse ?? "";
       case "corps_etat":
-        return o.programmation.corps_etat ?? "";
+        return o.corps_etat ?? "";
       case "total":
-        return o.programmation.montant_total;
+        return totalOperation(o);
     }
   };
   const dir = asc ? 1 : -1;
@@ -76,7 +74,7 @@ export default function PspV1Table({
   totalParAnnee,
   onOpen,
 }: {
-  operations: SuiviOperationVue[];
+  operations: PspOperation[];
   totalParAnnee: Record<string, number>;
   onOpen: (id: string) => void;
 }) {
@@ -96,7 +94,7 @@ export default function PspV1Table({
       <ChevronsUpDown className="size-3 text-muted-foreground/50" />
     );
 
-  const totalGlobal = operations.reduce((s, o) => s + o.programmation.montant_total, 0);
+  const totalGlobal = operations.reduce((s, o) => s + totalOperation(o), 0);
 
   const headerTd = (cle: CleTriV1, label: string, align?: "right") => (
     <TableHead
@@ -135,53 +133,42 @@ export default function PspV1Table({
         </TableHeader>
         <TableBody>
           {triees.map((op) => {
-            const montantParAnnee = new Map(
-              op.programmation.annees.map((a) => [a.annee, a.montant]),
-            );
-            const consultation = op.consultation.statut;
-            const statut = op.programmation.ligne.statut ?? "a_definir";
+            const consultation = statutConsultationDepuisDevis(op.devis);
+            const statut = op.statut ?? "a_definir";
+            const adresse = [op.adresse, op.ville].filter(Boolean).join(" – ") || null;
             return (
               <TableRow
-                key={op.identite.id}
+                key={op.id}
                 className="cursor-pointer transition-colors hover:bg-primary/5"
-                onClick={() => onOpen(op.identite.id)}
-                title="Ouvrir la fiche opération (prototype)"
+                onClick={() => onOpen(op.id)}
+                title="Ouvrir la fiche opération (workflow réel)"
               >
                 <TableCell className="sticky left-0 z-10 bg-card font-mono text-xs font-bold">
-                  {op.identite.tranche}
+                  {op.tranche}
                 </TableCell>
                 <TableCell className="py-2">
-                  <PspSecteurBadge categorie={op.identite.categorie} />
+                  <PspSecteurBadge categorie={op.categorie} />
                 </TableCell>
                 <TableCell className="max-w-[200px] py-2">
-                  <span
-                    className="block truncate text-[11px]"
-                    title={op.programmation.adresse ?? ""}
-                  >
-                    {op.programmation.adresse ?? "—"}
+                  <span className="block truncate text-[11px]" title={adresse ?? ""}>
+                    {adresse ?? "—"}
                   </span>
                 </TableCell>
                 <TableCell className="max-w-[220px] py-2">
-                  <span
-                    className="block truncate text-[11px]"
-                    title={op.programmation.nature ?? ""}
-                  >
-                    {op.programmation.nature ?? "—"}
+                  <span className="block truncate text-[11px]" title={op.nature_travaux ?? ""}>
+                    {op.nature_travaux ?? "—"}
                   </span>
                 </TableCell>
                 <TableCell className="max-w-[140px] py-2">
-                  <span
-                    className="block truncate text-[11px]"
-                    title={op.programmation.corps_etat ?? ""}
-                  >
-                    {op.programmation.corps_etat ?? "—"}
+                  <span className="block truncate text-[11px]" title={op.corps_etat ?? ""}>
+                    {op.corps_etat ?? "—"}
                   </span>
                 </TableCell>
                 <TableCell className="py-2 font-mono text-[11px]">
-                  {op.programmation.ligne.ligne_budget ?? "—"}
+                  {op.ligne_budget ?? "—"}
                 </TableCell>
                 {PSP_ANNEES.map((a) => {
-                  const montant = montantParAnnee.get(a) ?? 0;
+                  const montant = montantAnnee(op, a);
                   return (
                     <TableCell
                       key={a}
@@ -195,11 +182,11 @@ export default function PspV1Table({
                   );
                 })}
                 <TableCell className="py-2 text-right tabnum text-xs font-black text-primary">
-                  {money0(op.programmation.montant_total)}
+                  {money0(totalOperation(op))}
                 </TableCell>
                 <TableCell className="py-2">
-                  <Badge className={cn("text-[9px]", CONSULTATION_STYLES[consultation] ?? "")}>
-                    {op.consultation.statut_label}
+                  <Badge className={cn("text-[9px]", CONSULTATION_STYLES[consultation.code] ?? "")}>
+                    {consultation.label}
                   </Badge>
                 </TableCell>
                 <TableCell className="py-2">
