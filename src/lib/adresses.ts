@@ -84,6 +84,29 @@ export function normaliserRecherche(value: string | null | undefined): string {
     .trim();
 }
 
+/**
+ * Motif de recherche avec joker « * » = n'importe quelle suite de caractères.
+ * - Sans « * » : correspondance « contient » (comportement historique, « PARIS »).
+ * - Avec « * » : le joker généralise la recherche, ex. « PLESS* » → « PLESSIS TREVISE »,
+ *   « RUE DE * » → « RUE DE PARIS », « *CARRE* » → n'importe où dans le libellé.
+ * Retourne null quand le terme est vide (aucun résultat).
+ */
+export function motifRechercheRegex(terme: string | null | undefined): RegExp | null {
+  const norm = (terme ?? "")
+    .toUpperCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^A-Z0-9*]+/g, " ")
+    .trim();
+  if (!norm) return null;
+  const echapper = (part: string) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  if (!norm.includes("*")) {
+    return new RegExp(echapper(norm));
+  }
+  // Mode joker : « * » devient « .* » (toute suite de caractères, y compris vide).
+  return new RegExp(norm.split("*").map(echapper).join(".*"));
+}
+
 export type ResultatVille = { ville: string; tranches: number; lots: number };
 export type ResultatAdresse = {
   adresse: string;
@@ -97,10 +120,17 @@ export type ResultatLocataire = {
   ville: string;
   tranche: string;
 };
+export type ResultatEr = {
+  code: string;
+  adresse: string;
+  ville: string;
+  tranche: string;
+};
 export type ResultatsRecherche = {
   villes: ResultatVille[];
   adresses: ResultatAdresse[];
   locataires: ResultatLocataire[];
+  ers: ResultatEr[];
 };
 
 /**
@@ -143,28 +173,41 @@ export function libelleNbCommandesTravaux(n: number): string {
  * Recherche hiérarchique du patrimoine, multi-catégories (jamais exclusive) :
  *  1. VILLES    — dans le référentiel des villes (getVilles, hors lots filtrés) ;
  *  2. ADRESSES  — lots dont l'adresse contient le terme (regroupées par adresse) ;
- *  3. LOCATAIRES— lots dont le locataire contient le terme (avec contexte d'adresse).
- * Matching « contient », insensible casse/accents/tirets/espaces. Terme vide → aucun résultat.
- * `lots` doivent déjà respecter le filtre `showGarages` (garages masqués exclus).
+ *  3. LOCATAIRES— lots dont le locataire contient le terme (avec contexte d'adresse) ;
+ *  4. ER        — lots dont l'identifiant patrimoine (code_patrimoine, ex. ER.123456)
+ *                contient le terme (ouvre la fiche logement).
+ * Matching « contient », insensible casse/accents/tirets/espaces. Le symbole « * » signifie
+ * « n'importe quelle suite de caractères » (glob, ex. « PLESS* », « RUE DE * », « *PARIS »).
+ * Terme vide → aucun résultat. `lots` doivent déjà respecter le filtre `showGarages`.
  */
 export function rechercherPatrimoine(
   terme: string,
   lots: LotItem[],
   villes: { ville: string; tranches: number; lots: number }[],
 ): ResultatsRecherche {
-  const t = normaliserRecherche(terme);
-  if (!t) return { villes: [], adresses: [], locataires: [] };
+  const regex = motifRechercheRegex(terme);
+  if (!regex) return { villes: [], adresses: [], locataires: [], ers: [] };
 
   const villesTrouvees: ResultatVille[] = villes
-    .filter((v) => normaliserRecherche(v.ville).includes(t))
+    .filter((v) => regex.test(normaliserRecherche(v.ville)))
     .map((v) => ({ ville: v.ville, tranches: v.tranches, lots: v.lots }));
 
   const adresses = new Map<string, ResultatAdresse>();
   const locataires = new Map<string, ResultatLocataire>();
+  const ers: ResultatEr[] = [];
 
   for (const lot of lots) {
+    const erNorm = normaliserRecherche(lot.code_patrimoine);
+    if (erNorm && regex.test(erNorm)) {
+      ers.push({
+        code: lot.code_patrimoine,
+        adresse: lot.adresse ?? "Adresse inconnue",
+        ville: lot.ville ?? "",
+        tranche: lot.tranche_code ?? "",
+      });
+    }
     const adrNorm = normaliserRecherche(lot.adresse);
-    if (adrNorm && adrNorm.includes(t)) {
+    if (adrNorm && regex.test(adrNorm)) {
       const cle = `${lot.ville}|${lot.tranche_code}|${adrNorm}`;
       const g = adresses.get(cle) ?? {
         adresse: lot.adresse ?? "Adresse inconnue",
@@ -176,7 +219,7 @@ export function rechercherPatrimoine(
       adresses.set(cle, g);
     }
     const nomNorm = normaliserRecherche(lot.locataire_nom);
-    if (nomNorm && nomNorm.includes(t)) {
+    if (nomNorm && regex.test(nomNorm)) {
       const cleLoc = `${nomNorm}|${lot.ville}|${lot.tranche_code}|${adrNorm}`;
       if (!locataires.has(cleLoc)) {
         locataires.set(cleLoc, {
@@ -189,10 +232,13 @@ export function rechercherPatrimoine(
     }
   }
 
+  ers.sort((a, b) => a.code.localeCompare(b.code, "fr", { numeric: true }));
+
   return {
     villes: villesTrouvees,
     adresses: [...adresses.values()],
     locataires: [...locataires.values()],
+    ers,
   };
 }
 

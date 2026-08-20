@@ -20,6 +20,53 @@ import { getPatrimoine } from "@/lib/isis.functions";
 import { isLogement } from "@/lib/isis";
 import { loadRecents, rueDe, type LotItem, type RecentAdresse } from "@/lib/adresses";
 
+const raccourcis = [
+  {
+    to: "/import",
+    label: "Import Patrimoine — ISIS",
+    icon: Upload,
+    variant: "outline" as const,
+  },
+  {
+    to: "/import-travaux",
+    label: "Import Suivi budgétaire annuel",
+    icon: Upload,
+    variant: "outline" as const,
+  },
+  {
+    to: "/import-psp",
+    label: "Import Historique CMD",
+    icon: Upload,
+    variant: "outline" as const,
+  },
+  {
+    to: "/psp-validation",
+    label: "Analyse historique CMD",
+    icon: ListChecks,
+    variant: "outline" as const,
+  },
+  {
+    to: "/suivi",
+    label: "Opérations",
+    icon: ListChecks,
+    variant: "outline" as const,
+  },
+  {
+    to: "/fournisseurs",
+    label: "Fournisseurs",
+    icon: Building2,
+    variant: "outline" as const,
+    search: LISTE_FOURNISSEURS_SEARCH_VIDE,
+  },
+  {
+    to: "/dashboard-travaux",
+    label: "Dashboard travaux",
+    icon: BarChart3,
+    variant: "default" as const,
+    search: { commande: undefined, de: undefined, a: undefined },
+  },
+] as const;
+
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
@@ -52,7 +99,7 @@ function Index() {
   const [recents, setRecents] = useState<RecentAdresse[]>([]);
   useEffect(() => setRecents(loadRecents()), []);
 
-  const lots = (data?.lots ?? []) as LotItem[];
+  const lots = useMemo(() => (data?.lots ?? []) as LotItem[], [data?.lots]);
 
   const totaux = useMemo(() => {
     const adresses = new Set(lots.map((l) => `${rueDe(l.adresse)}|${l.ville ?? ""}`));
@@ -74,44 +121,19 @@ function Index() {
             <p className="text-sm text-muted-foreground">Carte et accès rapide</p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button asChild variant="outline">
-              <Link to="/import">
-                <Upload className="size-4" /> Import Patrimoine — ISIS
-              </Link>
-            </Button>
-            <Button asChild variant="outline">
-              <Link to="/import-travaux">
-                <Upload className="size-4" /> Import Suivi budgétaire annuel
-              </Link>
-            </Button>
-            <Button asChild variant="outline">
-              <Link to="/import-psp">
-                <Upload className="size-4" /> Import Historique CMD
-              </Link>
-            </Button>
-            <Button asChild variant="outline">
-              <Link to="/psp-validation">
-                <ListChecks className="size-4" /> Analyse historique CMD
-              </Link>
-            </Button>
-            <Button asChild variant="outline">
-              <Link to="/suivi">
-                <ListChecks className="size-4" /> Opérations
-              </Link>
-            </Button>
-            <Button asChild variant="outline">
-              <Link to="/fournisseurs" search={LISTE_FOURNISSEURS_SEARCH_VIDE}>
-                <Building2 className="size-4" /> Fournisseurs
-              </Link>
-            </Button>
-            <Button asChild>
-              <Link
-                to="/dashboard-travaux"
-                search={{ commande: undefined, de: undefined, a: undefined }}
-              >
-                <BarChart3 className="size-4" /> Dashboard travaux
-              </Link>
-            </Button>
+            {raccourcis.map(({ to, label, icon: Icon, variant, search }) => (
+              <Button key={label} asChild variant={variant}>
+                {search ? (
+                  <Link to={to} search={search}>
+                    <Icon className="size-4" /> {label}
+                  </Link>
+                ) : (
+                  <Link to={to}>
+                    <Icon className="size-4" /> {label}
+                  </Link>
+                )}
+              </Button>
+            ))}
           </div>
         </div>
       </header>

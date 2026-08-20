@@ -35,6 +35,8 @@ import {
 import { getPspReferencePatrimoine } from "@/lib/psp.prep.data.functions";
 import {
   PSP_ANNEES,
+  construirePerimetresDepuisSaisie,
+  construireProgrammeDepuisSaisie,
   modifierOperationListe,
   supprimerOperationListe,
   type PspAnnee,
@@ -55,6 +57,7 @@ import {
   updatePspOperationComplete,
 } from "@/lib/psp.prep.supabase.functions";
 import type { LotInfo, PerimetreLigne } from "@/lib/psp.prep.v7";
+import { extraireCodeCorpsEtat } from "@/lib/psp.prep.v7";
 import { cn } from "@/lib/utils";
 
 /** Année de référence de la programmation pluriannuelle (2027-2031). */
@@ -233,10 +236,7 @@ export default function PspV1Page() {
   const handleModifier = async (saisie: SaisieOperation, operation?: PspOperation | null) => {
     const cible = operation ?? operations.find((o) => o.id === selectedOpId) ?? null;
     if (!cible) return;
-    const programme: Record<string, number> = {};
-    PSP_ANNEES.forEach((a, i) => {
-      programme[String(a)] = Number(saisie.programme[i]) || 0;
-    });
+    const programme = construireProgrammeDepuisSaisie(saisie.programme);
     const patch: Parameters<typeof modifierOperationListe>[2] = {
       tranche: saisie.tranche,
       categorie: saisie.categorie,
@@ -260,19 +260,14 @@ export default function PspV1Page() {
           id: cible.id,
           trancheCode: saisie.tranche,
           categorie: saisie.categorie,
-          corpsEtatCode: (saisie.corps_etat.match(/\(([^)]+)\)/)?.[1] ?? null) as string | null,
+          corpsEtatCode: extraireCodeCorpsEtat(saisie.corps_etat),
           corpsEtat: saisie.corps_etat || null,
           natureTravaux: saisie.nature_travaux || null,
           programme,
           remarques: saisie.remarques ?? null,
           statut: saisie.statut ?? null,
           priorite: saisie.priorite ?? null,
-          perimetres: (saisie.perimetres ?? []).map((p) => ({
-            niveau: p.niveau as "tranche" | "rue" | "adresse" | "lot",
-            rue: p.rue,
-            numero: p.numero,
-            lotId: p.lot_id,
-          })),
+          perimetres: construirePerimetresDepuisSaisie(saisie.perimetres),
         },
       });
       setOperations((prev) =>

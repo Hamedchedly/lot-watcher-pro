@@ -31,12 +31,18 @@ import {
 } from "@/components/ui/select";
 import { TableCell, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
-import { PSP_ANNEES, type PspAnnee, type PspCategorie } from "@/lib/psp.prep";
+import {
+  PSP_ANNEES,
+  construireProgrammeDepuisMontants,
+  construirePerimetresDepuisSaisie,
+  type PspAnnee,
+  type PspCategorie,
+} from "@/lib/psp.prep";
 import {
   createPspOperationComplete,
   rechercherFournisseursDevis,
 } from "@/lib/psp.prep.supabase.functions";
-import { PRIORITE_LABELS, STATUT_LABELS } from "@/lib/psp.prep.v7";
+import { PRIORITE_LABELS, STATUT_LABELS, extraireCodeCorpsEtat } from "@/lib/psp.prep.v7";
 import type { ReferencePatrimoine } from "@/lib/psp.prep.data";
 
 const CHARGE_OPERATION = "HCHEDLY";
@@ -113,28 +119,21 @@ export default function PspQuickAddRow({
     if (figee || !rec.tranche || rec.conflit) return;
     setSaving(true);
     try {
-      const programme: Record<string, number> = {};
-      for (const a of PSP_ANNEES) programme[String(a)] = montants[String(a)] ?? 0;
       await createPspOperationComplete({
         data: {
           programmationId,
           trancheCode: rec.tranche,
           categorie,
-          corpsEtatCode: (corpsEtat.match(/\(([^)]+)\)/)?.[1] ?? null) as string | null,
+          corpsEtatCode: extraireCodeCorpsEtat(corpsEtat),
           corpsEtat: corpsEtat || null,
           natureTravaux: nature || null,
-          programme,
+          programme: construireProgrammeDepuisMontants(montants),
           ligneBudget: null,
           remarques: notes.trim() || null,
           statut,
           priorite,
           origine: "preparation",
-          perimetres: rec.perimetres.map((p) => ({
-            niveau: p.niveau as "tranche" | "rue" | "adresse" | "lot",
-            rue: p.rue,
-            numero: p.numero,
-            lotId: p.lot_id,
-          })),
+          perimetres: construirePerimetresDepuisSaisie(rec.perimetres),
           devis: devisCoche
             ? [
                 {

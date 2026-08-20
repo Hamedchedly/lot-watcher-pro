@@ -5,9 +5,9 @@ import { Link, createFileRoute } from "@tanstack/react-router";
 import {
   Building2,
   ChevronRight,
-  Filter,
   Home,
   Info as InfoIcon,
+  KeyRound,
   Mail,
   MapPin,
   Phone,
@@ -28,7 +28,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -60,6 +59,7 @@ import { getFournisseursPourCommandes } from "@/lib/fournisseurs.functions";
 import { libelleEntreprise } from "@/lib/fournisseurs";
 import type { FicheFournisseurInfo } from "@/components/CommandeFicheDialog";
 import CommandeFicheDialog from "@/components/CommandeFicheDialog";
+import PatrimoineSearch from "@/components/PatrimoineSearch";
 
 // `z.coerce.string()` : TanStack Router JSON-parse les query params (« 1426 », « 1234 »)
 // arrivent en number → coerce les convertit en string sans casser le rendu (erreur 500 sinon).
@@ -211,19 +211,13 @@ function AdressesPage() {
               />
               Afficher les garages
             </label>
-            <div className="relative w-full sm:w-64">
-              <Search className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
-              <Input
-                type="search"
-                placeholder="Rechercher..."
-                className="pl-9"
-                defaultValue={q}
-                onKeyDown={(e) => e.key === "Enter" && handleSearch(e.currentTarget.value)}
-              />
-            </div>
-            <Button variant="outline" size="icon">
-              <Filter className="size-4" />
-            </Button>
+            <PatrimoineSearch
+              q={q}
+              villes={villeRows}
+              showGarages={showGarages}
+              onSearch={handleSearch}
+              onNavigate={(search) => navigate({ search })}
+            />
           </div>
         </div>
       </header>
@@ -314,7 +308,8 @@ function AdressesPage() {
                   <span className="text-xs text-muted-foreground">
                     {resultatsRecherche.villes.length +
                       resultatsRecherche.adresses.length +
-                      resultatsRecherche.locataires.length}{" "}
+                      resultatsRecherche.locataires.length +
+                      resultatsRecherche.ers.length}{" "}
                     résultat(s)
                   </span>
                 </header>
@@ -405,16 +400,43 @@ function AdressesPage() {
                   </section>
                 )}
 
+                {/* ER (identifiants patrimoine) */}
+                {resultatsRecherche.ers.length > 0 && (
+                  <section className="overflow-hidden rounded-lg border bg-background shadow-sm">
+                    <header className="border-b bg-muted/50 px-4 py-2.5">
+                      <h3 className="text-sm font-semibold">ER</h3>
+                    </header>
+                    <div className="divide-y">
+                      {resultatsRecherche.ers.map((row) => (
+                        <button
+                          key={row.code}
+                          onClick={() => ouvrirFicheLot(row.code)}
+                          className="flex w-full items-center gap-2 px-4 py-3 text-left hover:bg-muted/50 transition-colors"
+                        >
+                          <KeyRound className="size-4 shrink-0 text-primary" />
+                          <span className="flex min-w-0 flex-col">
+                            <span className="font-mono font-semibold">{row.code}</span>
+                            <span className="text-xs text-muted-foreground">
+                              {row.adresse} · {row.ville} · Tranche {row.tranche}
+                            </span>
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </section>
+                )}
+
                 {/* Aucun résultat */}
                 {resultatsRecherche.villes.length +
                   resultatsRecherche.adresses.length +
-                  resultatsRecherche.locataires.length ===
+                  resultatsRecherche.locataires.length +
+                  resultatsRecherche.ers.length ===
                   0 && (
                   <div className="flex h-40 flex-col items-center justify-center gap-2 text-center">
                     <InfoIcon className="size-8 text-muted-foreground" />
                     <h2 className="text-lg font-medium">Aucun résultat</h2>
                     <p className="text-sm text-muted-foreground">
-                      Aucune ville, adresse ou locataire ne correspond à « {q} ».
+                      Aucune ville, adresse, ER ou locataire ne correspond à « {q} ».
                     </p>
                     <Button
                       variant="outline"
@@ -1022,7 +1044,7 @@ function TravauxList({
   // Enrichissement Historique CMD des commandes liées à ce périmètre (lecture seule de la
   // vue de rapprochement). Aucune modification des données sources ; les fiches restent
   // fonctionnelles même si la vue est indisponible.
-  const travauxRows = (data ?? []) as TravailRow[];
+  const travauxRows = useMemo(() => (data ?? []) as TravailRow[], [data]);
   const commandeIds = useMemo(
     () => travauxRows.filter((t) => t.is_commande && t.id).map((t) => t.id),
     [travauxRows],

@@ -31,10 +31,15 @@ import {
 import { TableCell, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { money0 } from "@/lib/formats";
-import { PSP_ANNEES, type PspCategorie } from "@/lib/psp.prep";
+import {
+  PSP_ANNEES,
+  construirePerimetresDepuisSaisie,
+  construireProgrammeDepuisMontants,
+  type PspCategorie,
+} from "@/lib/psp.prep";
 import type { ReferencePatrimoine } from "@/lib/psp.prep.data";
 import { createPspOperationComplete } from "@/lib/psp.prep.supabase.functions";
-import { STATUT_LABELS, libelleEntreprise } from "@/lib/psp.prep.v7";
+import { STATUT_LABELS, extraireCodeCorpsEtat, libelleEntreprise } from "@/lib/psp.prep.v7";
 
 const CHARGE_OPERATION = "HCHEDLY";
 
@@ -80,28 +85,21 @@ export default function PspV1QuickAddRow({
     if (saving || !rec.tranche || rec.conflit) return;
     setSaving(true);
     try {
-      const programme: Record<string, number> = {};
-      for (const a of PSP_ANNEES) programme[String(a)] = montants[String(a)] ?? 0;
       await createPspOperationComplete({
         data: {
           programmationId,
           trancheCode: rec.tranche,
           categorie,
-          corpsEtatCode: (corpsEtat.match(/\(([^)]+)\)/)?.[1] ?? null) as string | null,
+          corpsEtatCode: extraireCodeCorpsEtat(corpsEtat),
           corpsEtat: corpsEtat || null,
           natureTravaux: nature || null,
-          programme,
+          programme: construireProgrammeDepuisMontants(montants),
           ligneBudget: ligneBudget.trim() || null,
           remarques: null,
           statut,
           priorite: "normale",
           origine: "preparation",
-          perimetres: rec.perimetres.map((p) => ({
-            niveau: p.niveau as "tranche" | "rue" | "adresse" | "lot",
-            rue: p.rue,
-            numero: p.numero,
-            lotId: p.lot_id,
-          })),
+          perimetres: construirePerimetresDepuisSaisie(rec.perimetres),
           devis: devisCoche
             ? [
                 {

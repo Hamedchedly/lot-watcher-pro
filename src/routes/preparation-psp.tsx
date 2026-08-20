@@ -44,6 +44,8 @@ import {
   construireDonneesExportXlsx,
   FILTRES_VIDES,
   PSP_ANNEES,
+  construirePerimetresDepuisSaisie,
+  construireProgrammeDepuisSaisie,
   ajouterOperationListe,
   fusionnerProgramme,
   modifierOperationListe,
@@ -104,6 +106,7 @@ import {
   type LotInfo,
   type PerimetreLigne,
   programmeParAnneeCategorie,
+  extraireCodeCorpsEtat,
 } from "@/lib/psp.prep.v7";
 
 export const Route = createFileRoute("/preparation-psp")({
@@ -851,17 +854,14 @@ function PreparationPspPage() {
       if (nouvelle) nouvelle.sous_secteur = sousSecteur;
       return liste;
     });
-    const programme: Record<string, number> = {};
-    PSP_ANNEES.forEach((a, i) => {
-      programme[String(a)] = Number(saisie.programme[i]) || 0;
-    });
+    const programme = construireProgrammeDepuisSaisie(saisie.programme);
     try {
       const ligne = await createCompleteFn({
         data: {
           programmationId: programmation.id,
           trancheCode: saisie.tranche,
           categorie: saisie.categorie,
-          corpsEtatCode: (saisie.corps_etat.match(/\(([^)]+)\)/)?.[1] ?? null) as string | null,
+          corpsEtatCode: extraireCodeCorpsEtat(saisie.corps_etat),
           corpsEtat: saisie.corps_etat || null,
           natureTravaux: saisie.nature_travaux || null,
           programme,
@@ -870,12 +870,7 @@ function PreparationPspPage() {
           statut: saisie.statut ?? null,
           priorite: saisie.priorite ?? null,
           origine: "preparation",
-          perimetres: (saisie.perimetres ?? []).map((p) => ({
-            niveau: p.niveau as "tranche" | "rue" | "adresse" | "lot",
-            rue: p.rue,
-            numero: p.numero,
-            lotId: p.lot_id,
-          })),
+          perimetres: construirePerimetresDepuisSaisie(saisie.perimetres),
           devis: undefined,
         },
       });
@@ -894,10 +889,7 @@ function PreparationPspPage() {
       toast.error("Programmation figée : modification impossible.");
       return;
     }
-    const programme: Record<string, number> = {};
-    PSP_ANNEES.forEach((a, i) => {
-      programme[String(a)] = Number(saisie.programme[i]) || 0;
-    });
+    const programme = construireProgrammeDepuisSaisie(saisie.programme);
     const patch: {
       tranche: string;
       categorie: string;
@@ -938,19 +930,14 @@ function PreparationPspPage() {
           id: cible.id,
           trancheCode: saisie.tranche,
           categorie: saisie.categorie,
-          corpsEtatCode: (saisie.corps_etat.match(/\(([^)]+)\)/)?.[1] ?? null) as string | null,
+          corpsEtatCode: extraireCodeCorpsEtat(saisie.corps_etat),
           corpsEtat: saisie.corps_etat || null,
           natureTravaux: saisie.nature_travaux || null,
           programme,
           remarques: saisie.remarques ?? null,
           statut: saisie.statut ?? null,
           priorite: saisie.priorite ?? null,
-          perimetres: (saisie.perimetres ?? []).map((p) => ({
-            niveau: p.niveau as "tranche" | "rue" | "adresse" | "lot",
-            rue: p.rue,
-            numero: p.numero,
-            lotId: p.lot_id,
-          })),
+          perimetres: construirePerimetresDepuisSaisie(saisie.perimetres),
         },
       });
       setPerimetresParLigne((prev) => {
@@ -1135,16 +1122,16 @@ function PreparationPspPage() {
                       programmees={programmees2026}
                       suivi={suivi}
                       exercice={2027}
-                    sourceFichiers={suivi2026Disponible}
-                    modifications={modifications}
-                    confirmees={confirmees}
-                    decisions={decisions}
-                    onReporter={handleReporter}
-                    onAnnuler={handleAnnuler}
-                    onConserver={handleConserver}
-                    onReevaluer={handleReevaluer}
-                    onConfirmerModification={handleConfirmerModification}
-                  />
+                      sourceFichiers={suivi2026Disponible}
+                      modifications={modifications}
+                      confirmees={confirmees}
+                      decisions={decisions}
+                      onReporter={handleReporter}
+                      onAnnuler={handleAnnuler}
+                      onConserver={handleConserver}
+                      onReevaluer={handleReevaluer}
+                      onConfirmerModification={handleConfirmerModification}
+                    />
                   </>
                 ) : (
                   <PspTable

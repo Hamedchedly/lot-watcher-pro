@@ -133,6 +133,48 @@ export const montantAnnee = (op: PspOperation, annee: string | number): number =
 export const totalOperation = (op: PspOperation): number =>
   PSP_ANNEES.reduce((s, a) => s + montantAnnee(op, a), 0);
 
+/**
+ * Construit un programme annuel normalisé depuis un état local de saisie.
+ * Les cinq années PSP restent toujours présentes, même à 0.
+ */
+export const construireProgrammeDepuisMontants = (
+  montants: Record<string, number>,
+): Record<string, number> => {
+  const programme: Record<string, number> = {};
+  for (const annee of PSP_ANNEES) {
+    programme[String(annee)] = Number(montants[String(annee)]) || 0;
+  }
+  return programme;
+};
+
+/** Variante pratique pour la saisie PSP (tableau 2027→2031). */
+export const construireProgrammeDepuisSaisie = (programme: number[]): Record<string, number> => {
+  const montants: Record<string, number> = {};
+  for (const [index, annee] of PSP_ANNEES.entries()) {
+    montants[String(annee)] = Number(programme[index]) || 0;
+  }
+  return construireProgrammeDepuisMontants(montants);
+};
+
+/**
+ * Normalise les périmètres saisis vers le format persistant utilisé par les
+ * mutations Supabase.
+ */
+export const construirePerimetresDepuisSaisie = (
+  perimetres: SaisieOperation["perimetres"],
+): Array<{
+  niveau: "tranche" | "rue" | "adresse" | "lot";
+  rue: string | null;
+  numero: string | null;
+  lotId: string | null;
+}> =>
+  (perimetres ?? []).map((p) => ({
+    niveau: p.niveau as "tranche" | "rue" | "adresse" | "lot",
+    rue: p.rue,
+    numero: p.numero,
+    lotId: p.lot_id,
+  }));
+
 /** Somme des montants programmés d'un ensemble d'opérations. */
 export const totalProgramme = (ops: PspOperation[]): number =>
   ops.reduce((s, op) => s + totalOperation(op), 0);
