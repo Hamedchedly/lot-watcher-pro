@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { ChevronRight, FileSpreadsheet, Upload, Calendar } from "lucide-react";
 import PageHeader from "@/components/PageHeader";
@@ -65,10 +65,12 @@ type Report = {
   ignorees: number;
   erreurs: number;
   doublons: number;
+  sansCommande: number;
 };
 
 function ImportTravauxPage() {
   const inputRef = useRef<HTMLInputElement>(null);
+  const queryClient = useQueryClient();
   const createImport = useServerFn(createTravauxImport);
   const runBatch = useServerFn(importTravauxBatch);
   const finalize = useServerFn(finalizeTravauxImport);
@@ -103,6 +105,7 @@ function ImportTravauxPage() {
           annee_exercice: parseInt(anneeExercice),
           doublonsDetails: parsed.doublonsDetails,
           erreursDetails: parsed.erreurs,
+          sansCommandeDetails: parsed.sansCommande,
         },
       });
       execution = { id: importResult.id };
@@ -148,9 +151,15 @@ function ImportTravauxPage() {
         archivees: result.archivees,
         erreurs: parsed.erreurs.length,
         doublons: parsed.doublons,
+        sansCommande: parsed.sansCommande.length,
       });
       setLastImportId(execution.id);
       setMessage(null);
+      // V8.10 — l'import matérialise de nouvelles lignes « suivi » sans commande :
+      // on invalide le cache du registre /suivi pour que l'onglet « Suivi annuel »
+      // reflète immédiatement les nouvelles opérations à demander en devis.
+      await queryClient.invalidateQueries({ queryKey: ["psp-suivi-annuel"] });
+      await queryClient.invalidateQueries({ queryKey: ["psp-suivi-operations"] });
     } catch (cause) {
       if (typeof execution !== "undefined") {
         try {
@@ -237,6 +246,7 @@ function ImportTravauxPage() {
             <li>
               {preview.doublons} doublon(s) interne(s), dont {preview.conflits.length} conflit(s)
             </li>
+            <li>{preview.sansCommande.length} ligne(s) sans n° de commande</li>
             <li>{preview.erreurs.length} ligne(s) invalide(s)</li>
           </ul>
           {preview.conflits.length || preview.erreurs.length ? (
@@ -287,6 +297,11 @@ function ImportTravauxPage() {
               onClick={() => setDetailsType("ignoree")}
             />
             <ReportCounter
+              label="sans n° de commande"
+              count={report.sansCommande}
+              onClick={() => setDetailsType("sans_commande")}
+            />
+            <ReportCounter
               label="erreur(s)"
               count={report.erreurs}
               onClick={() => setDetailsType("erreur")}
@@ -312,6 +327,7 @@ type ImportDetailsType =
   | "doublon"
   | "ignoree"
   | "erreur"
+  | "sans_commande"
   | "report";
 
 const DETAILS_LABELS: Record<ImportDetailsType, string> = {
@@ -322,6 +338,7 @@ const DETAILS_LABELS: Record<ImportDetailsType, string> = {
   doublon: "Doublons",
   ignoree: "Rattachements non résolus",
   erreur: "Erreurs",
+  sans_commande: "Lignes sans n° de commande",
   report: "Reports d'exercice",
 };
 
@@ -418,7 +435,8 @@ function ImportDetailsDialog({
 
   const isCommandType =
     type === "creee" || type === "archivee" || type === "inchangee" || type === "report";
-  const isLineType = type === "doublon" || type === "ignoree" || type === "erreur";
+  const isLineType =
+    type === "doublon" || type === "ignoree" || type === "erreur" || type === "sans_commande";
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>

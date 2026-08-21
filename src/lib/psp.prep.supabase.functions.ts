@@ -2030,23 +2030,30 @@ export const getPspSuiviAnnuel = createServerFn({ method: "POST" })
         db.from("psp_ligne_patrimoine").select("*"),
         db.from("psp_devis").select("*"),
         db.from("psp_command_links").select("*"),
-        // V8.8 §4 — imports de l'exercice demandé (pour compter les lignes annuelles
-        // sans commande de CET exercice, pas le cumul tous exercices).
-        db.from("import_travaux").select("id").eq("annee_exercice", annee),
+        // V8.8 §4 / V8.13 — dernier import de l'exercice demandé (pour compter les
+        // lignes annuelles SANS commande de l'état COURANT du fichier, pas le cumul
+        // des imports successifs du même fichier : chaque réimport du même export
+        // ne doit pas doubler le compteur).
+        db
+          .from("import_travaux")
+          .select("id")
+          .eq("annee_exercice", annee)
+          .order("demarre_at", { ascending: false })
+          .limit(1),
       ]);
     if (commandesR.error) throw new Error(`Lecture du registre : ${commandesR.error.message}`);
 
-    // V8.8 §4 — nombre de lignes annuelles SANS commande détectées dans les imports
-    // de l'exercice demandé (travaux_import_details, lecture seule — INTANGIBLE).
-    const importIdsExercice = (importsExerciceR.data ?? []).map((i: any) => i.id);
+    // V8.8 §4 / V8.13 — nombre de lignes annuelles SANS commande détectées dans le
+    // DERNIER import de l'exercice demandé (travaux_import_details, lecture seule — INTANGIBLE).
+    const dernierImportExercice = (importsExerciceR.data ?? [])[0]?.id ?? null;
     let sansCmdImportR: { count: number | null } = { count: null };
-    if (importIdsExercice.length > 0) {
+    if (dernierImportExercice) {
       const r = await db
         .from("travaux_import_details")
         .select("id", { count: "exact", head: true })
-        .eq("type", "erreur")
+        .eq("type", "sans_commande")
         .eq("message", "Numéro de commande manquant")
-        .in("import_id", importIdsExercice);
+        .eq("import_id", dernierImportExercice);
       sansCmdImportR = { count: r.count ?? 0 };
     }
 

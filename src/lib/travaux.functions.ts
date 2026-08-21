@@ -192,6 +192,7 @@ export const createTravauxImport = createServerFn({ method: "POST" })
         annee_exercice: z.number(),
         doublonsDetails: z.array(issueSchema).default([]),
         erreursDetails: z.array(issueSchema).default([]),
+        sansCommandeDetails: z.array(issueSchema).default([]),
       })
       .parse(d),
   )
@@ -215,23 +216,26 @@ export const createTravauxImport = createServerFn({ method: "POST" })
       .single();
     if (error) throw new Error(`Création de l'import : ${error.message}`);
 
-    // Persistance immédiate des détails connus dès l'analyse du fichier (doublons, erreurs).
+    // Persistance immédiate des détails connus dès l'analyse du fichier (doublons, erreurs,
+    // lignes sans n° de commande). V8.13 : les lignes SANS commande sont un type de détail
+    // DÉDIÉ (« sans_commande ») — jamais comptées comme des erreurs.
     const detailsRows: Record<string, unknown>[] = [
       ...data.doublonsDetails.map((issue) => detailIssue(execution.id, "doublon", issue)),
       ...data.erreursDetails.map((issue) => detailIssue(execution.id, "erreur", issue)),
+      ...data.sansCommandeDetails.map((issue) => detailIssue(execution.id, "sans_commande", issue)),
     ];
     if (detailsRows.length) {
       const { error: detailsError } = await db.from("travaux_import_details").insert(detailsRows);
       if (detailsError) throw new Error(`Détails de l'import : ${detailsError.message}`);
     }
 
-    // V8.6.2 — MATÉRIALISATION des lignes annuelles SANS commande dans `psp_lignes`
+    // V8.6.2/V8.13 — MATÉRIALISATION des lignes annuelles SANS commande dans `psp_lignes`
     // (origine='suivi', données réelles du fichier). Ne touche PAS aux tables
     // d'import ; anti-doublon TR + corps d'état + nature. Ne bloque jamais l'import.
     try {
       await materialiserLignesSansCommande(
         db,
-        data.erreursDetails,
+        data.sansCommandeDetails,
         data.annee_exercice,
         data.fichier,
       );

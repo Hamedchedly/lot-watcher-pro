@@ -365,6 +365,53 @@ function DashboardTravauxPage() {
   const recentImports = data?.imports ?? [];
   const tranchesDetails = data?.tranchesDetails ?? [];
 
+  // V8.12 — LIGNES ANNUELLES SANS COMMANDE (matérialisées origine='suivi') : exposées dans
+  // le tableau du Dashboard + KPI/barres. Forme « commande-like » (sans n° de commande).
+  const lignesSuiviRows = useMemo<CommandeTravauxEnrichie[]>(() => {
+    const lignesSuivi = data?.lignesSuivi ?? [];
+    return lignesSuivi.map((l: Record<string, unknown>): CommandeTravauxEnrichie => {
+      const trancheCode = l["tranche_code"] ? String(l["tranche_code"]) : null;
+      const detail = tranchesDetails.find((td) => td.code === trancheCode);
+      const programme = (l["programme"] as Record<string, number> | undefined) ?? {};
+      return {
+        id: String(l["id"]),
+        sans_commande: true,
+        numero_commande: "",
+        secteur: null,
+        tranche_code: trancheCode,
+        lot_code: null,
+        batiment: null,
+        charge_clientele: null,
+        adresse: detail ? [detail.libelle, detail.localite].filter(Boolean).join(" – ") : null,
+        nature_analytique: l["categorie"] ? String(l["categorie"]) : null,
+        corps_etat: l["corps_etat"] ? String(l["corps_etat"]) : null,
+        charge_operation: null,
+        ligne_budget: l["ligne_budget"] ? String(l["ligne_budget"]) : null,
+        descriptif: l["nature_travaux"] ? String(l["nature_travaux"]) : null,
+        budget: Number(programme[2026] ?? 0) || null,
+        numero_fournisseur: null,
+        fournisseur: null,
+        etat_commande: null,
+        engage: 0,
+        ecart: null,
+        paye: 0,
+        solde: null,
+        etat_travaux: null,
+        date_demarrage: null,
+        date_fin_travaux: null,
+        observations: null,
+        support_communication: null,
+        date_communication: null,
+        annee_exercice: 2026,
+        classification_programmation: null,
+        classification_secteur: null,
+        actif: true,
+        created_at: "",
+        updated_at: "",
+      };
+    });
+  }, [data?.lignesSuivi, tranchesDetails]);
+
   // Conflits/doublons non résolus par commande (indicateur « ACT. ») — défini avant le
   // filtre `filteredJournal` afin qu'il puisse les prendre en compte.
   const historyMap = useMemo(() => {
@@ -836,13 +883,14 @@ function DashboardTravauxPage() {
   // Journal : filtre « ACT. » (anomalies de données OU conflit/doublon) — en surcouche des
   // filtres existants (année, état, secteur, ville, archivage…). Les statistiques globales
   // (KPI, donut, carte) restent sur `filtered`, seules les lignes du journal sont filtrées.
-  const filteredJournal = useMemo(
-    () =>
-      actFilter
-        ? filtered.filter((row) => getAlertesCommande(row).length > 0 || historyMap.has(row.id))
-        : filtered,
-    [filtered, actFilter, historyMap],
-  );
+  const filteredJournal = useMemo(() => {
+    const base = actFilter
+      ? filtered.filter((row) => getAlertesCommande(row).length > 0 || historyMap.has(row.id))
+      : filtered;
+    // V8.12 — lignes annuelles SANS commande ajoutées au tableau (année dans la plage).
+    const suivi = lignesSuiviRows.filter((l) => matchesAnnee(l, yearRange));
+    return [...base, ...suivi];
+  }, [filtered, actFilter, historyMap, lignesSuiviRows, yearRange]);
 
   const stats = useMemo(() => {
     const budget = filtered.reduce((s, r) => s + (r.budget || 0), 0);
@@ -864,9 +912,44 @@ function DashboardTravauxPage() {
     };
   }, [filtered, exercice]);
 
-  // Périmètre explicite du compteur « Commandes » — calculé dynamiquement, jamais codé en dur.
-  const actifsTotal = allCommandes.filter((c) => c.actif).length;
-  const archivesTotal = allCommandes.length - actifsTotal;
+  // V8.12 — KPI du suivi annuel ANM (engagé, payé, % programmé, nb commandes) + barres
+  // d'avancement par catégorie (GT/GE/CP). Les lignes SANS commande (lignesSuiviRows)
+  // entrent dans le budget total et le « reste » des barres.
+  const statsAnm = useMemo(() => {
+    const eng = (rows: Array<{ engage?: number | null }>) =>
+      rows.reduce((s, r) => s + (r.engage || 0), 0);
+    const bud = (rows: Array<{ budget?: number | null }>) =>
+      rows.reduce((s, r) => s + (r.budget || 0), 0);
+    const prog = filtered.filter((r) => !!r.ligne_budget);
+    const hors = filtered.filter((r) => !r.ligne_budget);
+    const suiviAnnee = lignesSuiviRows.filter((l) => matchesAnnee(l, yearRange));
+    const engage = eng(filtered);
+    const paye = filtered.reduce((s, r) => s + (r.paye || 0), 0);
+    const engProg = eng(prog);
+    const budgetTotal = bud(filtered) + bud(suiviAnnee);
+    const pct = budgetTotal > 0 ? Math.round((engProg / budgetTotal) * 100) : 0;
+    const cat = (["GT", "GE", "CP"] as const).map((code) => {
+      const cmds = filtered.filter((r) => r.nature_analytique === code);
+      const suivi = suiviAnnee.filter((l) => l.nature_analytique === code);
+      const cmdsProg = cmds.filter((r) => !!r.ligne_budget);
+      const cmdsHors = cmds.filter((r) => !r.ligne_budget);
+      return {
+        code,
+        budget: bud(cmds) + bud(suivi),
+        // V8.12 — segments « commandes » mesurés en ENGAGÉ : les commandes hors
+        // programmation n'ont pas de budget dans le fichier ANM ; leur engagé rend
+        // le segment visible. Reste = budget − engagé (non engagé).
+        prog: eng(cmdsProg),
+        hors: eng(cmdsHors),
+        engage: eng(cmds),
+        reste: Math.max(0, bud(cmds) + bud(suivi) - eng(cmds)),
+        nbProg: cmdsProg.length,
+        nbHors: cmdsHors.length,
+        nbSuivi: suivi.length,
+      };
+    });
+    return { engage, paye, pct, budgetTotal, nProg: prog.length, nHors: hors.length, cat };
+  }, [filtered, lignesSuiviRows, yearRange]);
 
   const dataSecteur = useMemo(() => repartitionCommandesParSecteur(filtered), [filtered]);
 
@@ -1255,18 +1338,113 @@ function DashboardTravauxPage() {
           </div>
         </section>
 
-        {/* KPIs */}
-        <section className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <Kpi label="Engagé Total" value={money0(stats.engage)} trend="ACTUEL" />
-          <Kpi label="Budget Prévu" value={money0(stats.budget)} trend="CIBLE" />
-          <Kpi label="% Programmation" value={`${stats.pctProg}%`} trend="QUALITÉ" />
-          <Kpi
-            label="Commandes"
-            value={stats.total.toString()}
-            detail={`${stats.done} terminées · ${actifsTotal} actives · ${archivesTotal} archivées`}
-            trend="FLUX"
-          />
-        </section>
+        {/* V8.12 — KPIs (engagé + payé combinés) et barres d'avancement sur la même ligne */}
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            {/* Engagé + Payé dans la MÊME carte */}
+            <div className="rounded-xl border bg-card p-4 shadow-sm hover:shadow-md transition-shadow sm:col-span-2">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div>
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                    Total engagé
+                  </p>
+                  <div className="mt-1 flex items-baseline gap-2">
+                    <p className="text-2xl font-black text-slate-900">{money0(statsAnm.engage)}</p>
+                    <span className="text-[9px] font-black text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded uppercase tracking-tighter">
+                      ACTUEL
+                    </span>
+                  </div>
+                </div>
+                <div>
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                    Montant payé
+                  </p>
+                  <div className="mt-1 flex items-baseline gap-2">
+                    <p className="text-2xl font-black text-slate-900">{money0(statsAnm.paye)}</p>
+                    <span className="text-[9px] font-black text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded uppercase tracking-tighter">
+                      FLUX
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <Kpi label="% Programmé" value={`${statsAnm.pct}%`} trend="QUALITÉ" />
+            <Kpi
+              label="Commandes"
+              value={String(statsAnm.nProg + statsAnm.nHors)}
+              detail={`${statsAnm.nProg} programmées · ${statsAnm.nHors} hors programmation`}
+              trend="FLUX"
+            />
+          </div>
+
+          {/* Barres d'avancement budgétaire par catégorie (GT · GE · CP) — à côté des KPI */}
+          <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+            <h3 className="mb-1 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-slate-400">
+              <BarChart3 className="size-4 text-blue-600" /> Avancement budgétaire par catégorie
+            </h3>
+            <p className="mb-3 text-[9px] text-slate-400">
+              Segments : montant engagé (programmées / hors programmation) · reste = budget non
+              engagé (rayé).
+            </p>
+            <div className="space-y-5">
+              {statsAnm.cat.map((c) => {
+                const total = c.budget || 1;
+                const pProg = (c.prog / total) * 100;
+                const pHors = (c.hors / total) * 100;
+                const pReste = (c.reste / total) * 100;
+                return (
+                  <div key={c.code}>
+                    <div className="flex items-baseline justify-between text-[10px] font-black uppercase tracking-widest">
+                      <span className="text-slate-700">{c.code}</span>
+                      <span className="text-slate-400">
+                        {money0(c.budget)} · engagé {money0(c.engage)}
+                      </span>
+                    </div>
+                    <div className="mt-1.5 flex h-4 w-full overflow-hidden rounded-full bg-slate-100">
+                      <div
+                        style={{ width: `${pProg}%`, background: SECTOR_COLORS[c.code] }}
+                        title={`Programmées (engagé) ${money0(c.prog)}`}
+                      />
+                      <div
+                        style={{
+                          width: `${pHors}%`,
+                          background: SECTOR_COLORS[c.code],
+                          opacity: 0.4,
+                        }}
+                        title={`Hors programmation (engagé) ${money0(c.hors)}`}
+                      />
+                      <div
+                        className="bg-[repeating-linear-gradient(45deg,#cbd5e1,#cbd5e1_4px,#e2e8f0_4px,#e2e8f0_8px)]"
+                        style={{ width: `${pReste}%` }}
+                        title={`Reste (budget − engagé) ${money0(c.reste)}`}
+                      />
+                    </div>
+                    <div className="mt-1 flex flex-wrap gap-3 text-[9px] text-slate-400">
+                      <span className="inline-flex items-center gap-1">
+                        <span
+                          className="size-2 rounded-sm"
+                          style={{ background: SECTOR_COLORS[c.code] }}
+                        />
+                        Programmées (engagé) {money0(c.prog)} ({c.nbProg})
+                      </span>
+                      <span className="inline-flex items-center gap-1">
+                        <span
+                          className="size-2 rounded-sm"
+                          style={{ background: SECTOR_COLORS[c.code], opacity: 0.4 }}
+                        />
+                        Hors prog (engagé) {money0(c.hors)} ({c.nbHors})
+                      </span>
+                      <span className="inline-flex items-center gap-1">
+                        <span className="size-2 rounded-sm bg-[repeating-linear-gradient(45deg,#cbd5e1,#cbd5e1_2px,#e2e8f0_2px,#e2e8f0_4px)]" />
+                        Reste {money0(c.reste)} · sans commande {c.nbSuivi}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        </div>
 
         {/* CARTE & GRAPHIQUES */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -1815,24 +1993,32 @@ function DashboardTravauxPage() {
                   return (
                     <tr key={row.id} className="hover:bg-blue-50/30 transition-colors group">
                       <td className="p-4 font-bold text-slate-400">{yearOf(row)}</td>
-                      <td className="p-4 font-black text-blue-600 truncate">
-                        <button
-                          onClick={() => {
-                            setSelectedDetail(row);
-                            // Ouvre la fiche VIA l'URL (param ?commande=) en FUSIONNANT avec
-                            // les autres paramètres (de/a) : le bouton retour navigateur
-                            // retirera le param et fermera l'overlay.
-                            if (row.numero_commande) {
-                              navigate({
-                                search: (prev) => ({ ...prev, commande: row.numero_commande }),
-                              });
-                            }
-                          }}
-                          className="hover:underline flex items-center gap-1"
-                        >
-                          {row.numero_commande}
-                          <Info className="size-3 opacity-0 group-hover:opacity-100" />
-                        </button>
+                      <td className="p-4 font-black truncate">
+                        {row.sans_commande ? (
+                          <span className="inline-block rounded bg-slate-200 px-2 py-0.5 text-[8px] font-black uppercase tracking-wider text-slate-600">
+                            Sans commande
+                          </span>
+                        ) : (
+                          <button
+                            onClick={() => {
+                              // V8.12 — la ligne est garantie « commande » ici (hors badge
+                              // « Sans commande ») : cast sûr vers le type enrichi.
+                              setSelectedDetail(row as CommandeTravauxEnrichie);
+                              // Ouvre la fiche VIA l'URL (param ?commande=) en FUSIONNANT avec
+                              // les autres paramètres (de/a) : le bouton retour navigateur
+                              // retirera le param et fermera l'overlay.
+                              if (row.numero_commande) {
+                                navigate({
+                                  search: (prev) => ({ ...prev, commande: row.numero_commande }),
+                                });
+                              }
+                            }}
+                            className="hover:underline flex items-center gap-1 text-blue-600"
+                          >
+                            {row.numero_commande}
+                            <Info className="size-3 opacity-0 group-hover:opacity-100" />
+                          </button>
+                        )}
                       </td>
                       <td className="p-4 font-black text-slate-700 truncate">
                         <Link

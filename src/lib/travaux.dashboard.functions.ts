@@ -80,6 +80,8 @@ export type CommandeTravaux = {
  * Aucun de ces champs n'est écrit en base — sources immuables.
  */
 export type CommandeTravauxEnrichie = CommandeTravaux & {
+  /** V8.12 — marqueur des lignes annuelles SANS commande ajoutées au tableau du Dashboard. */
+  sans_commande?: boolean;
   commande_id?: string | null;
   psp_date_commande?: string | null;
   nature_historique?: string | null;
@@ -152,6 +154,8 @@ export type TravauxDashboardData = {
   historique: HistoriqueTravaux[];
   imports: ImportTravaux[];
   tranchesDetails: TrancheDetail[];
+  /** V8.12 — lignes annuelles SANS commande (psp_lignes origine='suivi'). */
+  lignesSuivi: Record<string, unknown>[];
 };
 
 export type CheckTravauxImportResult = {
@@ -267,18 +271,22 @@ export const getTravauxDashboard = createServerFn({ method: "GET", strict: false
 
     // On charge TOUTES les commandes (actives et archivées) : le Dashboard peut ainsi filtrer
     // par année d'exercice et consulter les années historiques sans dépendre de `actif = true`.
-    const [commandesResult, importsResult, tranchesResult, enrichiesResult] = await Promise.all([
-      db
-        .from("travaux_commandes")
-        .select("*")
-        .order("engage", { ascending: false, nullsFirst: false }),
-      // Tous les imports (tous exercices) : l'en-tête affiche la date du dernier import de
-      // l'exercice courant, qui ne figurerait pas forcément dans les 5 plus récents.
-      db.from("import_travaux").select("*").order("demarre_at", { ascending: false }).limit(500),
-      db.from("tranches").select("code, libelle, localite, nb_logements").eq("actif", true),
-      // Enrichissement Historique CMD via la vue de rapprochement (lecture seule).
-      db.from("v_travaux_commandes_enrichies").select(SELECT_PASP_ENRICHIES),
-    ]);
+    const [commandesResult, importsResult, tranchesResult, enrichiesResult, lignesSuiviResult] =
+      await Promise.all([
+        db
+          .from("travaux_commandes")
+          .select("*")
+          .order("engage", { ascending: false, nullsFirst: false }),
+        // Tous les imports (tous exercices) : l'en-tête affiche la date du dernier import de
+        // l'exercice courant, qui ne figurerait pas forcément dans les 5 plus récents.
+        db.from("import_travaux").select("*").order("demarre_at", { ascending: false }).limit(500),
+        db.from("tranches").select("code, libelle, localite, nb_logements").eq("actif", true),
+        // Enrichissement Historique CMD via la vue de rapprochement (lecture seule).
+        db.from("v_travaux_commandes_enrichies").select(SELECT_PASP_ENRICHIES),
+        // V8.12 — lignes annuelles SANS commande (matérialisées à l'import, origine='suivi') :
+        // exposées dans le tableau + KPI/barres du Dashboard.
+        db.from("psp_lignes").select("*").eq("origine", "suivi"),
+      ]);
 
     let historiqueResult;
     try {
@@ -314,6 +322,7 @@ export const getTravauxDashboard = createServerFn({ method: "GET", strict: false
       })[],
       imports: (importsResult.data ?? []) as ImportTravaux[],
       tranchesDetails: (tranchesResult.data ?? []) as TrancheDetail[],
+      lignesSuivi: (lignesSuiviResult.data ?? []) as Record<string, unknown>[],
     } satisfies TravauxDashboardData;
   },
 );
@@ -438,6 +447,7 @@ export const getTravauxImportDetails = createServerFn({ method: "POST" })
           "doublon",
           "ignoree",
           "erreur",
+          "sans_commande",
           "report",
         ]),
         page: z.number().int().min(1).optional(),

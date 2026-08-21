@@ -590,3 +590,117 @@ export const kpiRegistreAnnuel = (lignes: LigneRegistreAnnuel[]) => {
     aVerifier: lignes.filter((l) => l.etat_annuel === "a_verifier").length,
   };
 };
+
+// ── V8.10 — ONGLETS DEMANDES DE DEVIS (avancement devis) ─────────────────────
+// Filtre d'avancement des demandes de devis, commun aux deux onglets de /suivi
+// (« Suivi annuel » sans commande + « PSP »). Dérivé des données RÉELLES de
+// consultation (psp_devis) — aucun état stocké, aucun MOCK.
+
+export type AvancementDevis = "sans_devis" | "attente_devis" | "devis_recus";
+
+export const AVANCEMENT_DEVIS_LABELS: Record<AvancementDevis, string> = {
+  sans_devis: "Sans devis",
+  attente_devis: "Attente de devis",
+  devis_recus: "Devis reçus",
+};
+
+/** Options du filtre d'avancement (3 états + « Toutes »). */
+export const AVANCEMENT_DEVIS_OPTIONS: Array<AvancementDevis | "toutes"> = [
+  "sans_devis",
+  "attente_devis",
+  "devis_recus",
+  "toutes",
+];
+
+/** Avancement devis d'une consultation (dérivé — 3 états uniquement). */
+export const avancementDevis = (c: {
+  nb_demandes: number;
+  nb_devis_recus: number;
+}): AvancementDevis => {
+  if (c.nb_devis_recus > 0) return "devis_recus";
+  if (c.nb_demandes > 0) return "attente_devis";
+  return "sans_devis";
+};
+
+/** Filtre générique par avancement devis — accepte soit une ligne exposant
+ *  directement `avancement` (LigneDemandeDevis), soit une ligne exposant
+ *  `consultation { nb_demandes, nb_devis_recus }` (registre / vue opération). */
+export const filtrerAvancementDevis = <
+  T extends {
+    avancement?: AvancementDevis;
+    consultation?: { nb_demandes: number; nb_devis_recus: number };
+  },
+>(
+  lignes: T[],
+  filtre: AvancementDevis | "toutes",
+): T[] => {
+  if (filtre === "toutes") return lignes;
+  return lignes.filter((l) => {
+    const av =
+      l.avancement ?? avancementDevis(l.consultation ?? { nb_demandes: 0, nb_devis_recus: 0 });
+    return av === filtre;
+  });
+};
+
+/** Ligne commune des onglets « demandes de devis » — les deux onglets partagent
+ *  le même tableau ; la fiche opération s'ouvre via pspLigneId. */
+export type LigneDemandeDevis = {
+  key: string;
+  pspLigneId: string | null;
+  tranche: string;
+  adresse: string | null;
+  cc: string | null;
+  corps_etat: string | null;
+  nature: string | null;
+  origine: "psp" | "hors_psp";
+  /** Montant programmé sur l'année de l'onglet — nul si hors programme. */
+  montant: number | null;
+  nb_demandes: number;
+  nb_devis_recus: number;
+  statut_consultation: string;
+  statut_consultation_label: string;
+  avancement: AvancementDevis;
+};
+
+/** Construit une LigneDemandeDevis depuis une ligne du registre annuel. */
+export const ligneDemandeDevisDepuisRegistre = (l: LigneRegistreAnnuel): LigneDemandeDevis => ({
+  key: l.id,
+  pspLigneId: l.pspLigneId,
+  tranche: l.tranche,
+  adresse: l.adresse,
+  cc: l.cc,
+  corps_etat: l.corps_etat,
+  nature: l.nature,
+  origine: l.origine,
+  montant: l.programme_annee != null && l.programme_annee > 0 ? l.programme_annee : l.budget,
+  nb_demandes: l.consultation.nb_demandes,
+  nb_devis_recus: l.consultation.nb_devis_recus,
+  statut_consultation: l.consultation.statut,
+  statut_consultation_label: l.consultation.statut_label,
+  avancement: avancementDevis(l.consultation),
+});
+
+/** Construit une LigneDemandeDevis depuis une vue opération (SuiviOperationVue),
+ *  pour l'année donnée (montant programmé sur cette année). */
+export const ligneDemandeDevisDepuisOperation = (
+  op: SuiviOperationVue,
+  annee: number,
+): LigneDemandeDevis => {
+  const prog = op.programmation.annees.find((a) => a.annee === annee);
+  return {
+    key: op.identite.id,
+    pspLigneId: op.identite.id,
+    tranche: op.identite.tranche,
+    adresse: op.programmation.adresse,
+    cc: op.programmation.cc,
+    corps_etat: op.programmation.corps_etat,
+    nature: op.programmation.nature,
+    origine: op.identite.origine,
+    montant: prog && prog.montant > 0 ? prog.montant : null,
+    nb_demandes: op.consultation.nb_demandes,
+    nb_devis_recus: op.consultation.nb_devis_recus,
+    statut_consultation: op.consultation.statut,
+    statut_consultation_label: op.consultation.statut_label,
+    avancement: avancementDevis(op.consultation),
+  };
+};

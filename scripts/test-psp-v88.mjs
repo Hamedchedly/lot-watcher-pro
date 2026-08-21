@@ -123,9 +123,11 @@ check(
   supabaseFn.includes('ligne.origine === "suivi"'),
 );
 check(
-  "D3. compteur par exercice (import_travaux filtré par l'année)",
+  "D3. compteur sans commande par exercice — dernier import de l'exercice (V8.13)",
   supabaseFn.includes('.eq("annee_exercice", annee)') &&
-    supabaseFn.includes('.in("import_id", importIdsExercice)'),
+    supabaseFn.includes('.order("demarre_at", { ascending: false })') &&
+    supabaseFn.includes('.limit(1)') &&
+    supabaseFn.includes('.eq("import_id", dernierImportExercice)'),
 );
 check(
   "D4. script de matérialisation one-shot créé (workflow d'import, pas à l'affichage)",
@@ -228,7 +230,10 @@ check(
 
 // ════════════ G. ANNÉES ═══════════════════════════════════════════════════════
 console.log("\n=== G. Années (2026 réel / 2027 préparation) ===");
-check("G1. /suivi 2026 par défaut", fichier("routes/suivi.tsx").includes("useState<number>(2026)"));
+check(
+  "G1. /suivi : onglet « Suivi annuel » figé sur 2026 (V8.10 — années par onglet)",
+  fichier("routes/suivi.tsx").includes("ANNEE_SUIVI = 2026"),
+);
 check(
   "G2. préparation PSP centrée 2027-2031 (PSP_ANNEES)",
   fichier("lib/psp.prep.ts").includes("[2027, 2028, 2029, 2030, 2031]"),

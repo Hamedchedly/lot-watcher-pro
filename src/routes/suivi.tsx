@@ -7,7 +7,7 @@
  * (commandes de l'exercice + opérations de la préparation programmées sur
  * l'année ou hors PSP). Aucun MOCK, Dashboard inchangé.
  */
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Link, createFileRoute } from "@tanstack/react-router";
@@ -16,17 +16,19 @@ import { ArrowLeft, FileSearch, Loader2, Workflow } from "lucide-react";
 import PspCommandesARapprocherPanel from "@/components/suivi/PspCommandesARapprocherPanel";
 import PspCorrespondanceCommandeDialog from "@/components/suivi/PspCorrespondanceCommandeDialog";
 import SuiviOperationFiche from "@/components/suivi/SuiviOperationFiche";
-import SuiviTable from "@/components/suivi/SuiviTable";
+import TableauDemandesDevis from "@/components/suivi/TableauDemandesDevis";
 import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { money0 } from "@/lib/formats";
 import { getPspSuiviAnnuel, getPspSuiviOperations } from "@/lib/psp.prep.supabase.functions";
-import type { LigneRegistreAnnuel } from "@/lib/psp.suivi.view";
+import {
+  kpiRegistreAnnuel,
+  ligneDemandeDevisDepuisOperation,
+  ligneDemandeDevisDepuisRegistre,
+  operationSurAnnee,
+  type LigneDemandeDevis,
+  type LigneRegistreAnnuel,
+} from "@/lib/psp.suivi.view";
 import type { SuiviOperationVue } from "@/lib/psp.suivi.foundation";
 
 export const Route = createFileRoute("/suivi")({
@@ -43,17 +45,21 @@ export const Route = createFileRoute("/suivi")({
   component: SuiviPage,
 });
 
+// V8.10 — /suivi en DEUX ONGLETS : « Suivi annuel 2026 » (opérations sans
+// commande → demandes de devis, mises à jour à chaque import du fichier
+// annuel) et « PSP 2027 » (opérations programmées 2027). Années figées par
+// onglet — le sélecteur d'année est supprimé.
+const ANNEE_SUIVI = 2026;
+const ANNEE_PSP = 2027;
+
 function SuiviPage() {
   const fetchRegistre = useServerFn(getPspSuiviAnnuel);
   const fetchOperations = useServerFn(getPspSuiviOperations);
   const queryClient = useQueryClient();
 
-  // V8.6.1 §4/§8 — année sélectionnée (défaut 2026).
-  const [annee, setAnnee] = useState<number>(2026);
-
   const { data: registre, isLoading } = useQuery({
-    queryKey: ["psp-suivi-annuel", annee],
-    queryFn: () => fetchRegistre({ data: { annee } }),
+    queryKey: ["psp-suivi-annuel", ANNEE_SUIVI],
+    queryFn: () => fetchRegistre({ data: { annee: ANNEE_SUIVI } }),
     staleTime: 1000 * 30,
     retry: 1,
   });
@@ -64,11 +70,16 @@ function SuiviPage() {
     staleTime: 1000 * 60,
     retry: 1,
   });
-  const operations = (operationsData?.operations ?? []) as SuiviOperationVue[];
-  const parPspLigneId = new Map(operations.map((o) => [o.identite.id, o]));
+  const operations = useMemo(
+    () => (operationsData?.operations ?? []) as SuiviOperationVue[],
+    [operationsData],
+  );
+  const parPspLigneId = useMemo(
+    () => new Map(operations.map((o) => [o.identite.id, o])),
+    [operations],
+  );
 
-  const lignes = (registre?.lignes ?? []) as LigneRegistreAnnuel[];
-  const anneesDisponibles = (registre?.anneesDisponibles ?? [2026]) as number[];
+  const lignes = useMemo(() => (registre?.lignes ?? []) as LigneRegistreAnnuel[], [registre]);
   const lignesSansCommandeImport = (registre?.lignesSansCommandeImport ?? 0) as number;
   const lignesSuiviMaterialisees = (registre?.lignesSuiviMaterialisees ?? 0) as number;
 
@@ -78,11 +89,11 @@ function SuiviPage() {
 
   /** V8.3/V8.6.1 — recharge le registre après création/enregistrement. */
   const refresh = async () => {
-    await queryClient.invalidateQueries({ queryKey: ["psp-suivi-annuel", annee] });
+    await queryClient.invalidateQueries({ queryKey: ["psp-suivi-annuel", ANNEE_SUIVI] });
     await queryClient.invalidateQueries({ queryKey: ["psp-suivi-operations"] });
     const d = await queryClient.fetchQuery({
-      queryKey: ["psp-suivi-annuel", annee],
-      queryFn: () => fetchRegistre({ data: { annee } }),
+      queryKey: ["psp-suivi-annuel", ANNEE_SUIVI],
+      queryFn: () => fetchRegistre({ data: { annee: ANNEE_SUIVI } }),
     });
     if (selection) {
       const vue = parPspLigneId.get(selection.identite.id);
@@ -91,14 +102,34 @@ function SuiviPage() {
     void d;
   };
 
-  const ouvrirLigne = (l: LigneRegistreAnnuel) => {
-    if (l.type === "operation" && l.pspLigneId) {
-      const vue = parPspLigneId.get(l.pspLigneId);
-      if (vue) setSelection(vue);
-      return;
-    }
-    // Ligne « commande » non rattachée → dialogue de correspondance (V8.6 §4).
-    if (l.type === "commande" && l.id) setCommandeSelection(l.id);
+  // V8.10 — KPI du registre 2026 (7 conventions V8.6.1 §12, conservés).
+  const kpi = useMemo(() => kpiRegistreAnnuel(lignes), [lignes]);
+
+  // V8.10 — lignes des deux onglets (même tableau partagé LigneDemandeDevis).
+  //  · Onglet « Suivi annuel » : opérations 2026 SANS commande (données réelles
+  //    du registre annuel V8.8.3) — but : demandes de devis.
+  const lignesSuiviAnnuel = useMemo<LigneDemandeDevis[]>(
+    () =>
+      lignes
+        .filter((l) => l.type === "operation" && l.etat_annuel === "sans_commande")
+        .map(ligneDemandeDevisDepuisRegistre),
+    [lignes],
+  );
+  //  · Onglet « PSP 2027 » : opérations programmées sur 2027 (préparation PSP).
+  const lignesPsp2027 = useMemo<LigneDemandeDevis[]>(
+    () =>
+      operations
+        .filter((o) => operationSurAnnee(o, ANNEE_PSP))
+        .map((o) => ligneDemandeDevisDepuisOperation(o, ANNEE_PSP)),
+    [operations],
+  );
+
+  /** Ouvre la fiche opération depuis une ligne des onglets (demandes de devis). */
+  const ouvrirDemande = (l: LigneDemandeDevis) => {
+    if (!l.pspLigneId) return;
+    const vue =
+      parPspLigneId.get(l.pspLigneId) ?? operations.find((o) => o.identite.id === l.pspLigneId);
+    if (vue) setSelection(vue);
   };
 
   return (
@@ -113,24 +144,8 @@ function SuiviPage() {
               Registre opérationnel annuel — données réelles du fichier annuel + commandes.
             </p>
           </div>
-          {/* V8.6.1 §4 — sélecteur d'année (défaut 2026). */}
-          <div className="flex items-center gap-2">
-            <span className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
-              Année
-            </span>
-            <Select value={String(annee)} onValueChange={(v) => setAnnee(Number(v))}>
-              <SelectTrigger className="h-8 w-24 text-[11px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {anneesDisponibles.map((a) => (
-                  <SelectItem key={a} value={String(a)}>
-                    {a}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          {/* V8.10 — sélecteur d'année supprimé : années figées par onglet
+              (Suivi annuel 2026 / PSP 2027). */}
           {/* V8.6.2 — plus de création manuelle générique depuis /suivi : une
               opération annuelle vient de la PRÉPARATION PSP ou du FICHIER ANNUEL
               (matérialisée par l'import, origine='suivi'). */}
@@ -167,12 +182,46 @@ function SuiviPage() {
       )}
 
       <main className="mx-auto max-w-7xl space-y-4 px-4 py-6 sm:px-6">
+        {/* V8.10 — KPI du registre 2026 conservés (7 conventions V8.6.1 §12). */}
+        {!isLoading && (
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
+            <Kpi label="Opérations" value={String(kpi.operations)} />
+            <Kpi label="Budget programmé" value={money0(kpi.budgetProgramme)} />
+            <Kpi label="Commandé" value={money0(kpi.budgetCommande)} />
+            <Kpi label="Engagé" value={money0(kpi.budgetEngage)} />
+            <Kpi label="Payé" value={money0(kpi.budgetPaye)} />
+            <Kpi label="Travaux en cours" value={String(kpi.travauxEnCours)} />
+            <Kpi label="Terminées" value={String(kpi.terminees)} />
+          </div>
+        )}
+
         {isLoading ? (
           <p className="flex items-center gap-2 text-sm text-muted-foreground">
             <Loader2 className="size-4 animate-spin" /> Chargement du suivi annuel…
           </p>
         ) : (
-          <SuiviTable lignes={lignes} annee={annee} onOpen={ouvrirLigne} />
+          <Tabs defaultValue="suivi-annuel">
+            <TabsList>
+              <TabsTrigger value="suivi-annuel">Suivi annuel {ANNEE_SUIVI}</TabsTrigger>
+              <TabsTrigger value="psp-2027">PSP {ANNEE_PSP}</TabsTrigger>
+            </TabsList>
+            <TabsContent value="suivi-annuel" className="pt-3">
+              <TableauDemandesDevis
+                titre={`Suivi annuel ${ANNEE_SUIVI} — sans commande`}
+                sousTitre="Opérations de l'exercice sans commande : à demander en devis. Mises à jour à chaque import du fichier annuel."
+                lignes={lignesSuiviAnnuel}
+                onOpen={ouvrirDemande}
+              />
+            </TabsContent>
+            <TabsContent value="psp-2027" className="pt-3">
+              <TableauDemandesDevis
+                titre={`PSP ${ANNEE_PSP} — programmées`}
+                sousTitre="Opérations de la préparation PSP programmées sur 2027."
+                lignes={lignesPsp2027}
+                onOpen={ouvrirDemande}
+              />
+            </TabsContent>
+          </Tabs>
         )}
       </main>
 
@@ -204,6 +253,15 @@ function SuiviPage() {
           }}
         />
       )}
+    </div>
+  );
+}
+
+function Kpi({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border bg-card px-2 py-1.5">
+      <p className="text-[9px] uppercase tracking-wider text-muted-foreground">{label}</p>
+      <p className="text-sm font-bold">{value}</p>
     </div>
   );
 }
