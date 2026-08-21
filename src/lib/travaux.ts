@@ -36,7 +36,26 @@ export type CommandeTravaux = {
   ligne?: number;
 };
 
-export type TravauxParseIssue = { line: number; message: string; numero_commande: string | null };
+export type TravauxParseIssue = {
+  line: number;
+  message: string;
+  numero_commande: string | null;
+  /** Identité de la ligne (ajoutée pour la revue des reports PSP : une ligne de
+   *  suivi sans commande reste identifiable par TR + C + ligne budgétaire). */
+  tranche_code?: string | null;
+  nature_analytique?: string | null;
+  ligne_budget?: string | null;
+  descriptif?: string | null;
+  /** V8.6.2 — corps d'état porté pour la matérialisation / anti-doublon. */
+  corps_etat?: string | null;
+  budget?: number | null;
+  adresse?: string | null;
+  charge_clientele?: string | null;
+  etat_commande?: string | null;
+  etat_travaux?: string | null;
+  engage?: number | null;
+  paye?: number | null;
+};
 export type ParsedTravaux = {
   commandes: CommandeTravaux[];
   lignes: number;
@@ -44,6 +63,8 @@ export type ParsedTravaux = {
   doublonsDetails: TravauxParseIssue[];
   conflits: TravauxParseIssue[];
   erreurs: TravauxParseIssue[];
+  /** V8.13 — lignes annuelles SANS numéro de commande (distinctes des erreurs). */
+  sansCommande: TravauxParseIssue[];
 };
 
 type Raw = Record<string, unknown>;
@@ -113,6 +134,61 @@ const headerAliases: Record<string, keyof CommandeTravaux> = {
   "support communication": "support_communication",
   "date communication": "date_communication",
 };
+
+/**
+ * V8.11 — ALIASES DU MODÈLE ANM (nouveau fichier « ANM_SUIVTRXSECT »).
+ * En-têtes techniques « *.ANA_SUIVTRXSECT » → champs travaux_commandes.
+ * La clé est la partie avant le suffixe « .ANA_SUIVTRXSECT », normalisée.
+ */
+const anmHeaderAliases: Record<string, keyof CommandeTravaux | null> = {
+  "comn num": "numero_commande",
+  "stsn budget": "budget",
+  "stsn engage": "engage",
+  "stsn paye": "paye",
+  "stsn solde": "solde",
+  "stsn ecart": "ecart",
+  "stsc corpsetat": "corps_etat",
+  "perc secteur": "secteur",
+  "patc n4": "tranche_code",
+  "uhmc arl": "charge_clientele",
+  "stsc adresse": "adresse",
+  "naac code": "nature_analytique",
+  "stsc chargeop": "charge_operation",
+  "stsc desctrx": "descriptif",
+  "stsc lignebud": "ligne_budget",
+  "entn num": "numero_fournisseur",
+  "w entc employeur": "fournisseur",
+  "stsc etattrx": "etat_travaux",
+  "stsc etatcom": "etat_commande",
+  "stsd debtrx": "date_demarrage",
+  "stsd fintrx": "date_fin_travaux",
+  "stsd datecom": "date_communication",
+  "stsc obstx": "observations",
+  // Colonnes sans correspondance (ignorées) :
+  "stsc lettre": null,
+  "b cmd": null,
+  "w flag new occ": null,
+  "b devis": null,
+};
+
+/** V8.11 — normalise les états du modèle ANM (majuscules) vers les libellés
+ *  métier compris par etatMetier : « TERMINES » → « Terminés », « PLANIFIES » →
+ *  « Planifiés », « EN COURS » → « En cours », « ANNULEE » → « Annulée »… */
+const normaliserEtatANM = (value: string | null | undefined): string | null => {
+  const t = (value ?? "").trim();
+  if (!t) return null;
+  const map: Record<string, string> = {
+    termines: "Terminés",
+    clos: "Close",
+    close: "Close",
+    planifies: "Planifiés",
+    "en cours": "En cours",
+    annulee: "Annulée",
+    "attente validation": "Attente validation",
+  };
+  return map[t.toLowerCase()] ?? t;
+};
+
 const moneyFields = new Set(["budget", "engage", "ecart", "paye", "solde"]);
 const dateFields = new Set(["date_demarrage", "date_fin_travaux", "date_communication"]);
 
@@ -122,14 +198,26 @@ export function parseTravauxWorkbook(data: ArrayBuffer): ParsedTravaux {
   if (!sheet) throw new Error("Le classeur ne contient aucune feuille.");
   const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: null });
 
-  // Recherche de la ligne contenant "No commande"
-  const mainHeaderIndex = matrix.findIndex((row) =>
-    row.some((cell) => normalizeHeader(cell) === "no commande"),
+  // V8.11 — DÉTECTION DU MODÈLE :
+  //  · Modèle « ANM » (nouveau) : en-têtes techniques « *.ANA_SUIVTRXSECT » (export
+  //    ANM Suivi travaux secteur). La ligne d'en-tête est la 1ʳᵉ ligne contenant
+  //    « ANA_SUIVTRXSECT » ; pas de fusion de ligne au-dessus (une seule ligne).
+  //  · Modèle « classique » (historique) : ligne d'en-tête contenant « No commande »,
+  //    avec fusion de la ligne au-dessus (en-têtes groupés).
+  const anmHeaderIndex = matrix.findIndex((row) =>
+    (row as unknown[]).some((cell) => typeof cell === "string" && cell.includes("ANA_SUIVTRXSECT")),
   );
+  const estModeleAnm = anmHeaderIndex >= 0;
+
+  const mainHeaderIndex = estModeleAnm
+    ? anmHeaderIndex
+    : matrix.findIndex((row) => row.some((cell) => normalizeHeader(cell) === "no commande"));
   if (mainHeaderIndex < 0) throw new Error("Colonne obligatoire introuvable : No commande.");
 
   // On récupère la ligne principale et la ligne au-dessus pour fusionner les en-têtes
-  const rowAbove = (mainHeaderIndex > 0 ? matrix[mainHeaderIndex - 1] : []) as unknown[];
+  const rowAbove = estModeleAnm
+    ? []
+    : ((mainHeaderIndex > 0 ? matrix[mainHeaderIndex - 1] : []) as unknown[]);
   const rowMain = (matrix[mainHeaderIndex] || []) as unknown[];
 
   const headers: (keyof CommandeTravaux | null)[] = [];
@@ -139,14 +227,22 @@ export function parseTravauxWorkbook(data: ArrayBuffer): ParsedTravaux {
     const h1 = normalizeHeader(rowAbove[i]);
     const h2 = normalizeHeader(rowMain[i]);
 
-    // On cherche d'abord dans les alias avec la ligne principale, puis la ligne du dessus
-    const alias = headerAliases[h2] || headerAliases[h1];
+    let alias: keyof CommandeTravaux | null | undefined;
+    if (estModeleAnm) {
+      // En-tête ANM : « STSN_BUDGET.ANA_SUIVTRXSECT » → clé « stsn budget ».
+      const cle = (h2 ?? "").replace(/ ana suivtrxsect$/, "").trim();
+      alias = anmHeaderAliases[cle] ?? null;
+    } else {
+      // On cherche d'abord dans les alias avec la ligne principale, puis la ligne du dessus
+      alias = headerAliases[h2] || headerAliases[h1];
+    }
     headers.push(alias || null);
   }
 
   const commandes = new Map<string, CommandeTravaux>();
   const conflits: TravauxParseIssue[] = [];
   const erreurs: TravauxParseIssue[] = [];
+  const sansCommande: TravauxParseIssue[] = [];
   const doublonsDetails: TravauxParseIssue[] = [];
   let doublons = 0;
 
@@ -161,10 +257,26 @@ export function parseTravauxWorkbook(data: ArrayBuffer): ParsedTravaux {
 
     const numero = text(raw["numero_commande"]);
     if (!numero) {
-      erreurs.push({
+      // V8.13 — ligne de suivi SANS commande : catégorie DÉDIÉE (pas une erreur).
+      // On porte l'identité de la ligne (TR, C, LB, nature, budget) pour que le
+      // préparateur PSP puisse l'arbitrer sans re-parser le fichier.
+      sansCommande.push({
         line: index + 1,
         message: "Numéro de commande manquant",
         numero_commande: null,
+        tranche_code: text(raw["tranche_code"]),
+        nature_analytique: text(raw["nature_analytique"]),
+        ligne_budget: text(raw["ligne_budget"]),
+        descriptif: text(raw["descriptif"]),
+        // V8.6.2 — corps d'état porté (anti-doublon à la matérialisation).
+        corps_etat: text(raw["corps_etat"]),
+        budget: number(raw["budget"]),
+        adresse: text(raw["adresse"]),
+        charge_clientele: text(raw["charge_clientele"]),
+        etat_commande: text(raw["etat_commande"]),
+        etat_travaux: text(raw["etat_travaux"]),
+        engage: number(raw["engage"]),
+        paye: number(raw["paye"]),
       });
       continue;
     }
@@ -202,11 +314,15 @@ export function parseTravauxWorkbook(data: ArrayBuffer): ParsedTravaux {
       if (key) {
         const value = row[column];
         const typed = commande as unknown as Record<string, unknown>;
-        typed[key] = moneyFields.has(key)
-          ? number(value)
-          : dateFields.has(key)
-            ? date(value)
-            : text(value);
+        // V8.11 — normalisation des états du modèle ANM (« TERMINES » → « Terminés »…).
+        typed[key] =
+          estModeleAnm && (key === "etat_travaux" || key === "etat_commande")
+            ? normaliserEtatANM(text(value))
+            : moneyFields.has(key)
+              ? number(value)
+              : dateFields.has(key)
+                ? date(value)
+                : text(value);
       }
     });
 
@@ -244,6 +360,7 @@ export function parseTravauxWorkbook(data: ArrayBuffer): ParsedTravaux {
     doublonsDetails,
     conflits,
     erreurs,
+    sansCommande,
   };
 }
 
@@ -284,11 +401,15 @@ export type TravailComparable = Record<string, string | number | boolean | null>
  * Utilisé pour la comparaison de versions et l'historique (avant / après).
  */
 export const travauxComparable = (row: Record<string, unknown>): TravailComparable =>
-  Object.fromEntries(TRAVAUX_FIELDS.map((field) => [field, row[field] ?? null])) as TravailComparable;
+  Object.fromEntries(
+    TRAVAUX_FIELDS.map((field) => [field, row[field] ?? null]),
+  ) as TravailComparable;
 
 /** Deux versions d'une commande sont-elles strictement identiques (champs métier) ? */
-export const travauxIdentiques = (a: Record<string, unknown>, b: Record<string, unknown>): boolean =>
-  JSON.stringify(travauxComparable(a)) === JSON.stringify(travauxComparable(b));
+export const travauxIdentiques = (
+  a: Record<string, unknown>,
+  b: Record<string, unknown>,
+): boolean => JSON.stringify(travauxComparable(a)) === JSON.stringify(travauxComparable(b));
 
 /**
  * Domaine d'années pour le slider du Dashboard.
@@ -345,9 +466,7 @@ export const champsDifferents = (
   apres: Record<string, unknown> | null | undefined,
 ): string[] => {
   const keys = new Set([...Object.keys(avant ?? {}), ...Object.keys(apres ?? {})]);
-  return [...keys].filter(
-    (key) => JSON.stringify(avant?.[key]) !== JSON.stringify(apres?.[key]),
-  );
+  return [...keys].filter((key) => JSON.stringify(avant?.[key]) !== JSON.stringify(apres?.[key]));
 };
 
 /**
@@ -474,7 +593,7 @@ export const detailArchivee = (
 /** Constructeur de ligne de détail : doublon / erreur issus du parseur. */
 export const detailIssue = (
   importId: string,
-  type: "doublon" | "erreur",
+  type: "doublon" | "erreur" | "sans_commande",
   issue: { line: number; message: string; numero_commande?: string | null | undefined },
 ): Record<string, unknown> => ({
   import_id: importId,
@@ -672,9 +791,10 @@ export const getAlertesCommande = (row: Record<string, unknown>): string[] => {
     (typeof etatCommande === "number" && Number.isFinite(etatCommande)) ||
     (typeof etatCommande === "string" && estNumeriqueStrict(etatCommande));
   if (etatCommandeNumerique) {
-    const valeur =
-      typeof etatCommande === "number" ? etatCommande : Number(etatCommande.trim());
-    alertes.push(`❌ État commande incohérent : valeur numérique « ${formatNombreAlerte(valeur)} »`);
+    const valeur = typeof etatCommande === "number" ? etatCommande : Number(etatCommande.trim());
+    alertes.push(
+      `❌ État commande incohérent : valeur numérique « ${formatNombreAlerte(valeur)} »`,
+    );
   }
 
   // 3. etat_travaux ressemblant à une date DD.MM.YYYY (ce champ est censé contenir un état).
