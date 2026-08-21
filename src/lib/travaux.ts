@@ -171,6 +171,42 @@ const anmHeaderAliases: Record<string, keyof CommandeTravaux | null> = {
   "b devis": null,
 };
 
+/**
+ * V8.14 — LAYOUT POSITIONNEL du modèle ANM SANS ligne d'en-tête.
+ * Certains exports (ex. « ANM_SUIVTRXSECT 2023.xlsx ») ne contiennent PAS la
+ * ligne « *.ANA_SUIVTRXSECT » : les données commencent à la 1ʳᵉ ligne, dans le
+ * MÊME ordre de colonnes que l'export avec en-tête (2026). Ce tableau mappe
+ * l'index de colonne → champ, en miroir exact de `anmHeaderAliases`.
+ */
+const ANM_POSITIONNEL: (keyof CommandeTravaux | null)[] = [
+  null, // 0  B_CMD
+  null, // 1  W_FLAG_NEW_OCC
+  null, // 2  B_DEVIS
+  "corps_etat", // 3  STSC_CORPSETAT
+  "secteur", // 4  PERC_SECTEUR
+  "tranche_code", // 5  PATC_N4
+  "charge_clientele", // 6  UHMC_ARL
+  "adresse", // 7  STSC_ADRESSE
+  "nature_analytique", // 8  NAAC_CODE
+  null, // 9  STSC_LETTRE
+  "charge_operation", // 10 STSC_CHARGEOP
+  "descriptif", // 11 STSC_DESCTRX
+  "budget", // 12 STSN_BUDGET
+  "ligne_budget", // 13 STSC_LIGNEBUD
+  "numero_commande", // 14 COMN_NUM
+  "numero_fournisseur", // 15 ENTN_NUM
+  "fournisseur", // 16 W_ENTC_EMPLOYEUR
+  "engage", // 17 STSN_ENGAGE
+  "paye", // 18 STSN_PAYE
+  "solde", // 19 STSN_SOLDE
+  "etat_travaux", // 20 STSC_ETATTRX
+  "date_demarrage", // 21 STSD_DEBTRX
+  "date_fin_travaux", // 22 STSD_FINTRX
+  "observations", // 23 STSC_OBSTRX
+  "etat_commande", // 24 STSC_ETATCOM
+  "date_communication", // 25 STSD_DATECOM
+];
+
 /** V8.11 — normalise les états du modèle ANM (majuscules) vers les libellés
  *  métier compris par etatMetier : « TERMINES » → « Terminés », « PLANIFIES » →
  *  « Planifiés », « EN COURS » → « En cours », « ANNULEE » → « Annulée »… */
@@ -208,35 +244,69 @@ export function parseTravauxWorkbook(data: ArrayBuffer): ParsedTravaux {
     (row as unknown[]).some((cell) => typeof cell === "string" && cell.includes("ANA_SUIVTRXSECT")),
   );
   const estModeleAnm = anmHeaderIndex >= 0;
+  const classiqueHeaderIndex = estModeleAnm
+    ? -1
+    : matrix.findIndex((row) => row.some((cell) => normalizeHeader(cell) === "no commande"));
+
+  // V8.14 — export ANM SANS ligne d'en-tête (ex. « ANM_SUIVTRXSECT 2023.xlsx ») :
+  // mêmes colonnes en position fixe que le 2026. Signature : secteur « Sxx »
+  // (col 4), nature GT/GE/CP (col 8), TR numérique (col 5). Dernier recours,
+  // uniquement si aucun en-tête connu n'a été trouvé.
+  const modeleAnmSansEnTeteIdx =
+    estModeleAnm || classiqueHeaderIndex >= 0
+      ? -1
+      : matrix.findIndex((row) => {
+          const r = (row ?? []) as unknown[];
+          return (
+            /^S\d+$/i.test(String(r[4] ?? "").trim()) &&
+            ["GT", "GE", "CP"].includes(
+              String(r[8] ?? "")
+                .trim()
+                .toUpperCase(),
+            ) &&
+            r[5] != null &&
+            String(r[5]).trim() !== ""
+          );
+        });
+  const modeleAnmSansEnTete = modeleAnmSansEnTeteIdx >= 0;
+  const modeleAnm = estModeleAnm || modeleAnmSansEnTete;
 
   const mainHeaderIndex = estModeleAnm
     ? anmHeaderIndex
-    : matrix.findIndex((row) => row.some((cell) => normalizeHeader(cell) === "no commande"));
-  if (mainHeaderIndex < 0) throw new Error("Colonne obligatoire introuvable : No commande.");
+    : modeleAnmSansEnTete
+      ? modeleAnmSansEnTeteIdx - 1 // les données commencent à modeleAnmSansEnTeteIdx
+      : classiqueHeaderIndex;
+  if (mainHeaderIndex < 0 && !modeleAnmSansEnTete)
+    throw new Error("Colonne obligatoire introuvable : No commande.");
 
   // On récupère la ligne principale et la ligne au-dessus pour fusionner les en-têtes
-  const rowAbove = estModeleAnm
+  const rowAbove = modeleAnm
     ? []
     : ((mainHeaderIndex > 0 ? matrix[mainHeaderIndex - 1] : []) as unknown[]);
-  const rowMain = (matrix[mainHeaderIndex] || []) as unknown[];
+  const rowMain = modeleAnmSansEnTete ? [] : ((matrix[mainHeaderIndex] || []) as unknown[]);
 
   const headers: (keyof CommandeTravaux | null)[] = [];
-  const maxCols = Math.max(rowAbove.length, rowMain.length);
+  if (modeleAnmSansEnTete) {
+    // Layout positionnel fixe (même ordre que l'en-tête ANM 2026).
+    headers.push(...ANM_POSITIONNEL);
+  } else {
+    const maxCols = Math.max(rowAbove.length, rowMain.length);
 
-  for (let i = 0; i < maxCols; i++) {
-    const h1 = normalizeHeader(rowAbove[i]);
-    const h2 = normalizeHeader(rowMain[i]);
+    for (let i = 0; i < maxCols; i++) {
+      const h1 = normalizeHeader(rowAbove[i]);
+      const h2 = normalizeHeader(rowMain[i]);
 
-    let alias: keyof CommandeTravaux | null | undefined;
-    if (estModeleAnm) {
-      // En-tête ANM : « STSN_BUDGET.ANA_SUIVTRXSECT » → clé « stsn budget ».
-      const cle = (h2 ?? "").replace(/ ana suivtrxsect$/, "").trim();
-      alias = anmHeaderAliases[cle] ?? null;
-    } else {
-      // On cherche d'abord dans les alias avec la ligne principale, puis la ligne du dessus
-      alias = headerAliases[h2] || headerAliases[h1];
+      let alias: keyof CommandeTravaux | null | undefined;
+      if (estModeleAnm) {
+        // En-tête ANM : « STSN_BUDGET.ANA_SUIVTRXSECT » → clé « stsn budget ».
+        const cle = (h2 ?? "").replace(/ ana suivtrxsect$/, "").trim();
+        alias = anmHeaderAliases[cle] ?? null;
+      } else {
+        // On cherche d'abord dans les alias avec la ligne principale, puis la ligne du dessus
+        alias = headerAliases[h2] || headerAliases[h1];
+      }
+      headers.push(alias || null);
     }
-    headers.push(alias || null);
   }
 
   const commandes = new Map<string, CommandeTravaux>();
@@ -314,9 +384,10 @@ export function parseTravauxWorkbook(data: ArrayBuffer): ParsedTravaux {
       if (key) {
         const value = row[column];
         const typed = commande as unknown as Record<string, unknown>;
-        // V8.11 — normalisation des états du modèle ANM (« TERMINES » → « Terminés »…).
+        // V8.11/V8.14 — normalisation des états du modèle ANM (« TERMINES » → « Terminés »…),
+        // avec ou sans ligne d'en-tête.
         typed[key] =
-          estModeleAnm && (key === "etat_travaux" || key === "etat_commande")
+          modeleAnm && (key === "etat_travaux" || key === "etat_commande")
             ? normaliserEtatANM(text(value))
             : moneyFields.has(key)
               ? number(value)

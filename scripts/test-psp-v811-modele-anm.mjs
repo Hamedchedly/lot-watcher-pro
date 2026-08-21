@@ -250,5 +250,118 @@ if (existsSync(cheminReel)) {
   console.log("  (fichier réel absent — bloc F sauté)");
 }
 
+// ════════════ G. V8.14 — MODÈLE ANM SANS LIGNE D'EN-TÊTE ════════════════════
+// Certains exports (ANM_SUIVTRXSECT 2023) n'ont pas de ligne « *.ANA_SUIVTRXSECT » :
+// mêmes colonnes en position fixe, données dès la 1ʳᵉ ligne.
+const sansEnTeteRows = [
+  // 0:B_CMD 1:W_FLAG 2:B_DEVIS 3:corps 4:secteur 5:TR 6:CC 7:adresse 8:nature 9:lettre
+  // 10:chargeop 11:descriptif 12:budget 13:LB 14:CMD 15:ENTN 16:fournisseur 17:engagé
+  // 18:payé 19:solde 20:état travaux 21-22:dates 23:obst 24:état cmd 25:date com
+  [
+    "0",
+    "",
+    "0",
+    "(h) Cages",
+    "S11",
+    2292,
+    "ALOTHORE",
+    "RUE RENE MICHEL, CHAUMES-EN-BRIE",
+    "GE",
+    "(h) Cages",
+    "HCHEDLY",
+    "REPRISE EN PEINTURE DES CAGES",
+    20000,
+    547,
+    5063935,
+    8168,
+    "EVIZIO",
+    19166.51,
+    19166.51,
+    0,
+    "TERMINES",
+    null,
+    null,
+    null,
+    null,
+    null,
+  ],
+  [
+    "0",
+    "",
+    "0",
+    "(o) Plomberie",
+    "S11",
+    2086,
+    null,
+    "RUE X, CHELLES",
+    "CP",
+    "(o) Plomberie",
+    "HCHEDLY",
+    "TRAVAUX SUR SDB",
+    3000,
+    575,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    "",
+    null,
+    null,
+    null,
+    null,
+    null,
+  ],
+];
+const sansEnTete = parseLignes(sansEnTeteRows);
+const cmdSET = sansEnTete.commandes[0];
+check("G1. détection du modèle ANM sans en-tête (signature positionnelle)", !!cmdSET);
+check(
+  "G2. n° commande positionnel (col 14 → numero_commande)",
+  cmdSET?.numero_commande === "5063935",
+);
+check("G3. budget positionnel (col 12 → budget)", cmdSET?.budget === 20000);
+check("G4. TR positionnel (col 5 → tranche_code)", cmdSET?.tranche_code === "2292");
+check(
+  "G5. état normalisé même sans en-tête (TERMINES → Terminés)",
+  cmdSET?.etat_travaux === "Terminés",
+);
+check(
+  "G6. ligne sans commande → sansCommande (col 14 vide), erreurs vides",
+  sansEnTete.commandes.length === 1 &&
+    sansEnTete.sansCommande.length === 1 &&
+    sansEnTete.erreurs.length === 0,
+);
+check(
+  "G7. identité ligne sans commande (TR, corps, nature, budget)",
+  sansEnTete.sansCommande[0]?.tranche_code === "2086" &&
+    sansEnTete.sansCommande[0]?.corps_etat === "(o) Plomberie" &&
+    sansEnTete.sansCommande[0]?.nature_analytique === "CP" &&
+    sansEnTete.sansCommande[0]?.budget === 3000,
+);
+
+// ════════════ H. FICHIER RÉEL ANM 2023 (sans en-tête, si présent) ════════════
+const cheminReel2023 = "C:/Users/Hamed/Downloads/ANM_SUIVTRXSECT 2023.xlsx";
+if (existsSync(cheminReel2023)) {
+  const reel23 = parseTravauxWorkbook(readFileSync(cheminReel2023));
+  check(
+    "H1. ANM 2023 réel : 65 commandes · 24 sans commande · 0 erreur",
+    reel23.commandes.length === 65 &&
+      reel23.sansCommande.length === 24 &&
+      reel23.erreurs.length === 0,
+    `got ${reel23.commandes.length} cmd / ${reel23.sansCommande.length} sans / ${reel23.erreurs.length} err`,
+  );
+  check(
+    "H2. une commande 2023 mappée (n°, budget, engagé, fournisseur)",
+    (() => {
+      const c = reel23.commandes.find((x) => x.numero_commande === "4581335");
+      return c?.budget === 3000 && c?.engage === 12677.5 && c?.fournisseur === "STARK";
+    })(),
+  );
+} else {
+  console.log("  (fichier réel 2023 absent — bloc H sauté)");
+}
+
 console.log(`\nV8.11 MODÈLE ANM PUR — ${passed} ok / ${failed} échec(s)`);
 process.exit(failed === 0 ? 0 : 1);
